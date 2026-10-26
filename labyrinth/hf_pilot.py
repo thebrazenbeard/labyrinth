@@ -228,8 +228,18 @@ def _score_model(model: Any, tokenizer: Any, torch: Any, cases: list[Challenge],
                 "response_sha256": hashlib.sha256(response.encode("utf-8")).hexdigest(),
                 "response_preview": response[:128], "score_reason": result.reason,
             })
-    return {"correct": sum(t["correct"] for t in trials), "total": len(trials),
-            "accuracy": sum(t["correct"] for t in trials) / len(trials), "trials": trials}
+    return _summarize_trials(trials)
+
+
+def _summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
+    """Separate strict-format adherence from answer correctness."""
+    if not trials:
+        raise ValueError("cannot summarize an empty evaluation")
+    correct = sum(bool(t["correct"]) for t in trials)
+    format_valid = sum(t["score_reason"] in ("correct", "incorrect") for t in trials)
+    return {"correct": correct, "total": len(trials), "accuracy": correct / len(trials),
+            "format_valid": format_valid, "format_rate": format_valid / len(trials),
+            "trials": trials}
 
 
 def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],

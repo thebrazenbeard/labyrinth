@@ -13,6 +13,7 @@ from labyrinth.hf_pilot import (
     _device_headroom,
     _encode_pair,
     _lora_value_digest,
+    _summarize_trials,
     derange_answers,
     reload_evaluate,
     run_pilot,
@@ -194,6 +195,17 @@ class HfPilotContractTests(unittest.TestCase):
 
         self.assertNotEqual(_lora_value_digest(Model(b"before"), FakeTorch),
                             _lora_value_digest(Model(b"after"), FakeTorch))
+
+    def test_format_rate_is_not_conflated_with_accuracy(self):
+        trials = [
+            {"correct": False, "score_reason": "invalid_format"},
+            {"correct": False, "score_reason": "incorrect"},
+        ]
+        summary = _summarize_trials(trials)
+        self.assertEqual((summary["correct"], summary["format_valid"]), (0, 1))
+        self.assertEqual((summary["accuracy"], summary["format_rate"]), (0.0, 0.5))
+        with self.assertRaises(ValueError):
+            _summarize_trials([])
 
 
 if __name__ == "__main__":

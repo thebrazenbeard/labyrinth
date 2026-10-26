@@ -123,6 +123,24 @@ Training report SHA-256:    9b74008cad3a035a7c5b38d7f09892adb268b2b9c1393d4727b7
 
 All held-out scores: **baseline 0/2, candidate 0/2, untrained-adapter 0/2, corrupted-label 0/2**. This is qualified only as **actual tiny neural LoRA update/save/reload mechanism**. It does **not** show improvement over frozen base, transfer, strong inferential statistics, pretrained adaptation, CUDA feasibility or equal-compute sham validity. Neither model weights nor reports containing local paths were uploaded to GitHub. Peak RAM/VRAM and broader replicates were not measured.
 
+### E-017 — actual already-local pretrained 0.5B model LoRA and numeric reload
+
+**Evidence classes:** local source/model file inspection; live CPU real-system run; independent-model hostile review. This is a **subsequent bounded experiment**, not retroactive confirmation of the initial research preregistration. On 2026-10-26 the target workstation was found to contain three local Hugging Face donor directories beyond the earlier top-level inventory. An independent reviewer checked their upstream model-card provenance and challenged unsupported assumptions from directory names. The selected candidate is **Open-Reasoner-Zero/Open-Reasoner-Zero-0.5B** (Qwen2 causal LM, based on pretrained Qwen2.5-0.5B and reasoning-RL tuned). The local weight file is 988,097,824 bytes, BF16 in its config and a compatible offline tokenizer/config loaded with `trust_remote_code=False`. Local upstream git origin resolved to the stated Hugging Face repository, git HEAD `a0720dbf6af0d56300c938cc5c9df82b143441bb`, with empty porcelain status. This does not independently authenticate a publisher's model-training history, but it materially improves identification over filename inference.
+
+**Executed Labyrinth source:** exact clean checkout commit `6f7b2924d7f6178623c9d014dece3762890bcf82`, reported source-tree digest `b5a5b584d37a7d686353959fd568a303c2d0a3966e87fdcef9f09fc17dada011`. The model's offline local tokenizer yielded at most 33, 59, 132 and 137 tokens for two examples in each of Labyrinth's tiers 1–4 under a simple task/completion serialization, within the 256-token pilot bound. No package download or installation, remote inference, quantization, GPU training, or write to the original pretrained checkpoint occurred.
+
+Live `train` used CPU, one PEFT LoRA optimizer update on one train-only example (`train_count=2`, `steps=1`), two held-out tier-1 cases, `max_new_tokens=16`; **exit 0**, ~37.47 seconds. A distinct `eval` Python process loaded the saved adapter, verified exact numeric LoRA tensor equality and reproduced candidate predictions; **exit 0**, ~26.10 seconds. The report recorded:
+
+```
+Pretrained base model safetensors SHA-256: f3fabf5933c996348e19cc65f2eaf4ceb4a036cb9981d2da1142c2e8b4020938
+Initial LoRA tensor SHA-256:            6ab18a8b24a2a4d0d8b77e931e43a3afb746dbdf8e884546e25a1d86a69c7315
+Trained LoRA tensor SHA-256:            a290cb28b6f42fad55b179a1a941437b1360aca283b70074ee22a4de9fdaaa63
+Reloaded LoRA tensor SHA-256:           a290cb28b6f42fad55b179a1a941437b1360aca283b70074ee22a4de9fdaaa63
+Training report SHA-256:               f8f474662705ebe01c830efb7debfbe42a57c7585ec37b757b0846c95490e0af
+```
+
+**Actual outcomes:** baseline **0/2** (`invalid_format`, `invalid_format`); trained candidate **0/2** (`incorrect`, `invalid_format`); untrained-adapter **0/2** (both invalid format); corrupted-label **0/2** (`incorrect`, `invalid_format`). One trained output became parseable but was still **wrong**. The candidate's train loss after its single visit was reported as ~1.0816; this is not evidence of generalization. These are two trials, not an inferentially useful benchmark. The `sham` is still zero-update/zero-visit, not compute matched. This establishes **actual adaptation and persistence of a small pretrained model's LoRA weights**, while **reasoning improvement remains unproven**. The target's active Torch was CPU-only; no GPU claim follows. Private run paths and artifacts remain local; only redacted digests and results are published.
+
 ## Deviations and holds
 
 - The initial literature work by independent reviewers started before this log was frozen; LIT-01 and LIT-02 are therefore **exploratory**, never retroactively confirmatory.
