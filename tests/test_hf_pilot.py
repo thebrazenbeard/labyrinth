@@ -133,6 +133,12 @@ class HfPilotContractTests(unittest.TestCase):
                                 text=True, capture_output=True, check=True)
         self.assertIn("--model-path", result.stdout)
 
+    def test_tiny_fixture_help_does_not_import_optional_packages(self):
+        script = Path(__file__).resolve().parents[1] / "scripts" / "make_tiny_hf_fixture.py"
+        result = subprocess.run([sys.executable, str(script), "--help"],
+                                text=True, capture_output=True, check=True)
+        self.assertIn("--output-dir", result.stdout)
+
     def test_cuda_preflight_fails_closed_for_small_free_vram(self):
         class TorchWithMemory:
             class cuda:
