@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import subprocess
+from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -251,6 +252,29 @@ def _examples_context(examples: list[dict[str, str]]) -> str:
     return "\n\n".join(lines)
 
 
+def _deranged_training_labels(examples: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Preserve the label multiset while changing every label, or fail closed.
+
+    A cyclic shift of examples is insufficient when neighboring gold answers
+    coincide: it can make the purported negative control identical to the
+    candidate. A complete derangement exists only if no value occupies more
+    than half the positions.
+    """
+    labels = [item["answer"] for item in examples]
+    n = len(labels)
+    max_frequency = max(Counter(labels).values())
+    if max_frequency * 2 > n:
+        raise ValueError("shuffled control invalid: training labels cannot be fully deranged")
+    indices = sorted(range(n), key=lambda i: (labels[i], i))
+    replacements = [""] * n
+    for position, original_index in enumerate(indices):
+        replacement_index = indices[(position + max_frequency) % n]
+        replacements[original_index] = labels[replacement_index]
+    if any(original == replacement for original, replacement in zip(labels, replacements)):
+        raise ValueError("shuffled control invalid: a repeated label remained unchanged")
+    return [{**example, "answer": replacement} for example, replacement in zip(examples, replacements)]
+
+
 def _placebo_context(target_length: int) -> str:
     # Text-length matched, deliberately *not* token-count matched. Disclosed in report.
     prefix = "Neutral calibration passage (not task examples).\n"
@@ -272,8 +296,7 @@ def run_experiment(
         raise ValueError("training/evaluation split contamination: repeated challenge ID or prompt")
 
     candidate_prefix = _examples_context(examples)
-    rotated_answers = [ex["answer"] for ex in examples[1:]] + [examples[0]["answer"]]
-    shuffled = [{**ex, "answer": other} for ex, other in zip(examples, rotated_answers)]
+    shuffled = _deranged_training_labels(examples)
     label_collisions = sum(a["answer"] == b["answer"] for a, b in zip(examples, shuffled))
 
     # Fresh Python adapter instances are essential: adapters may otherwise

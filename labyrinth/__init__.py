@@ -1,8 +1,8 @@
 """Labyrinth: an offline-first framework for reproducible reasoning experiments.
 
 Labyrinth measures model responses to deterministic challenges. Its prompt-based
-adaptation experiments do *not* constitute evidence of weight updates or lasting
-learning without additional tests and persistent trainer state.
+comparisons are not weight training. An explicitly limited CPU toy learner
+demonstrates persisted numeric parameters, not language-model training.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

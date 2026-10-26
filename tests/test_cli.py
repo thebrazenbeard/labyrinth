@@ -81,6 +81,17 @@ class RunnerTests(unittest.TestCase):
         prompts = [arms[k]["trials"][0]["model_prompt_sha256"] for k in arms]
         self.assertEqual(len(set(prompts)), 4)
         self.assertEqual(report["mode"], "controlled-few-shot")
+        self.assertEqual(report["shuffled_label_collisions"], 0)
+
+    def test_shuffled_control_rejects_identical_training_answers(self):
+        # A circular shift is not a negative control if every label is equal.
+        artifact = build_training_artifact(seed=3, count=2, tiers=(2,))
+        self.assertEqual([e["answer"] for e in artifact["examples"]], ["10", "10"])
+        with self.assertRaisesRegex(ValueError, "shuffled.*control"):
+            run_experiment(
+                lambda: ReplayAdapter({}, default="ANSWER: 0"),
+                seed=3, eval_count=2, tiers=(2,), artifact=artifact,
+            )
 
     def test_stateful_adapter_instance_reuse_is_rejected(self):
         adapter = ReplayAdapter({}, default="ANSWER: 0")
@@ -153,6 +164,34 @@ class CLITests(unittest.TestCase):
         report = json.loads(proc.stdout)
         self.assertEqual(report["evaluation"]["total"], 4)
         self.assertEqual(report["model_id"], "replay:constant-zero")
+
+    def test_structural_holdout_maze_cli(self):
+        proc = invoke("run", "--seed", "17", "--count", "2", "--tiers", "4")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["evaluation"]["total"], 2)
+        self.assertTrue(all(t["kind"] == "register_program" for t in report["evaluation"]["trials"]))
+
+    def test_toy_parameter_training_checkpoint_reload_in_new_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = str(Path(tmp) / "trained.json")
+            first_report = str(Path(tmp) / "comparison.json")
+            second_report = str(Path(tmp) / "reloaded.json")
+            trained = invoke(
+                "train-toy", "--seed", "0", "--train-count", "64", "--eval-count", "64",
+                "--checkpoint-out", checkpoint, "--report", first_report,
+            )
+            self.assertEqual(trained.returncode, 0, trained.stderr)
+            experiment = json.loads(Path(first_report).read_text())
+            self.assertGreater(experiment["arms"]["trained"]["accuracy"], experiment["arms"]["baseline"]["accuracy"])
+            self.assertEqual(experiment["arms"]["zero_update"]["model_hash"], experiment["arms"]["baseline"]["model_hash"])
+            reloaded = invoke("toy-eval", "--checkpoint", checkpoint, "--seed", "0", "--eval-count", "64",
+                              "--report", second_report)
+            self.assertEqual(reloaded.returncode, 0, reloaded.stderr)
+            after = json.loads(Path(second_report).read_text())
+            self.assertEqual(after["model_hash"], experiment["arms"]["trained"]["model_hash"])
+            self.assertEqual(after["correct"], experiment["arms"]["trained"]["correct"])
+            self.assertEqual(invoke("train-toy", "--checkpoint-out", checkpoint).returncode, 2)
 
     def test_artifact_reloaded_in_fresh_process_and_reports_repeat(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -120,14 +120,19 @@ def generate_maze(
         not isinstance(tiers, (tuple, list))
         or not tiers
         or len(set(tiers)) != len(tiers)
-        or any(type(tier) is not int or tier not in (1, 2, 3) for tier in tiers)
+        or any(type(tier) is not int or tier not in (1, 2, 3, 4) for tier in tiers)
     ):
-        raise ValueError("tiers must contain unique integers selected from 1, 2, 3")
+        raise ValueError("tiers must contain unique integers selected from 1, 2, 3, 4")
     if not isinstance(split, str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", split):
         raise ValueError("split must be a short lowercase identifier")
 
-    return [
-        _make_challenge(seed, split, tier, index)
-        for tier in tiers
-        for index in range(count)
-    ]
+    result: list[Challenge] = []
+    for tier in tiers:
+        if tier == 4:
+            # Local import avoids a module cycle: program_maze uses Challenge.
+            from .program_maze import generate_program_challenges
+
+            result.extend(generate_program_challenges(seed, count, split))
+        else:
+            result.extend(_make_challenge(seed, split, tier, index) for index in range(count))
+    return result

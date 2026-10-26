@@ -14,6 +14,8 @@ from .runner import (
     run_maze,
     save_json_new,
 )
+from .maze import generate_maze
+from .toy_backend import ToyLinearAdapter, evaluate_toy_model, run_toy_experiment
 
 
 def _tiers(raw: str) -> tuple[int, ...]:
@@ -21,8 +23,8 @@ def _tiers(raw: str) -> tuple[int, ...]:
         tiers = tuple(int(token.strip()) for token in raw.split(","))
     except ValueError as exc:
         raise argparse.ArgumentTypeError("tiers must be comma-separated integers") from exc
-    if not tiers or len(tiers) != len(set(tiers)) or any(t not in (1, 2, 3) for t in tiers):
-        raise argparse.ArgumentTypeError("tiers must be unique values drawn from 1,2,3")
+    if not tiers or len(tiers) != len(set(tiers)) or any(t not in (1, 2, 3, 4) for t in tiers):
+        raise argparse.ArgumentTypeError("tiers must be unique values drawn from 1,2,3,4")
     return tiers
 
 
@@ -63,6 +65,21 @@ def _parser() -> argparse.ArgumentParser:
     artifacts = experiment.add_mutually_exclusive_group()
     artifacts.add_argument("--artifact-in", metavar="JSON", help="Reuse a saved demonstrations artifact")
     artifacts.add_argument("--artifact-out", metavar="JSON", help="Persist a new demonstrations artifact")
+
+    toy = subcommands.add_parser("train-toy", help="Run a CPU-only toy parameter-learning experiment (NOT an LLM)")
+    toy.add_argument("--seed", type=int, default=0)
+    toy.add_argument("--train-count", type=_positive, default=64)
+    toy.add_argument("--eval-count", type=_positive, default=64)
+    toy.add_argument("--epochs", type=_positive, default=80)
+    toy.add_argument("--learning-rate", type=float, default=0.5)
+    toy.add_argument("--checkpoint-out", metavar="JSON", help="Exclusively create the trained toy checkpoint")
+    toy.add_argument("--report", metavar="JSON", help="Exclusively create a JSON comparison report")
+
+    toy_eval = subcommands.add_parser("toy-eval", help="Evaluate a saved toy checkpoint in a separate process")
+    toy_eval.add_argument("--checkpoint", metavar="JSON", required=True)
+    toy_eval.add_argument("--seed", type=int, default=0)
+    toy_eval.add_argument("--eval-count", type=_positive, default=64)
+    toy_eval.add_argument("--report", metavar="JSON", help="Exclusively create an evaluation report")
     return parser
 
 
@@ -94,23 +111,39 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     try:
-        adapter = _load_model(args)
-        if args.command == "run":
-            report = run_maze(adapter, seed=args.seed, count=args.count, tiers=args.tiers, split=args.split)
+        if args.command == "train-toy":
+            report = run_toy_experiment(
+                seed=args.seed, train_count=args.train_count, eval_count=args.eval_count,
+                epochs=args.epochs, learning_rate=args.learning_rate,
+            )
+            if args.checkpoint_out:
+                candidate = ToyLinearAdapter(seed=args.seed)
+                training_cases = generate_maze(seed=args.seed, tiers=(1,), count=args.train_count, split="train")
+                candidate.train(training_cases, epochs=args.epochs, learning_rate=args.learning_rate)
+                if candidate.model_hash != report["arms"]["trained"]["model_hash"]:
+                    raise ValueError("trained model hash differs from controlled experiment")
+                report["checkpoint_integrity_sha256"] = candidate.save_checkpoint(args.checkpoint_out)
+        elif args.command == "toy-eval":
+            candidate = ToyLinearAdapter.load_checkpoint(args.checkpoint)
+            report = evaluate_toy_model(candidate, seed=args.seed, eval_count=args.eval_count)
         else:
-            artifact = (
-                load_json(args.artifact_in) if args.artifact_in else
-                build_training_artifact(
-                    seed=args.seed, count=args.train_count, tiers=args.tiers,
-                    adapter=adapter,
+            adapter = _load_model(args)
+            if args.command == "run":
+                report = run_maze(adapter, seed=args.seed, count=args.count, tiers=args.tiers, split=args.split)
+            else:
+                artifact = (
+                    load_json(args.artifact_in) if args.artifact_in else
+                    build_training_artifact(
+                        seed=args.seed, count=args.train_count, tiers=args.tiers,
+                        adapter=adapter,
+                    )
                 )
-            )
-            report = run_experiment(
-                lambda: _load_model(args), seed=args.seed, eval_count=args.eval_count,
-                tiers=args.tiers, artifact=artifact,
-            )
-            if args.artifact_out:
-                save_json_new(args.artifact_out, artifact)
+                report = run_experiment(
+                    lambda: _load_model(args), seed=args.seed, eval_count=args.eval_count,
+                    tiers=args.tiers, artifact=artifact,
+                )
+                if args.artifact_out:
+                    save_json_new(args.artifact_out, artifact)
         if args.report:
             save_json_new(args.report, report)
             print(f"Wrote reproducible report to {args.report}", file=sys.stderr)
