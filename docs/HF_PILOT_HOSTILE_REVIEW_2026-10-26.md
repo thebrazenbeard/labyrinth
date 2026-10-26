@@ -18,8 +18,14 @@
 
 - **Source:** local safetensors-only path; HF config/tokenizer file hash commitments; masked prefix tokens; train-only case generation; opt-in LoRA code path; model tensor digests; separate reload CLI; non-overwrite outputs; bounded local model size. Implementation present, not executed with a real HF checkpoint.
 - **Test:** `python -m unittest discover -s tests -q` passed **70/70** tests after integration; tests use stdlib/mocks and establish public interface/guards, not actual LoRA optimization.
-- **Unverified runtime:** model load/backprop on target laptop; GPU/CPU memory use and throughput; PEFT compatibility; adapter save/reload with a real model; baseline-versus-candidate inference after new-process reload. Do not mark these PASS.
+- **Runtime at review time:** model load/backprop, PEFT compatibility and adapter persistence were not yet executed when the source-only hostile review was issued. A subsequent **separately bound** CPU-only runtime smoke (E-016 in the research log) did establish these mechanisms on a randomly initialized tiny model, including numerical tensor equality after fresh-process reload. GPU memory feasibility and representative CPU/GPU throughput remain unqualified.
 - **Unverified semantics:** improved unseen reasoning, matched-compute sham, multi-seed uncertainty, independent blind task families, negative transfer controls.
 - **Privacy:** local reports can contain absolute checkpoint paths. Keep them private; sanitize such paths before any public upload.
 
 **Next falsification:** an explicitly selected small *already-local* HF safetensors checkpoint or a deliberately generated tiny local model, isolated Python environment, two bounded CPU updates, independently observed tensor changes, then a separate process reload with identical held-out predictions. Only after that mechanism test should pretrained-model gain claims be attempted.
+
+## Subsequent executed smoke / hostile follow-up
+
+The proposed *tiny random model* mechanism gate above was exercised on the authorized target workstation on 2026-10-26 using exact source commit `6f7b2924d7f6178623c9d014dece3762890bcf82`. Both CPU train and separate Python-process reload exited 0. The first SHA-256 of LoRA tensor values differed from the post-training digest, while the **frozen** reloaded LoRA tensors reproduced the trained digest exactly (`75f12dbabc0424a932abaa01181d0246971df49a8d1cdf5cf9f962d5dbc3db58`). Held-out baseline, candidate and controls all scored **0/2**. The reviewer expressly classified this as a **real neural update/persistence mechanism**, not pretrained adaptation or reasoning gain.
+
+> **Still-open hostile finding:** Matching trained tensors proves what survived serialization, not what reasoning improved. The current untrained-adapter `sham` is not compute-matched, and four fixed tier-4 holdout structures are insufficient for broad transfer claims. The tiny smoke result must not be promoted into a trained-reasoning or safety qualification.

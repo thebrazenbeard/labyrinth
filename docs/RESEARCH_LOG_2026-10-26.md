@@ -102,11 +102,32 @@ Subsequent connected GitHub private-issue comment readback on 2026-10-26 found *
 
 An independent LoRA-pilot design reviewer inspected exact local `labyrinth/program_maze.py` on 2026-10-26: `_TRAIN` and `_HOLDOUT` each contain only four instruction structures. Direct source readback confirmed this. The generator samples numbers and chooses among structures; no claim of hundreds of structurally independent examples follows. The reviewer recommended cluster-by-structure reporting and independent grammatical/blind holdouts. This is source inspection plus adversarial model review, **not** behavioral transfer testing.
 
+### E-016 — executed Lappy CPU LoRA smoke and fresh-process numeric reload
+
+**Evidence class: REAL_SYSTEM_PROBE**, bounded to one actually executed source subject. On 2026-10-26, an authorized connected workstation cloned the Labyrinth feature branch into a new isolated temporary directory. No package install, existing model overwrite, permanent Vera install or GPU training occurred. The first run at commit `be3d934ccf3d8d75b2346f75995fa0be4d321abb` executed tiny randomly initialized GPT-2/PEFT LoRA training and separate reload, exit 0, but the fixture had a GPT-2 default BOS token outside the tiny vocabulary. That warning was corrected in the fixture before the final run; the initial run is retained as historical smoke evidence, not substituted for the corrected subject.
+
+The corrected final run used exact checked-out source commit **`6f7b2924d7f6178623c9d014dece3762890bcf82`**, report `source.clean=true`, reported source-tree digest `b5a5b584d37a7d686353959fd568a303c2d0a3966e87fdcef9f09fc17dada011`. A new tiny **random-weight** HF GPT-2 fixture was created offline (config with valid special token IDs), then the following separate terminal commands were run with the workstation's already-installed Python/PyTorch/Transformers/PEFT packages:
+
+1. `python -m labyrinth.hf_pilot train` via an explicit Python module-path loader using an existing temporary clone, with **CPU**, train count 4, eval count 2, update steps 2, token bound 256. The terminal reported **exit 0** after ~15.81 seconds, pilot schema `labyrinth.hf-lora-pilot.v2`, `changed=true`.
+2. In a **new Python process**, `python -m labyrinth.hf_pilot eval` via the same module-path loader, loading the saved adapter from its new temporary run directory. Terminal reported **exit 0** after ~16.65 seconds, eval schema `labyrinth.hf-lora-reload-eval.v2`, `matches_original_candidate_trials=true`. The report also verified exact equality of **reloaded LoRA tensor values**, independent of their frozen `requires_grad=False` status.
+
+Key model/parameter commitments (paths, user identity and personal host details withheld from this public record):
+
+```
+Random base safetensors SHA-256: 4f645a4b75172852134dbcdb258b303536d86a2595d45444c22fa7c58d7a90cf
+Initial trainable LoRA values: 21eee9e76b8af4bbb3458332c1c07020bb9bcb128bc90a9de25b08202d739361
+Trained LoRA tensor values:  75f12dbabc0424a932abaa01181d0246971df49a8d1cdf5cf9f962d5dbc3db58
+Reloaded LoRA tensor values: 75f12dbabc0424a932abaa01181d0246971df49a8d1cdf5cf9f962d5dbc3db58
+Training report SHA-256:    9b74008cad3a035a7c5b38d7f09892adb268b2b9c1393d4727b7fe494a84a89c
+```
+
+All held-out scores: **baseline 0/2, candidate 0/2, untrained-adapter 0/2, corrupted-label 0/2**. This is qualified only as **actual tiny neural LoRA update/save/reload mechanism**. It does **not** show improvement over frozen base, transfer, strong inferential statistics, pretrained adaptation, CUDA feasibility or equal-compute sham validity. Neither model weights nor reports containing local paths were uploaded to GitHub. Peak RAM/VRAM and broader replicates were not measured.
+
 ## Deviations and holds
 
 - The initial literature work by independent reviewers started before this log was frozen; LIT-01 and LIT-02 are therefore **exploratory**, never retroactively confirmatory.
 - The workstation transport returned initial output plus process IDs, not explicit exit codes for these one-shot commands. Observed values were cross-checked where practicable (GPU via CIM and `nvidia-smi`), but process completion is not elevated above the reported readback. An independent reviewer compared *logged evidence* and did not independently re-probe the machine.
-- No benchmark/model training was executed in this pass. H1/H2/H4 receive only comparative literature support; H3 hardware and software boundaries have an initial inventory, not a successful adapter fit test.
+- The *initial bounded literature/hardware research pass* did not execute model training. Subsequent E-016 records a separate, explicitly bounded **actual** tiny HF LoRA CPU runtime smoke. H1/H2/H4 still have no evidence of improved general reasoning; H3 now has a tiny adapter-fit mechanism on the target host, not a pretrained-model learning effect.
 - A peer's explicit private GitHub read-and-reply is now verified (E-014). Direct CCB runtime event delivery and subscription remain unverified. Private coordination details are intentionally excluded from the public report.
 
 ## Independent evidence verdict
