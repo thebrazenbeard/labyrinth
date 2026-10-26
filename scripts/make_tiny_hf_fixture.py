@@ -42,6 +42,7 @@ def main() -> None:
                                            eos_token="<eos>")
     config = GPT2Config(vocab_size=len(hf_tokenizer), n_positions=512,
                         n_ctx=512, n_embd=48, n_layer=2, n_head=2,
+                        bos_token_id=hf_tokenizer.eos_token_id,
                         eos_token_id=hf_tokenizer.eos_token_id,
                         pad_token_id=hf_tokenizer.pad_token_id)
     model = GPT2LMHeadModel(config)
