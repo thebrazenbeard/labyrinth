@@ -54,7 +54,7 @@ The seed-0 fixture with 64 training and 64 held-out cases yields **0/64 baseline
 
 The next distinct research gate is a CPU-capable, optional supervised fine-tuning backend for an explicitly supplied local causal LM (for example a parameter-efficient adapter using Transformers/PEFT), with base/tokenizer hashes, optimizer receipts, and fresh-process held-out evaluation. No such LLM training backend or local model installation is claimed here.
 
-See [experimental qualification protocol](docs/EXPERIMENT_PROTOCOL.md) for the controls required before making learning or transfer claims, and the [independent challenge record](docs/INDEPENDENT_CHALLENGES_2026-10-26.md) for reproduced design failures and their disposition.
+See the [research landscape and staged local-training gate](docs/REASONING_TRAINING_LANDSCAPE_2026-10-26.md), its [evidence log and independent review](docs/RESEARCH_LOG_2026-10-26.md), the [experimental qualification protocol](docs/EXPERIMENT_PROTOCOL.md) for learning/transfer controls, and the [independent challenge record](docs/INDEPENDENT_CHALLENGES_2026-10-26.md) for reproduced prototype failures.
 
 ## Verification and limits
 
