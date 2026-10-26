@@ -29,8 +29,8 @@ from .maze import Challenge, generate_maze
 from .runner import _source_state
 
 
-SCHEMA = "labyrinth.hf-lora-pilot.v1"
-EVAL_SCHEMA = "labyrinth.hf-lora-reload-eval.v1"
+SCHEMA = "labyrinth.hf-lora-pilot.v2"
+EVAL_SCHEMA = "labyrinth.hf-lora-reload-eval.v2"
 EVAL_SEED_XOR = 0x5C18A7
 # No quantization/CPU offload in v1: bound pre-existing weights to a small size.
 MAX_LOCAL_WEIGHTS = 1_073_741_824
@@ -171,20 +171,30 @@ def _prompt_commitment(cases: list[Challenge]) -> str:
                                      ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def _parameter_digest(model: Any, torch: Any) -> str:
-    """Hash trainable tensor *values*, names, shapes and dtypes, not just keys."""
+def _selected_parameter_digest(model: Any, torch: Any, *, include: Any) -> str:
+    """Hash selected tensor *values*, names, shapes and dtypes, not just keys."""
     digest = hashlib.sha256()
     count = 0
     for name, parameter in sorted(model.named_parameters()):
-        if not parameter.requires_grad:
+        if not include(name, parameter):
             continue
         count += 1
         raw = parameter.detach().cpu().contiguous().flatten().view(torch.uint8).numpy().tobytes()
         metadata = json.dumps([name, list(parameter.shape), str(parameter.dtype)], separators=(",", ":"))
         digest.update(metadata.encode("utf-8") + b"\x00" + raw)
     if count == 0:
-        raise RuntimeError("PEFT model exposed no trainable parameters")
+        raise RuntimeError("PEFT model exposed no selected adapter parameters")
     return digest.hexdigest()
+
+
+def _parameter_digest(model: Any, torch: Any) -> str:
+    """Hash trainable tensors before/after optimization."""
+    return _selected_parameter_digest(model, torch, include=lambda name, p: p.requires_grad)
+
+
+def _lora_value_digest(model: Any, torch: Any) -> str:
+    """Hash LoRA tensor values regardless of frozen `requires_grad` on reload."""
+    return _selected_parameter_digest(model, torch, include=lambda name, p: ".lora_" in name)
 
 
 def _encode_pair(tokenizer: Any, prompt: str, answer: str, max_tokens: int) -> tuple[list[int], list[int]]:
@@ -344,6 +354,9 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     trained_digest = _parameter_digest(model, torch)
     if trained_digest == initial_digest:
         raise RuntimeError("no trainable LoRA parameter changed; refusing learning claim")
+    trained_saved_digest = _lora_value_digest(model, torch)
+    if trained_saved_digest != trained_digest:
+        raise RuntimeError("trainable parameter selection differs from LoRA tensor selection")
     candidate = _score_model(model, tokenizer, torch, heldout, device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
     # A clean, newly created output directory is used; no existing run changes.
@@ -382,6 +395,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
         "heldout_public_prompt_sha256": _prompt_commitment(heldout),
         "initial_lora_parameter_sha256": initial_digest,
         "candidate_lora_parameter_sha256": trained_digest,
+        "candidate_lora_tensor_value_sha256": trained_saved_digest,
         "corrupted_lora_parameter_sha256": corrupted_digest,
         "control_data": {"corrupted_label_collisions": sum(a.answer == b for a, b in zip(train, corrupted_answers)),
                          "sham_updates": 0, "sham_train_case_visits": 0,
@@ -452,10 +466,14 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
                                  auto_model=auto_model, auto_tokenizer=auto_tokenizer)
     model = peft_model.from_pretrained(base, str(adapter_dir), is_trainable=False,
                                       local_files_only=True)
+    observed_adapter_digest = _lora_value_digest(model, torch)
+    if observed_adapter_digest != report.get("candidate_lora_tensor_value_sha256"):
+        raise ValueError("reloaded LoRA tensor values differ from trained candidate")
     observed = _score_model(model, tokenizer, torch, heldout, device=device,
                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
     value = {"schema": EVAL_SCHEMA, "training_report_sha256": _sha_file(source),
              "adapter_sha256": actual_adapters, "process_id": os.getpid(),
+             "reloaded_lora_tensor_value_sha256": observed_adapter_digest,
              "evaluation": observed, "claimed_fresh_process": None,
              "process_id_differs": os.getpid() != report.get("training_process_id"),
              "matches_original_candidate_trials": observed["trials"] == report["evaluations"]["candidate"]["trials"],

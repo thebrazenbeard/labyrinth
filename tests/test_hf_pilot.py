@@ -12,6 +12,7 @@ from labyrinth.hf_pilot import (
     PilotConfig,
     _device_headroom,
     _encode_pair,
+    _lora_value_digest,
     derange_answers,
     reload_evaluate,
     run_pilot,
@@ -150,6 +151,49 @@ class HfPilotContractTests(unittest.TestCase):
         self.assertIsNone(_device_headroom(TorchWithMemory, "cpu", weights))
         with self.assertRaisesRegex(RuntimeError, "CUDA memory"):
             _device_headroom(TorchWithMemory, "cuda", weights)
+
+    def test_frozen_reload_lora_values_are_still_hashed(self):
+        class Tensor:
+            requires_grad = False
+            shape = (1,)
+            dtype = "float32"
+
+            def __init__(self, value):
+                self.value = value
+
+            def detach(self):
+                return self
+
+            def cpu(self):
+                return self
+
+            def contiguous(self):
+                return self
+
+            def flatten(self):
+                return self
+
+            def view(self, dtype):
+                return self
+
+            def numpy(self):
+                return self
+
+            def tobytes(self):
+                return self.value
+
+        class Model:
+            def __init__(self, value):
+                self.value = value
+
+            def named_parameters(self):
+                return iter([("base_model.layer.lora_A.default.weight", Tensor(self.value))])
+
+        class FakeTorch:
+            uint8 = object()
+
+        self.assertNotEqual(_lora_value_digest(Model(b"before"), FakeTorch),
+                            _lora_value_digest(Model(b"after"), FakeTorch))
 
 
 if __name__ == "__main__":
