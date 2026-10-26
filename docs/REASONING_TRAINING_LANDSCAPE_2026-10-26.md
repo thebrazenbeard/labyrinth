@@ -29,6 +29,8 @@ Labyrinth should become a **model-agnostic suite of procedurally generated, inde
 
 Other concrete traps: all-correct/all-wrong GRPO groups give little ranking signal; curriculum difficulty selected on test results leaks selection; LLM judges exhibit preference biases; “trained” outputs that are simply cached demonstrations are context adaptation; changing one deterministic hash doesn't prove a valid training history; CPU/GPU installations may differ from package names. Historical benchmark archives can be valuable reproducibility data but cannot be used as a fair same-condition comparison without matching the generating protocol.
 
+> **Hostile source inspection — false structural sample size:** The current `program_maze.py` uses exactly **four hard-coded training instruction structures and four hard-coded holdout instruction structures**, despite sampling different numbers and seeds. Therefore hundreds of instances from one split are not hundreds of independent *reasoning structures*. Even a positive LoRA effect is restricted to these finite public templates. Report accuracy by structural fingerprint; expand to parameterized grammars, held-out compositional rules and an independently authored blind family before claiming general structural transfer.
+
 ## Proposed environment protocol (future iteration)
 
 The current `maze.py` / `program_maze.py` produce question-answer instances and exact scoring. Incrementally generalize to an interface whose contracts can also represent interactive mazes:
@@ -68,7 +70,7 @@ Read-only 2026-10-26 probe through an already-authorized workstation connection.
 
 ## Coordination and open decisions
 
-- A separate private coordination invitation exists for the other Labyrinth chat. It is a **record**, not routed CCB delivery or peer acknowledgment. Private issue identity and event metadata are deliberately excluded from this public repository. Await explicit other-chat reply/branch ownership before modifying overlapping training code.
+- A separate private coordination thread has received explicit read-and-reply acknowledgment from another project chat. That is verified **GitHub correspondence**, not proof of CCB runtime delivery, live subscription, or background execution. Patrick clarified the immediate target is **Labyrinth's genuine model training/evaluation**, not Mosaic integration. Private issue identity and event metadata remain deliberately excluded from this public repository. Labyrinth owns its branch's training code; no cross-repository integration is a current prerequisite.
 - A bounded top-level model inventory found 3B HF weights but did not establish whether a smaller HF full-weight checkpoint exists elsewhere. Whether to select/download a sub-1B baseline is a **user/material coordination choice**, not an implicit download authorization.
 - GPU-supporting PyTorch is absent in the current interpreter; a qualified separate environment may be feasible, but installation/compatibility/VRAM checks remain unexecuted.
 - The current v0.2 four-parameter arithmetic toy really updates numerical weights and reloads them. It is neither a neural LLM fine-tune nor evidence of transferable reasoning.

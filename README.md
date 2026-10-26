@@ -2,7 +2,7 @@
 
 Labyrinth is an offline-first **reasoning challenge, training-lifecycle, and evaluation harness**. It generates seeded tasks, scores strictly formatted answers, compares in-context controls, and includes a deliberately small CPU-only parameter-learning demonstration.
 
-It is a working **prototype**, not yet a language-model weight trainer or evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM.
+It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path; execution against an actual HF model on Lappy remains **unverified**.
 
 ## Run it
 
@@ -52,9 +52,23 @@ Training artifacts contain answer keys because their purpose is to preserve demo
 
 The seed-0 fixture with 64 training and 64 held-out cases yields **0/64 baseline, 64/64 trained, 0/64 zero-update, and 0/64 corrupted-label control**. These numbers establish only that this tiny, explicitly engineered parameterization learned a two-operator numerical mapping and retained it across processes. They are **not** evidence of neural-language-model fine-tuning, transfer to tier 4, or general reasoning improvement. Checkpoints preserve bounded coefficients and an integrity digest; neither proves the claimed training history authentic.
 
-The next distinct research gate is a CPU-capable, optional supervised fine-tuning backend for an explicitly supplied local causal LM (for example a parameter-efficient adapter using Transformers/PEFT), with base/tokenizer hashes, optimizer receipts, and fresh-process held-out evaluation. No such LLM training backend or local model installation is claimed here.
+## Optional real language-model LoRA pilot (unqualified runtime)
 
-See the [research landscape and staged local-training gate](docs/REASONING_TRAINING_LANDSCAPE_2026-10-26.md), its [evidence log and independent review](docs/RESEARCH_LOG_2026-10-26.md), the [experimental qualification protocol](docs/EXPERIMENT_PROTOCOL.md) for learning/transfer controls, and the [independent challenge record](docs/INDEPENDENT_CHALLENGES_2026-10-26.md) for reproduced prototype failures.
+The `train-hf` and `eval-hf` commands operate on an **already-local**, small Hugging Face causal-LM checkpoint in safetensors format. Unlike `experiment` and `train-toy`, this path loads optional PyTorch, Transformers and PEFT dependencies and attempts a genuine LoRA supervised update of **train-split answer tokens only**. It records trainable tensor changes, saves a separate adapter, compares same-base zero-update and corrupted-label controls, and supports reload/evaluation in a separately started Python process.
+
+```bash
+# Optional packages must already exist in your chosen isolated Python environment.
+# The model directory must contain local config/tokenizer/safetensors files, <= 1 GiB weights.
+python -m labyrinth train-hf --model-path LOCAL_HF_MODEL_DIR --output-dir NEW_EMPTY_PARENT/RUN_001 --device cpu --steps 2
+# Invoke separately to qualify persistence; report path must not exist.
+python -m labyrinth eval-hf --run-dir NEW_EMPTY_PARENT/RUN_001 --report NEW_EMPTY_PARENT/reload.json
+```
+
+This path never downloads weights, installs packages, runs arbitrary model text, or replaces the base checkpoint. It rejects existing output directories and checkpoints exceeding its strict 1 GiB no-quantization limit; therefore the existing ~6.15 GB 3B-class local checkpoint on Lappy is **not eligible** for this initial pilot. Its default two steps consume only two of eight default generated training examples. The public finite mazes are a mechanism smoke test, **not** a qualified learning effect. The current untrained-adapter `sham` performs no training visits or optimizer steps, so it is **not a compute-matched placebo**. At publication, only source inspection and dependency-free contract tests were executed for this backend; no neural training or fresh-process LoRA reload has yet been verified on Lappy. A tiny local model and independent structural/paraphrase holdouts are necessary before higher claims.
+
+The next gate is executing this optional path in an isolated environment with independently measured resource use, immutable model/tokenizer identity and a matched repeated-seed experiment. Do not infer from the code or changed adapter bytes that a pretrained language model became better at reasoning.
+
+See the [research landscape and staged local-training gate](docs/REASONING_TRAINING_LANDSCAPE_2026-10-26.md), its [evidence log and independent review](docs/RESEARCH_LOG_2026-10-26.md), the [HF pilot hostile review](docs/HF_PILOT_HOSTILE_REVIEW_2026-10-26.md), the [experimental qualification protocol](docs/EXPERIMENT_PROTOCOL.md) for learning/transfer controls, and the [independent challenge record](docs/INDEPENDENT_CHALLENGES_2026-10-26.md) for reproduced prototype failures.
 
 ## Verification and limits
 
@@ -62,7 +76,7 @@ See the [research landscape and staged local-training gate](docs/REASONING_TRAIN
 python -m unittest discover -s tests -v
 ```
 
-Tests cover seeded determinism, independent register-program interpretation, exact scoring, injection resistance, adapter boundaries, curriculum replay, artifact tampering, valid shuffled controls, separate control-arm adapter instances, bounded untrusted output, toy parameter updates, and fresh-process artifact reload.
+Tests cover seeded determinism, independent register-program interpretation, exact scoring, injection resistance, adapter boundaries, curriculum replay, artifact tampering, valid shuffled controls, separate control-arm adapter instances, bounded untrusted output, toy parameter updates, fresh-process artifact reload, and optional HF pilot preflight, train/eval split separation, label derangement and prompt-loss masking. The new HF tests exercise the **contract**, not an actual backward pass.
 
 Important limitations:
 
@@ -83,6 +97,7 @@ Important limitations:
 - `labyrinth/curriculum.py`: training-only progression state
 - `labyrinth/runner.py`: scored runs, artifacts, four-arm controls, JSON provenance
 - `labyrinth/toy_backend.py`: explicitly limited CPU parameter learning and checkpoint reload
-- `labyrinth/cli.py`: `run`, `experiment`, `train-toy`, and `toy-eval` commands
+- `labyrinth/hf_pilot.py`: opt-in local HF/PEFT LoRA SFT and same-checkpoint controls; no default ML dependency
+- `labyrinth/cli.py`: `run`, `experiment`, `train-toy`, `toy-eval`, `train-hf`, and `eval-hf` commands
 
 Labyrinth deliberately does not install itself into Vera, execute model responses, mutate Git repositories, or claim any externally deployed training effect.

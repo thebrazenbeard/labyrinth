@@ -80,6 +80,8 @@ def _parser() -> argparse.ArgumentParser:
     toy_eval.add_argument("--seed", type=int, default=0)
     toy_eval.add_argument("--eval-count", type=_positive, default=64)
     toy_eval.add_argument("--report", metavar="JSON", help="Exclusively create an evaluation report")
+    subcommands.add_parser("train-hf", help="Opt-in bounded LoRA update of an existing local HF checkpoint")
+    subcommands.add_parser("eval-hf", help="Reload and evaluate a saved HF LoRA pilot in a new process")
     return parser
 
 
@@ -108,8 +110,15 @@ def _load_model(args: argparse.Namespace):
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] in ("train-hf", "eval-hf"):
+        # Separate parser owns optional HF flags. Importing this module does
+        # not import torch, transformers or PEFT; the normal CLI stays offline.
+        from .hf_pilot import main as hf_main
+
+        return hf_main(["train" if arguments[0] == "train-hf" else "eval", *arguments[1:]])
     parser = _parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     try:
         if args.command == "train-toy":
             report = run_toy_experiment(

@@ -94,12 +94,20 @@ Connected GitHub `get_repo`, `fetch_file(README.md)`, `fetch_file(LICENSE)` of h
 
 Connected GitHub `get_repo`/`fetch_file(README.md)` of https://github.com/caslab-vt/SARNet, default branch `master`, and primary peer-reviewed paper https://proceedings.neurips.cc/paper/2020/hash/72ab54f9b8c11fae5b923d7f854ef06a-Abstract.html, retrieved 2026-10-26. The architecture learns relevance-weighted multi-agent communication from past observations in cooperative/competitive tasks; README cites Python 3.5.4+, Gym 0.10.5, TensorFlow 1.14.0 and MPE/Traffic Junction. `fetch_file(LICENSE)` on repository root returned 404; that is not an exhaustive license audit. No code copied or imported. Transfer to a multi-agent maze is a *future hypothesis*, not verified general reasoning or current Labyrinth integration.
 
+### E-014 — explicit cross-chat correspondence and corrected scope
+
+Subsequent connected GitHub private-issue comment readback on 2026-10-26 found **two substantive peer replies**, including the user's correction: prioritize actual Labyrinth LLM training/evaluation over previously proposed Mosaic integration. The Labyrinth chat replied on the same private thread and verified its new comment ID. Private thread identity, user and machine identifiers are intentionally omitted here. This proves GitHub-level read-and-reply only; it does not prove any live CCB queue route, pushed subscription, model training or repository merge. It supersedes the initial no-acknowledgment state in E-011.
+
+### E-015 — source-level structural diversity falsifier
+
+An independent LoRA-pilot design reviewer inspected exact local `labyrinth/program_maze.py` on 2026-10-26: `_TRAIN` and `_HOLDOUT` each contain only four instruction structures. Direct source readback confirmed this. The generator samples numbers and chooses among structures; no claim of hundreds of structurally independent examples follows. The reviewer recommended cluster-by-structure reporting and independent grammatical/blind holdouts. This is source inspection plus adversarial model review, **not** behavioral transfer testing.
+
 ## Deviations and holds
 
 - The initial literature work by independent reviewers started before this log was frozen; LIT-01 and LIT-02 are therefore **exploratory**, never retroactively confirmatory.
 - The workstation transport returned initial output plus process IDs, not explicit exit codes for these one-shot commands. Observed values were cross-checked where practicable (GPU via CIM and `nvidia-smi`), but process completion is not elevated above the reported readback. An independent reviewer compared *logged evidence* and did not independently re-probe the machine.
 - No benchmark/model training was executed in this pass. H1/H2/H4 receive only comparative literature support; H3 hardware and software boundaries have an initial inventory, not a successful adapter fit test.
-- No direct event subscription or peer acknowledgment is known. Private coordination details are intentionally excluded from the public report.
+- A peer's explicit private GitHub read-and-reply is now verified (E-014). Direct CCB runtime event delivery and subscription remain unverified. Private coordination details are intentionally excluded from the public report.
 
 ## Independent evidence verdict
 
