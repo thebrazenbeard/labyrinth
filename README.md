@@ -150,6 +150,14 @@ and [live Lappy run evidence E-018](docs/MINOTAUR_CRITIC_LAPPY_RUN_2026-10-27.md
 The follow-up v2 pairs right/wrong answers within every update, but its real
 two- and eight-update runs **still** approved every incorrect development and
 transfer answer. See [E-019](docs/MINOTAUR_CRITIC_PAIRED_LAPPY_RUN_2026-10-27.md).
+The [E-020 margin and process-claim experiments](docs/MINOTAUR_DIAGNOSIS_AND_PROCESS_PILOTS_2026-10-27.md)
+add explicit Yes/No logit diagnostics, predeclared abstention/coverage
+measurements, an opt-in first-error-claim curriculum, and opt-in direct binary
+logit training. Three real CPU pilots reproduced unsafe **all-Yes** or **all-No**
+collapse; none established improved judgment. Separate-process reload accepts
+at most 1e-4 roundoff for supplemental margin scalars but requires exact
+prediction identities, risk/coverage decisions and adapter tensor digests.
+**Neural Minotaur is advisory-only; external private qualification is not established.**
 
 `labyrinth.processbench_adapter` can score a reviewer on caller-supplied,
 strictly validated **Qwen/ProcessBench** JSONL records, with correct one-based
