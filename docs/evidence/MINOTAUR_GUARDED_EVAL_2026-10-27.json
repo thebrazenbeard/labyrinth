@@ -1,0 +1,86 @@
+{
+  "abstentions": 334,
+  "by_seed": [
+    {
+      "metrics": {
+        "abstentions": 113,
+        "checker_disagreement_on_gold": 0,
+        "correct_cases": 96,
+        "correct_decisions": 79,
+        "decision_coverage": 0.4114583333333333,
+        "decisions": 79,
+        "false_approval_rate": 0.0,
+        "false_approvals": 0,
+        "false_rejection_rate": 0.0,
+        "false_rejections": 0,
+        "graduation_authority": "none",
+        "qualification": "NOT_ESTABLISHED",
+        "selective_accuracy": 1.0,
+        "task_domain": "bounded_mod97_register_trace",
+        "total": 192,
+        "warning": "False-approval prevention is from independent symbolic checker, not neural competence.",
+        "wrong_cases": 96
+      },
+      "seed": 501
+    },
+    {
+      "metrics": {
+        "abstentions": 109,
+        "checker_disagreement_on_gold": 0,
+        "correct_cases": 96,
+        "correct_decisions": 83,
+        "decision_coverage": 0.4322916666666667,
+        "decisions": 83,
+        "false_approval_rate": 0.0,
+        "false_approvals": 0,
+        "false_rejection_rate": 0.0,
+        "false_rejections": 0,
+        "graduation_authority": "none",
+        "qualification": "NOT_ESTABLISHED",
+        "selective_accuracy": 1.0,
+        "task_domain": "bounded_mod97_register_trace",
+        "total": 192,
+        "warning": "False-approval prevention is from independent symbolic checker, not neural competence.",
+        "wrong_cases": 96
+      },
+      "seed": 911
+    },
+    {
+      "metrics": {
+        "abstentions": 112,
+        "checker_disagreement_on_gold": 0,
+        "correct_cases": 96,
+        "correct_decisions": 80,
+        "decision_coverage": 0.4166666666666667,
+        "decisions": 80,
+        "false_approval_rate": 0.0,
+        "false_approvals": 0,
+        "false_rejection_rate": 0.0,
+        "false_rejections": 0,
+        "graduation_authority": "none",
+        "qualification": "NOT_ESTABLISHED",
+        "selective_accuracy": 1.0,
+        "task_domain": "bounded_mod97_register_trace",
+        "total": 192,
+        "warning": "False-approval prevention is from independent symbolic checker, not neural competence.",
+        "wrong_cases": 96
+      },
+      "seed": 2027
+    }
+  ],
+  "caveat": "This narrow public grammar is independently exactly checkable; no neural reasoning or blind final exam demonstrated.",
+  "checker_mismatches": 0,
+  "checkpoint_parameter_sha256": "fa43682e6d19e2a2d2b2e32e4b88d2c901961ce7a1f5aac7a43dd8b2bccdd088",
+  "checkpoint_sha256": "ce2d1a8a7e91f32f58ad01de2304ca6241e2f3f4c2a0227447764503d7fd77ec",
+  "coverage": 0.4201388888888889,
+  "decisions": 242,
+  "false_approvals": 0,
+  "graduation_authority": "none",
+  "incorrect_cases": 288,
+  "mechanism": "neural-scratch-checkpoint must agree with separate strict modular register-step interpreter; otherwise ABSTAIN",
+  "qualification": "NOT_ESTABLISHED",
+  "schema": "labyrinth.minotaur.guarded-evaluation.v2",
+  "source_commit": "9dd67e553bde530cd37069dd754357dfcd26056e",
+  "source_status": "clean",
+  "total": 576
+}
