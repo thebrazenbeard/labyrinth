@@ -29,6 +29,7 @@ from .hf_pilot import (
     _save_new, _sha_file, validate_config,
 )
 from .maze import generate_maze
+from .guardian_benchmark import generate_process_cases
 from .runner import _source_state, load_json
 
 
@@ -64,6 +65,7 @@ class CriticConfig:
     lora_rank: int = 4
     lora_alpha: int = 8
     device: str = "cpu"
+    objective: str = "answer_correctness"  # or process_first_error
 
     def validate_fields(self) -> None:
         for name in ("seed", "train_seed", "dev_seed", "transfer_seed"):
@@ -83,6 +85,8 @@ class CriticConfig:
             raise ValueError("learning_rate must be a finite supported float")
         if self.device not in ("cpu", "cuda"):
             raise ValueError("device must be cpu or cuda")
+        if self.objective not in ("answer_correctness", "process_first_error"):
+            raise ValueError("unsupported Minotaur critic objective")
         if len({self.train_seed, self.dev_seed, self.transfer_seed}) != 3:
             raise ValueError("training and evaluation seeds must differ")
         if self.steps > self.train_count_per_tier * 2:
@@ -122,6 +126,64 @@ def critic_examples(seed: int, split: str, count_per_tier: int,
                 is_correct=truth,
             ))
     return examples
+
+
+def process_critic_examples(
+    seed: int, split: str, count_per_tier: int, tiers: tuple[int, ...],
+) -> list[CriticExample]:
+    """Matched first-error-claim verification, NOT direct step localization.
+
+    The oracle label remains outside the model prompt. Each process trace yields
+    a correct and a deliberately false proposed first-error claim.
+    """
+    names = {1: "fresh_numbers", 2: "new_composition", 4: "longer_program"}
+    if (type(split) is not str or not split or type(tiers) is not tuple
+            or not tiers or len(set(tiers)) != len(tiers)
+            or any(tier not in names for tier in tiers)):
+        raise ValueError("unsupported process curriculum profile")
+    examples: list[CriticExample] = []
+    for case in generate_process_cases(seed, count_per_slice=count_per_tier):
+        if case.slice_name not in {names[tier] for tier in tiers}:
+            continue
+        truth = case.first_error_step or 0
+        # For a bad trace alternate missed-error and wrong-location hypotheses.
+        wrong = (1 if truth == 0 else
+                 (0 if seed % 2 == 0 or len(case.steps) == 1
+                  else 1 + truth % len(case.steps)))
+        if wrong == truth:
+            raise ValueError("process claim negative control equals truth")
+        case_text = case.question + "\n" + "\n".join(case.steps)
+        binding = hashlib.sha256(case_text.encode("utf-8")).hexdigest()
+        for claimed, correct in ((truth, True), (wrong, False)):
+            guess = "ALL_CORRECT" if claimed == 0 else f"ERROR_STEP:{claimed}"
+            prompt = (
+                "You are checking a trainee's proposed first error location, "
+                "not accepting a persuasive explanation.\n"
+                "Check every step against the printed program. Identify whether "
+                "the proposed first error is exactly correct. Respond Yes or No.\n"
+                f"Task:\n{case.question}\nTrace:\n"
+                + "\n".join(case.steps)
+                + f"\nTrainee proposed first error: {guess}\nVerdict:"
+            )
+            examples.append(CriticExample(
+                example_id=hashlib.sha256((case.case_id + ":" + str(claimed)).encode()).hexdigest(),
+                case_id=case.case_id, case_prompt_sha256=binding,
+                kind="first_error." + case.slice_name,
+                prompt=prompt, trainee_answer=claimed, is_correct=correct,
+            ))
+    return examples
+
+
+def critic_datasets(config: CriticConfig) -> tuple[list[CriticExample], list[CriticExample], list[CriticExample]]:
+    """The same objective-selected, split-bound cases for training and reload."""
+    config.validate_fields()
+    factory = (critic_examples if config.objective == "answer_correctness"
+               else process_critic_examples)
+    return (
+        factory(config.train_seed, "train", config.train_count_per_tier, (1, 2)),
+        factory(config.dev_seed, "critic_dev", config.eval_count_per_tier, (1, 2)),
+        factory(config.transfer_seed, "critic_transfer", config.eval_count_per_tier, (4,)),
+    )
 
 
 def validate_dataset_separation(*groups: Sequence[CriticExample]) -> None:
@@ -422,9 +484,7 @@ def _updates(model: Any, tokenizer: Any, torch: Any,
 def run_critic(config: CriticConfig) -> dict[str, Any]:
     base_path, output, weights = config.validate()
     base_manifest = _checkpoint_manifest(base_path, weights)
-    train = critic_examples(config.train_seed, "train", config.train_count_per_tier, (1, 2))
-    dev = critic_examples(config.dev_seed, "critic_dev", config.eval_count_per_tier, (1, 2))
-    transfer = critic_examples(config.transfer_seed, "critic_transfer", config.eval_count_per_tier, (4,))
+    train, dev, transfer = critic_datasets(config)
     validate_dataset_separation(train, dev, transfer)
     selected = training_schedule(train, steps=config.steps, seed=config.seed)
     torch, auto_model, auto_tokenizer, peft, device = _deps(config.device)
@@ -526,8 +586,7 @@ def reload_critic(run_dir: str, report_path: str) -> dict[str, Any]:
     expected_adapter = prior["adapter_sha256"]
     if _adapter_manifest(adapter) != expected_adapter:
         raise ValueError("saved adapter changed")
-    dev = critic_examples(config.dev_seed, "critic_dev", config.eval_count_per_tier, (1, 2))
-    transfer = critic_examples(config.transfer_seed, "critic_transfer", config.eval_count_per_tier, (4,))
+    _, dev, transfer = critic_datasets(config)
     torch, auto_model, auto_tokenizer, peft, device = _deps(config.device)
     torch.use_deterministic_algorithms(True)
     current_runtime = _runtime_manifest(torch, device)
