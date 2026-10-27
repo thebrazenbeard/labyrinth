@@ -15,6 +15,11 @@ import random
 import re
 import time
 
+if __package__:
+    from .state_traces import verified_state_trace
+else:  # Direct execution on an isolated host without installing a package.
+    from state_traces import verified_state_trace
+
 
 def file_digest(path: Path) -> str:
     digest = hashlib.sha256()
@@ -55,11 +60,59 @@ def read_training(path: Path) -> list[dict[str, str]]:
     return records
 
 
+def supervised_target(item: dict[str, str], *, policy: str, arm: str,
+                      step: int) -> str:
+    """Derive train-only supervised suffix, never an evaluator oracle.
+
+    Corrupted-state targets perturb every register observation and final
+    answer while leaving instruction counters and syntax unchanged.
+    """
+    if policy not in ("answer", "trace") or arm not in ("trained", "sham", "corrupted"):
+        raise ValueError("unknown supervised target policy or arm")
+    if type(step) is not int or step < 0:
+        raise ValueError("invalid step")
+    if policy == "answer":
+        value = item["answer"]
+        if arm == "corrupted":
+            value = str((int(value) + 1 + step % 7) % 97)
+        return "ANSWER: " + value
+    text = verified_state_trace(item)
+    if arm == "corrupted":
+        offset = 1 + step % 7
+        text = re.sub(
+            r"(\bA=|\bB=|ANSWER: )(\d+)",
+            lambda m: m.group(1) + str((int(m.group(2)) + offset) % 97),
+            text,
+        )
+    return text
+
+
+_ONE_LINE_REQUEST = (
+    "What is the final value of A? Respond with exactly one line: ANSWER: <integer>."
+)
+_TRACE_REQUEST = (
+    "Show the updated values of both registers after each numbered instruction, "
+    "in order, using one line per instruction: STATE N: A=<integer>, B=<integer>. "
+    "Then finish with exactly one line: ANSWER: <integer>."
+)
+
+
+def training_prefix(item: dict[str, str], *, policy: str) -> str:
+    """Align the written task instruction with its supervised output contract."""
+    if policy == "answer":
+        return item["prompt"] + "\n"
+    if policy != "trace" or not item["prompt"].endswith(_ONE_LINE_REQUEST):
+        raise ValueError("trace policy requires an explicit known final-answer prompt")
+    return item["prompt"][:-len(_ONE_LINE_REQUEST)] + _TRACE_REQUEST + "\n"
+
+
 def train(args) -> None:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    if not 1 <= args.steps <= 32 or not 1 <= args.threads <= 8:
+    # A larger pretrained CPU model needs a bounded longer pilot to revisit
+    # more independent train-only cases; still cap this at 128 optimizer steps.
+    if not 1 <= args.steps <= 128 or not 1 <= args.threads <= 8:
         raise ValueError("steps or CPU threads outside safe pilot bounds")
     base = Path(args.base).resolve(strict=True)
     data = Path(args.train_data).resolve(strict=True)
@@ -94,18 +147,20 @@ def train(args) -> None:
                                   lr=args.lr, weight_decay=0.0)
     model.train()
     losses = []
+    supervised_tokens = []
     started = time.monotonic()
     for step in range(args.steps):
         item = examples[step % len(examples)]
-        answer = item["answer"]
-        if args.arm == "corrupted":
-            answer = str((int(answer) + 1 + (step % 7)) % 97)
-        prefix = item["prompt"] + "\n"
-        suffix = "ANSWER: " + answer + (tokenizer.eos_token or "")
+        prefix = training_prefix(item, policy=args.target_policy)
+        suffix = supervised_target(item, policy=args.target_policy, arm=args.arm,
+                                   step=step) + (tokenizer.eos_token or "")
         prefix_ids = tokenizer(prefix, add_special_tokens=False).input_ids
         ids = tokenizer(prefix + suffix, add_special_tokens=False).input_ids
-        if len(ids) > 256 or len(prefix_ids) >= len(ids):
+        if ids[:len(prefix_ids)] != prefix_ids:
+            raise ValueError("tokenizer prefix boundary changes on concatenation")
+        if len(ids) > (384 if args.target_policy == "trace" else 256) or len(prefix_ids) >= len(ids):
             raise ValueError("train example token length outside bounded pilot")
+        supervised_tokens.append(len(ids) - len(prefix_ids))
         input_ids = torch.tensor([ids], dtype=torch.long)
         labels = input_ids.clone()
         labels[:, :len(prefix_ids)] = -100
@@ -129,8 +184,11 @@ def train(args) -> None:
     model.save_pretrained(str(output), safe_serialization=True)
     tokenizer.save_pretrained(str(output))
     receipt = {
-        "schema": "labyrinth.cpu-neural-pilot.v1",
+        "schema": "labyrinth.cpu-neural-pilot.v2" if args.target_policy == "trace" else "labyrinth.cpu-neural-pilot.v1",
         "arm": args.arm, "seed": args.seed, "lr": args.lr,
+        "target_policy": args.target_policy,
+        "supervised_token_count": sum(supervised_tokens),
+        "supervised_token_lengths": supervised_tokens,
         "optimizer": "AdamW", "optimizer_step_calls": args.steps,
         "gradient_steps": 0 if args.arm == "sham" else args.steps,
         "case_visits": args.steps, "unique_training_cases": len(examples),
@@ -176,6 +234,7 @@ def main(argv=None) -> int:
     ptrain.add_argument("--train-data", required=True)
     ptrain.add_argument("--output", required=True)
     ptrain.add_argument("--arm", choices=("trained", "sham", "corrupted"), required=True)
+    ptrain.add_argument("--target-policy", choices=("answer", "trace"), default="answer")
     ptrain.add_argument("--seed", type=int, default=1701)
     ptrain.add_argument("--lr", type=float, default=0.0001)
     ptrain.add_argument("--steps", type=int, default=2)

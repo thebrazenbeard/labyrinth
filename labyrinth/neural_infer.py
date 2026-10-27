@@ -45,7 +45,9 @@ def infer(args) -> None:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    if not 1 <= args.max_new_tokens <= 32 or not 1 <= args.threads <= 8:
+    # Intermediate-state supervision can require 50-70 completion tokens.
+    # Keep one declared ceiling for every arm and reject unbounded generation.
+    if not 1 <= args.max_new_tokens <= 128 or not 1 <= args.threads <= 8:
         raise ValueError("unsafe inference bound")
     checkpoint = Path(args.checkpoint).resolve(strict=True)
     cases = read_public_cases(Path(args.public_cases).resolve(strict=True))
@@ -68,6 +70,9 @@ def infer(args) -> None:
                           add_special_tokens=False)
             if encoded.input_ids.shape[-1] > 256:
                 raise ValueError("inference prompt exceeds token bound")
+            # Greedy generation is RNG-independent, but make the reported
+            # per-case seed an actual applied value for future sampling modes.
+            torch.manual_seed(args.seed + i)
             generated = model.generate(
                 **encoded, max_new_tokens=args.max_new_tokens,
                 do_sample=False, pad_token_id=tok.eos_token_id,
