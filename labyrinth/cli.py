@@ -16,6 +16,7 @@ from .runner import (
 )
 from .maze import generate_maze
 from .toy_backend import ToyLinearAdapter, evaluate_toy_model, run_toy_experiment
+from .report_audit import audit_report
 
 
 def _tiers(raw: str) -> tuple[int, ...]:
@@ -80,6 +81,10 @@ def _parser() -> argparse.ArgumentParser:
     toy_eval.add_argument("--seed", type=int, default=0)
     toy_eval.add_argument("--eval-count", type=_positive, default=64)
     toy_eval.add_argument("--report", metavar="JSON", help="Exclusively create an evaluation report")
+    audit = subcommands.add_parser("audit-report", help="Recheck saved report's internal consistency offline")
+    audit.add_argument("--input", metavar="JSON", required=True, help="Saved maze or four-arm report")
+    audit.add_argument("--artifact", metavar="JSON", help="Training artifact needed for full four-arm prompt audit")
+    audit.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
     subcommands.add_parser("train-hf", help="Opt-in bounded LoRA update of an existing local HF checkpoint")
     subcommands.add_parser("eval-hf", help="Reload and evaluate a saved HF LoRA pilot in a new process")
     return parser
@@ -120,7 +125,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(arguments)
     try:
-        if args.command == "train-toy":
+        if args.command == "audit-report":
+            report = audit_report(load_json(args.input, strict=True),
+                                  artifact=load_json(args.artifact, strict=True) if args.artifact else None)
+        elif args.command == "train-toy":
             report = run_toy_experiment(
                 seed=args.seed, train_count=args.train_count, eval_count=args.eval_count,
                 epochs=args.epochs, learning_rate=args.learning_rate,
@@ -158,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote reproducible report to {args.report}", file=sys.stderr)
         else:
             print(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))
-        return 0
+        return 0 if args.command != "audit-report" or report["status"] == "PASS" else 2
     except (ValueError, TypeError, OSError, json.JSONDecodeError, AdapterError) as exc:
         print(f"labyrinth: {exc}", file=sys.stderr)
         return 2

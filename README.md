@@ -44,6 +44,19 @@ Tier 1 uses arithmetic, tier 2 uses multi-operation reasoning, and tier 3 tests 
 
 The evaluator accepts only a complete `ANSWER: <integer>` line. Reports distinguish *answer accuracy* from *output-format adherence* and include challenge commitments, seeds, model identity, generation options when available, report schema, source-tree hash, and per-trial prompt/response hashes. Correct answers are never placed in public evaluation prompts or reported as explicit answer keys.
 
+### Audit a saved report offline
+
+```bash
+python -m labyrinth run --seed 42 --count 3 --tiers 1,2,3 --report maze.json
+python -m labyrinth audit-report --input maze.json
+# For a four-arm experiment, provide the original demonstration artifact:
+python -m labyrinth audit-report --input evaluation.json --artifact training.json --report audit.json
+```
+
+The auditor re-generates public challenges, rechecks the answer commitment, identifiers, seeds, prompt hashes, complete response hashes, scores, and aggregated accuracy/format measures. It also verifies the training-artifact and control metadata when provided. CLI audit inputs reject duplicate JSON keys, nonfinite JSON numbers and files over 8 MiB; audit output paths are write-once. An exit code of **0** means `PASS` (all available internal checks), and **2** means `FAIL` or `INCOMPLETE`. In particular, four-arm reports without the original training artifact are `INCOMPLETE`, as are reports containing responses longer than the stored 4,096-character preview. Source-revision mismatch fails closed.
+
+**Critical evidence limit:** `PASS` means only *internal consistency against the current public generator and scorer*. The self-reported model identity and unsigned output are not authenticated; a third party can fabricate a completely consistent report without running a model. This command does **not** establish trained-model improvement, independent runtime execution, or blind evaluation.
+
 Training artifacts contain answer keys because their purpose is to preserve demonstrations. On load they must match the current canonical training generator outputs and source-tree hash; a self-computed checksum alone is not treated as authenticity. Experiment runs reject train/eval challenge ID or normalized prompt overlap. The shuffled control now **fails closed** when duplicate answer values prevent a complete label derangement, rather than silently becoming identical to the candidate. The scored model responses in this command's training trajectory are recorded but do **not** causally change its oracle-generated demonstration prompts; this is an in-context experiment, not a feedback-driven learner. Do not tune against the same held-out seed repeatedly and then call it independent evaluation; reserve new seeds for final qualification.
 
 ## Actual parameter-update demonstration (toy backend)
@@ -82,7 +95,7 @@ See the [research landscape and staged local-training gate](docs/REASONING_TRAIN
 python -m unittest discover -s tests -v
 ```
 
-Tests cover seeded determinism, independent register-program interpretation, exact scoring, injection resistance, adapter boundaries, curriculum replay, artifact tampering, bounded input JSON and untrusted output, valid shuffled controls, separate control-arm adapter instances, toy parameter updates, fresh-process artifact reload, and optional HF pilot preflight, train/eval split separation, label derangement and prompt-loss masking. The HF unit tests exercise the **contract**, not an actual backward pass.
+Tests cover seeded determinism, independent register-program interpretation, exact scoring, injection resistance, adapter boundaries, curriculum replay, artifact tampering, bounded input JSON and untrusted output, saved-report scoring/provenance self-consistency checks, valid shuffled controls, separate control-arm adapter instances, toy parameter updates, fresh-process artifact reload, and optional HF pilot preflight, train/eval split separation, label derangement and prompt-loss masking. The HF unit tests exercise the **contract**, not an actual backward pass.
 
 Important limitations:
 
@@ -102,8 +115,9 @@ Important limitations:
 - `labyrinth/adapters.py`: replay and local Ollama interface
 - `labyrinth/curriculum.py`: training-only progression state
 - `labyrinth/runner.py`: scored runs, artifacts, four-arm controls, JSON provenance
+- `labyrinth/report_audit.py`: offline report consistency verifier; neither provenance authentication nor a learning claim
 - `labyrinth/toy_backend.py`: explicitly limited CPU parameter learning and checkpoint reload
 - `labyrinth/hf_pilot.py`: opt-in local HF/PEFT LoRA SFT and same-checkpoint controls; no default ML dependency
-- `labyrinth/cli.py`: `run`, `experiment`, `train-toy`, `toy-eval`, `train-hf`, and `eval-hf` commands
+- `labyrinth/cli.py`: `run`, `experiment`, `audit-report`, `train-toy`, `toy-eval`, `train-hf`, and `eval-hf` commands
 
 Labyrinth deliberately does not install itself into Vera, execute model responses, mutate Git repositories, or claim any externally deployed training effect.
