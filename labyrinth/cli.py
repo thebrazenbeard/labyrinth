@@ -89,6 +89,17 @@ def _parser() -> argparse.ArgumentParser:
     hf_audit = subcommands.add_parser("audit-hf-report", help="Offline internal consistency audit of a saved HF LoRA pilot")
     hf_audit.add_argument("--input", metavar="JSON", required=True, help="Saved HF pilot report")
     hf_audit.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
+    rg = subcommands.add_parser("benchmark-rg", help="Optional Reasoning Gym development-only scoring; not sealed evaluation")
+    rg.add_argument("--dataset", required=True, help="Registered reasoning-gym task identifier")
+    rg.add_argument("--size", type=_positive, default=16, help="Number of development cases (max 128)")
+    rg.add_argument("--seed", type=int, default=2026)
+    rg.add_argument("--adapter", choices=("replay", "ollama"), default="replay")
+    rg.add_argument("--replay-file", metavar="JSON", help="Exact prompt-to-answer mapping")
+    rg.add_argument("--model", help="Required Ollama model identifier")
+    rg.add_argument("--base-url", default="http://127.0.0.1:11434")
+    rg.add_argument("--timeout-seconds", type=float, default=30.0)
+    rg.add_argument("--allow-remote-ollama", action="store_true")
+    rg.add_argument("--report", metavar="JSON", help="Exclusively create a JSON report")
     subcommands.add_parser("train-hf", help="Opt-in bounded LoRA update of an existing local HF checkpoint")
     subcommands.add_parser("eval-hf", help="Reload and evaluate a saved HF LoRA pilot in a new process")
     return parser
@@ -149,6 +160,15 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "toy-eval":
             candidate = ToyLinearAdapter.load_checkpoint(args.checkpoint)
             report = evaluate_toy_model(candidate, seed=args.seed, eval_count=args.eval_count)
+        elif args.command == "benchmark-rg":
+            from .reasoning_gym_bridge import benchmark_reasoning_gym
+
+            try:
+                report = benchmark_reasoning_gym(
+                    _load_model(args), args.dataset, size=args.size, seed=args.seed,
+                )
+            except RuntimeError as exc:
+                raise ValueError(str(exc)) from exc
         else:
             adapter = _load_model(args)
             if args.command == "run":
