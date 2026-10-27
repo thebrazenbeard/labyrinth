@@ -130,6 +130,83 @@ def training_prefix(item: dict[str, str], *, policy: str) -> str:
     return item["prompt"][:-len(_ONE_LINE_REQUEST)] + _TRACE_REQUEST + "\n"
 
 
+def render_supervised_tokens(tokenizer, item: dict[str, str], *, policy: str,
+                             arm: str, step: int, mode: str) -> tuple[list[int], int, dict]:
+    """Encode answer-blind prompt plus supervised completion at a stable mask boundary.
+
+    For ``chat``, render the model's own user-only generation prefix, and
+    independently tokenize only the assistant continuation.  Concatenating
+    token IDs, not re-tokenizing concatenated text, guarantees that training's
+    prefix tokens equal the prefix fed to the frozen chat-mode generator even
+    if the BPE tokenizer merges characters across a text boundary.
+    """
+    if mode not in ("raw", "chat"):
+        raise ValueError("unknown neural prompt mode")
+    prefix = training_prefix(item, policy=policy)
+    target = supervised_target(item, policy=policy, arm=arm, step=step)
+    if mode == "raw":
+        rendered_prefix = prefix
+        rendered_full = prefix + target + (tokenizer.eos_token or "")
+        prefix_ids = tokenizer(rendered_prefix, add_special_tokens=False).input_ids
+        all_ids = tokenizer(rendered_full, add_special_tokens=False).input_ids
+        if all_ids[:len(prefix_ids)] != prefix_ids:
+            raise ValueError("tokenizer prefix boundary changes on concatenation")
+        metadata = {"prompt_mode": "raw", "chat_template_sha256": None}
+    else:
+        template = getattr(tokenizer, "chat_template", None)
+        if not template:
+            raise ValueError("chat SFT requires tokenizer chat template")
+        # training_prefix always ends with a newline for historical raw mode;
+        # the chat inference path supplies the exact user text without it.
+        if not prefix.endswith("\n"):
+            raise ValueError("invalid training prompt suffix")
+        user_text = prefix[:-1]
+        user = {"role": "user", "content": user_text}
+        rendered_prefix = tokenizer.apply_chat_template(
+            [user], tokenize=False, add_generation_prompt=True)
+        rendered_full = tokenizer.apply_chat_template(
+            [user, {"role": "assistant", "content": target}],
+            tokenize=False, add_generation_prompt=False)
+        if (not isinstance(rendered_prefix, str)
+                or not isinstance(rendered_full, str)
+                or not 1 <= len(rendered_prefix) <= 16_384
+                or not len(rendered_prefix) < len(rendered_full) <= 20_480
+                or not rendered_full.startswith(rendered_prefix)):
+            raise ValueError("chat template is not aligned to assistant-generation prefix")
+        continuation = rendered_full[len(rendered_prefix):]
+        if not continuation.startswith(target):
+            raise ValueError("chat template does not place target after assistant header")
+        if target in rendered_prefix:
+            raise ValueError("assistant target leaks into chat generation prefix")
+        prefix_ids = tokenizer(rendered_prefix, add_special_tokens=False).input_ids
+        suffix_ids = tokenizer(continuation, add_special_tokens=False).input_ids
+        all_ids = prefix_ids + suffix_ids
+        encoded_template = json.dumps(
+            template, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False).encode("utf-8")
+        metadata = {"prompt_mode": "chat",
+                    "chat_template_sha256": hashlib.sha256(encoded_template).hexdigest()}
+    length_cap = 384 if policy == "trace" else 256
+    if len(all_ids) > length_cap or len(prefix_ids) >= len(all_ids):
+        raise ValueError("train example token length outside bounded pilot")
+    metadata["rendered_prompt_sha256"] = hashlib.sha256(
+        rendered_prefix.encode("utf-8")).hexdigest()
+    return all_ids, len(prefix_ids), metadata
+
+
+def zero_trainable_gradients(parameters) -> None:
+    """Run the sham's full backward pass, then suppress its parameter update.
+
+    AdamW is configured with zero weight decay.  Leaving explicitly zeroed
+    gradients present makes its optimizer step computably distinct from merely
+    skipping backward, without changing neural parameters.
+    """
+    for parameter in parameters:
+        gradient = getattr(parameter, "grad", None)
+        if gradient is not None:
+            gradient.zero_()
+
+
 def train(args) -> None:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -173,34 +250,33 @@ def train(args) -> None:
     model.train()
     losses = []
     supervised_tokens = []
+    rendered_prompt_hashes = []
+    rendering_commitment = None
     started = time.monotonic()
     for step in range(args.steps):
         item = examples[step % len(examples)]
-        prefix = training_prefix(item, policy=args.target_policy)
-        suffix = supervised_target(item, policy=args.target_policy, arm=args.arm,
-                                   step=step) + (tokenizer.eos_token or "")
-        prefix_ids = tokenizer(prefix, add_special_tokens=False).input_ids
-        ids = tokenizer(prefix + suffix, add_special_tokens=False).input_ids
-        if ids[:len(prefix_ids)] != prefix_ids:
-            raise ValueError("tokenizer prefix boundary changes on concatenation")
-        if len(ids) > (384 if args.target_policy == "trace" else 256) or len(prefix_ids) >= len(ids):
-            raise ValueError("train example token length outside bounded pilot")
-        supervised_tokens.append(len(ids) - len(prefix_ids))
+        ids, prefix_length, rendering = render_supervised_tokens(
+            tokenizer, item, policy=args.target_policy, arm=args.arm,
+            step=step, mode=args.prompt_mode)
+        if rendering_commitment is None:
+            rendering_commitment = {
+                "prompt_mode": rendering["prompt_mode"],
+                "chat_template_sha256": rendering["chat_template_sha256"],
+            }
+        supervised_tokens.append(len(ids) - prefix_length)
+        rendered_prompt_hashes.append(rendering["rendered_prompt_sha256"])
         input_ids = torch.tensor([ids], dtype=torch.long)
         labels = input_ids.clone()
-        labels[:, :len(prefix_ids)] = -100
+        labels[:, :prefix_length] = -100
         optimizer.zero_grad(set_to_none=True)
         loss = model(input_ids=input_ids, labels=labels).loss
         if not torch.isfinite(loss):
             raise ValueError("non-finite loss")
         losses.append(float(loss.detach()))
-        if args.arm != "sham":
-            loss.backward()
-            optimizer.step()
-        else:
-            # Call with no gradients: same number of case visits and step calls,
-            # but no parameter update. The receipt says zero gradient steps.
-            optimizer.step()
+        loss.backward()
+        if args.arm == "sham":
+            zero_trainable_gradients(block.parameters())
+        optimizer.step()
     after = layer_digest(block)
     if (before == after) != (args.arm == "sham"):
         raise ValueError("parameter-change invariant failed")
@@ -209,13 +285,20 @@ def train(args) -> None:
     model.save_pretrained(str(output), safe_serialization=True)
     tokenizer.save_pretrained(str(output))
     receipt = {
-        "schema": "labyrinth.cpu-neural-pilot.v2" if args.target_policy == "trace" else "labyrinth.cpu-neural-pilot.v1",
+        "schema": ("labyrinth.cpu-neural-pilot.v3" if args.prompt_mode == "chat" else
+                   "labyrinth.cpu-neural-pilot.v2" if args.target_policy == "trace" else
+                   "labyrinth.cpu-neural-pilot.v1"),
         "arm": args.arm, "seed": args.seed, "lr": args.lr,
         "target_policy": args.target_policy,
+        "prompt_mode": rendering_commitment["prompt_mode"],
+        "chat_template_sha256": rendering_commitment["chat_template_sha256"],
+        "rendered_prompt_sha256s": rendered_prompt_hashes,
         "supervised_token_count": sum(supervised_tokens),
         "supervised_token_lengths": supervised_tokens,
         "optimizer": "AdamW", "optimizer_step_calls": args.steps,
         "gradient_steps": 0 if args.arm == "sham" else args.steps,
+        "backward_steps": args.steps,
+        "zeroed_grad_steps": args.steps if args.arm == "sham" else 0,
         "case_visits": args.steps, "unique_training_cases": len(examples),
         "training_data_sha256": file_digest(data),
         "train_generator": "labyrinth-program-v1", "train_generator_seed": args.train_generator_seed,
@@ -263,6 +346,8 @@ def main(argv=None) -> int:
     ptrain.add_argument("--output", required=True)
     ptrain.add_argument("--arm", choices=("trained", "sham", "corrupted"), required=True)
     ptrain.add_argument("--target-policy", choices=("answer", "trace"), default="answer")
+    ptrain.add_argument("--prompt-mode", choices=("raw", "chat"), default="raw",
+                        help="Preserve legacy raw SFT or render the tokenizer's chat template")
     ptrain.add_argument("--seed", type=int, default=1701)
     ptrain.add_argument("--lr", type=float, default=0.0001)
     ptrain.add_argument("--steps", type=int, default=2)
