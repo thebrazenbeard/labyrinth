@@ -135,6 +135,35 @@ class CriticPilotTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "source tree changed"):
                 reload_critic(tmp, str(Path(tmp) / "reload.json"))
 
+    def test_reload_requires_exact_decisions_but_tolerates_bounded_margin_roundoff(self):
+        expected = {"dev": {"accuracy": 0.5, "predictions_sha256": "a" * 64,
+                            "verdict_margin_diagnostic": {
+                                "qualification": "NOT_ESTABLISHED",
+                                "margin_mean": 3.0, "margin_min": 2.0, "margin_max": 4.0,
+                                "mean_margin_on_correct": 3.2,
+                                "mean_margin_on_incorrect": 2.8,
+                                "predeclared_thresholds": {
+                                    "0.0": {"false_approval_rate": 1.0, "coverage": 1.0},
+                                }}}}
+        import copy
+        tiny = copy.deepcopy(expected)
+        tiny["dev"]["verdict_margin_diagnostic"]["margin_mean"] += 0.000006
+        verify_reload_contract(training_pid=42, reload_pid=43, measured=tiny,
+                               expected=expected)
+        for change in ("accuracy", "prediction_hash", "risk", "margin_big"):
+            altered = copy.deepcopy(tiny)
+            if change == "accuracy":
+                altered["dev"]["accuracy"] = 1.0
+            elif change == "prediction_hash":
+                altered["dev"]["predictions_sha256"] = "b" * 64
+            elif change == "risk":
+                altered["dev"]["verdict_margin_diagnostic"]["predeclared_thresholds"]["0.0"]["false_approval_rate"] = 0
+            else:
+                altered["dev"]["verdict_margin_diagnostic"]["margin_mean"] += 0.01
+            with self.subTest(change=change), self.assertRaises(RuntimeError):
+                verify_reload_contract(training_pid=42, reload_pid=43, measured=altered,
+                                       expected=expected)
+
     def test_reload_contract_fails_closed_on_same_process_or_changed_predictions(self):
         with self.assertRaisesRegex(RuntimeError, "fresh process"):
             verify_reload_contract(training_pid=12, reload_pid=12,

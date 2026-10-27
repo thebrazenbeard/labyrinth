@@ -277,7 +277,33 @@ def verify_reload_contract(*, training_pid: int, reload_pid: int,
         raise RuntimeError("Minotaur reload process identity is invalid")
     if training_pid == reload_pid:
         raise RuntimeError("Minotaur reload must run in a fresh process")
-    if measured != expected:
+    # CPU inference may vary in the last few float32 units. Permit only
+    # descriptive Yes-minus-No margin summaries to differ by at most 1e-4;
+    # classification hashes, scores and all abstention decisions remain exact.
+    margin_fields = frozenset({
+        "margin_min", "margin_max", "margin_mean",
+        "mean_margin_on_correct", "mean_margin_on_incorrect",
+    })
+
+    def normalize(value: Any, reference: Any, path: tuple[str, ...]) -> Any:
+        if type(value) is dict and type(reference) is dict:
+            if value.keys() != reference.keys():
+                raise RuntimeError("Minotaur reloaded predictions or metrics differ")
+            return {key: normalize(value[key], reference[key], path + (key,))
+                    for key in value}
+        if (len(path) >= 2 and path[-2] == "verdict_margin_diagnostic"
+                and path[-1] in margin_fields):
+            if value is None and reference is None:
+                return None
+            if (type(value) not in (int, float)
+                    or type(reference) not in (int, float)
+                    or not math.isfinite(value) or not math.isfinite(reference)
+                    or abs(value - reference) > 0.0001):
+                raise RuntimeError("Minotaur reloaded margin summary exceeds tolerance")
+            return reference
+        return value
+
+    if normalize(measured, expected, ()) != expected:
         raise RuntimeError("Minotaur reloaded predictions or metrics differ")
 
 
