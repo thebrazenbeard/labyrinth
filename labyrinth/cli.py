@@ -17,6 +17,7 @@ from .runner import (
 from .maze import generate_maze
 from .toy_backend import ToyLinearAdapter, evaluate_toy_model, run_toy_experiment
 from .report_audit import audit_report
+from .hf_report_audit import audit_hf_report
 
 
 def _tiers(raw: str) -> tuple[int, ...]:
@@ -85,6 +86,9 @@ def _parser() -> argparse.ArgumentParser:
     audit.add_argument("--input", metavar="JSON", required=True, help="Saved maze or four-arm report")
     audit.add_argument("--artifact", metavar="JSON", help="Training artifact needed for full four-arm prompt audit")
     audit.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
+    hf_audit = subcommands.add_parser("audit-hf-report", help="Offline internal consistency audit of a saved HF LoRA pilot")
+    hf_audit.add_argument("--input", metavar="JSON", required=True, help="Saved HF pilot report")
+    hf_audit.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
     subcommands.add_parser("train-hf", help="Opt-in bounded LoRA update of an existing local HF checkpoint")
     subcommands.add_parser("eval-hf", help="Reload and evaluate a saved HF LoRA pilot in a new process")
     return parser
@@ -128,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "audit-report":
             report = audit_report(load_json(args.input, strict=True),
                                   artifact=load_json(args.artifact, strict=True) if args.artifact else None)
+        elif args.command == "audit-hf-report":
+            report = audit_hf_report(load_json(args.input, strict=True))
         elif args.command == "train-toy":
             report = run_toy_experiment(
                 seed=args.seed, train_count=args.train_count, eval_count=args.eval_count,
@@ -166,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote reproducible report to {args.report}", file=sys.stderr)
         else:
             print(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))
-        return 0 if args.command != "audit-report" or report["status"] == "PASS" else 2
+        return 0 if args.command not in ("audit-report", "audit-hf-report") or report["status"] == "PASS" else 2
     except (ValueError, TypeError, OSError, json.JSONDecodeError, AdapterError) as exc:
         print(f"labyrinth: {exc}", file=sys.stderr)
         return 2
