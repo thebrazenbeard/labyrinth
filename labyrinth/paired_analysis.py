@@ -23,8 +23,8 @@ from typing import Any
 
 
 MANIFEST_SCHEMA = "labyrinth.private-eval.v1"
-TRIALS_SCHEMA = "labyrinth.neural-trials.v1"
-REPORT_SCHEMA = "labyrinth.paired-analysis.v1"
+TRIALS_SCHEMA = "labyrinth.neural-trials.v2"
+REPORT_SCHEMA = "labyrinth.paired-analysis.v2"
 REQUIRED_ARMS = ("baseline", "trained", "sham", "corrupted")
 VALID_SLICES = frozenset({"within_template", "structural", "length_shift", "representation_shift", "external"})
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -56,6 +56,8 @@ def _private_cases(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     cases = manifest.get("cases")
     if not isinstance(cases, list) or not 1 <= len(cases) <= 4096:
         _fail("evaluation requires 1..4096 cases")
+    if manifest["split"] == "final" and len(cases) < 32:
+        _fail("final evaluation requires at least 32 cases before an aggregate report")
     ids, prompts = set(), set()
     training_ids = manifest.get("train_case_ids")
     training_prompts = manifest.get("train_prompt_sha256")
@@ -158,6 +160,8 @@ def analyze(manifest: dict[str, Any], trials: dict[str, Any]) -> dict[str, Any]:
     cases = _private_cases(manifest)
     if not isinstance(trials, dict) or trials.get("schema") != TRIALS_SCHEMA:
         _fail("unsupported model trial schema")
+    if "eval_manifest_sha256" in trials:
+        _fail("public gold-bearing manifest commitments are prohibited in v2 trials")
     if not isinstance(trials.get("source_commit"), str) or not re.fullmatch(r"[0-9a-f]{40}", trials["source_commit"]):
         _fail("trial source commit must be a full Git SHA")
     if not _is_hex64(trials.get("base_model_sha256")):
@@ -166,9 +170,6 @@ def analyze(manifest: dict[str, Any], trials: dict[str, Any]) -> dict[str, Any]:
         _fail("missing tokenizer or decoding-configuration digest")
     if trials["source_commit"] != manifest["source_commit"]:
         _fail("training/evaluation source commits differ")
-    commitment = _hash(manifest)
-    if trials.get("eval_manifest_sha256") != commitment:
-        _fail("trial manifest commitment mismatch")
     arms = trials.get("arms")
     if not isinstance(arms, dict) or any(name not in arms for name in REQUIRED_ARMS):
         _fail("missing required neural control arms")
@@ -242,18 +243,21 @@ def analyze(manifest: dict[str, Any], trials: dict[str, Any]) -> dict[str, Any]:
     # Never echo manifest-supplied template labels: they may encode evaluator
     # gold even when the characters satisfy the opaque-ID contract.
     slices: dict[str, dict[str, Any]] = {"slice": {}, "template_group": {}}
-    for group in sorted({case["slice"] for case in cases}):
-        ix = [i for i, case in enumerate(cases) if case["slice"] == group]
-        slices["slice"][group] = {
-            name: _summary([scores[name][i] for i in ix], [formats[name][i] for i in ix])
-            for name in sorted(scores)
-        }
-    for ordinal, group in enumerate(sorted({case["template_id"] for case in cases}), 1):
-        ix = [i for i, case in enumerate(cases) if case["template_id"] == group]
-        slices["template_group"][f"group_{ordinal:04d}"] = {
-            name: _summary([scores[name][i] for i in ix], [formats[name][i] for i in ix])
-            for name in sorted(scores)
-        }
+    if manifest["split"] != "final":
+        # Final subgroup/singleton correctness can disclose private answer
+        # keys. Keep diagnostic slices on the explicitly non-secret dev split.
+        for group in sorted({case["slice"] for case in cases}):
+            ix = [i for i, case in enumerate(cases) if case["slice"] == group]
+            slices["slice"][group] = {
+                name: _summary([scores[name][i] for i in ix], [formats[name][i] for i in ix])
+                for name in sorted(scores)
+            }
+        for ordinal, group in enumerate(sorted({case["template_id"] for case in cases}), 1):
+            ix = [i for i, case in enumerate(cases) if case["template_id"] == group]
+            slices["template_group"][f"group_{ordinal:04d}"] = {
+                name: _summary([scores[name][i] for i in ix], [formats[name][i] for i in ix])
+                for name in sorted(scores)
+            }
 
     return {
         "schema": REPORT_SCHEMA,
@@ -262,7 +266,6 @@ def analyze(manifest: dict[str, Any], trials: dict[str, Any]) -> dict[str, Any]:
         "base_tokenizer_sha256": trials["base_tokenizer_sha256"],
         "generation_config_sha256": trials["generation_config_sha256"],
         "eval_split": manifest["split"],
-        "eval_manifest_sha256": commitment,
         "case_count": len(cases),
         "template_count": len({case["template_id"] for case in cases}),
         "arm_summary": results,
@@ -277,6 +280,8 @@ def analyze(manifest: dict[str, Any], trials: dict[str, Any]) -> dict[str, Any]:
             "Any final-split use for tuning contaminates that split; this tool cannot detect prior unseen exposures.",
             "Same seeds and cases do not prove determinism or identical runtime state across inference arms.",
             "The independent correctness of private gold and semantic equivalence of representation rewrites require separate oracle checks.",
+            "The trial contract binds case IDs and prompt digests, not private gold or slice metadata; an independent evaluator must retain private manifest custody.",
+            "Final aggregate results require one-shot release control; withholding small groups does not stop probing through repeated adaptive submissions.",
         ],
     }
 
