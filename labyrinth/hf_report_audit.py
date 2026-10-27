@@ -82,7 +82,12 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
     elif source["source_tree_sha256"] != _source_state()["source_tree_sha256"]:
         incomplete("source fingerprint mismatch: current generator/scorer is not pinned to historical report")
     for field in ("base_weights_sha256", "model_metadata_sha256", "candidate_adapter_sha256"):
-        if not _digest_map(report.get(field)):
+        digests = report.get(field)
+        has_required_file = (
+            "config.json" in digests if field == "model_metadata_sha256"
+            else any(name.endswith(".safetensors") for name in digests)
+        ) if isinstance(digests, dict) else False
+        if not _digest_map(digests) or not has_required_file:
             fail(f"{field}: missing or malformed file digest receipt")
     for field in ("initial_lora_parameter_sha256", "candidate_lora_parameter_sha256",
                   "candidate_lora_tensor_value_sha256", "corrupted_lora_parameter_sha256"):
@@ -204,7 +209,12 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
                 continue
             reported_correct += int(trial["correct"])
             reported_format += int(trial["score_reason"] in ("correct", "incorrect"))
-            preview_digest = hashlib.sha256(response.encode("utf-8")).hexdigest()
+            try:
+                preview_bytes = response.encode("utf-8")
+            except UnicodeEncodeError:
+                fail(f"{tag}: response preview contains invalid Unicode")
+                continue
+            preview_digest = hashlib.sha256(preview_bytes).hexdigest()
             if preview_digest != digest and len(response) == 128:
                 unverifiable_trials += 1
                 incomplete(f"{arm}: truncated model response cannot be independently rescored")
