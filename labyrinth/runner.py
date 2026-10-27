@@ -26,6 +26,12 @@ _MAX_DEMONSTRATIONS = 64
 # Bound CLI-supplied replay mappings and training artifacts before JSON parsing.
 # An 8 MiB input is ample for the maximum 64 bounded demonstrations/trajectories.
 _MAX_JSON_BYTES = 8 * 1024 * 1024
+CONTROL_DESCRIPTIONS = {
+    "baseline": "No examples supplied",
+    "candidate": "In-context examples from disjoint training split",
+    "placebo": "Text-length-matched neutral passage (not token matched)",
+    "shuffled": "Training questions with label-multiset-preserving, complete answer derangement",
+}
 
 
 class Model(Protocol):
@@ -336,12 +342,7 @@ def run_experiment(
         "training_count": len(examples),
         "challenge_commitment_sha256": _challenge_commitment(challenges),
         "shuffled_label_collisions": label_collisions,
-        "controls": {
-            "baseline": "No examples supplied",
-            "candidate": "In-context examples from disjoint training split",
-            "placebo": "Text-length-matched neutral passage (not token matched)",
-            "shuffled": "Training questions with label-multiset-preserving, complete answer derangement",
-        },
+        "controls": dict(CONTROL_DESCRIPTIONS),
         "arms": arms,
         "limitations": [
             "In-context conditioning is not parameter training or proof of persistent learning.",
@@ -358,7 +359,20 @@ def save_json_new(path: str | Path, value: Any) -> None:
         handle.write(json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
 
 
-def load_json(path: str | Path) -> Any:
+def _unique_json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON field: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_json(value: str) -> None:
+    raise ValueError(f"nonfinite JSON token forbidden: {value}")
+
+
+def load_json(path: str | Path, *, strict: bool = False) -> Any:
     # Read at most max+1 bytes even if a local file grows between stat/open;
     # never hand unbounded input to a JSON decoder.
     with Path(path).open("rb") as handle:
@@ -366,6 +380,8 @@ def load_json(path: str | Path) -> Any:
     if len(raw) > _MAX_JSON_BYTES:
         raise ValueError(f"JSON input exceeds {_MAX_JSON_BYTES} bytes")
     try:
-        return json.loads(raw.decode("utf-8"))
+        return json.loads(raw.decode("utf-8"),
+                          object_pairs_hook=_unique_json_pairs if strict else None,
+                          parse_constant=_reject_nonfinite_json if strict else None)
     except RecursionError as exc:
         raise ValueError("JSON input nesting exceeds parser limit") from exc
