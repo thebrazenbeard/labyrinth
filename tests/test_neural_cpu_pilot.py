@@ -3,6 +3,8 @@
 import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -85,6 +87,24 @@ class NeuralCpuPilotTests(unittest.TestCase):
         self.assertNotIn(ch.answer, prompt.split("Then finish with exactly one line:")[-1])
         with self.assertRaises(ValueError):
             training_prefix({"prompt": "unexpected prompt"}, policy="trace")
+
+    def test_repository_scripts_run_without_pythonpath_and_never_overwrite(self):
+        repo = Path(__file__).resolve().parents[1]
+        preflight = subprocess.run(
+            [sys.executable, str(repo / "scripts" / "preflight_trace_prefix.py"), "--help"],
+            cwd=self.tmp.name, capture_output=True, text=True,
+        )
+        self.assertEqual(preflight.returncode, 0, preflight.stderr)
+        generator = repo / "scripts" / "generate_neural_train.py"
+        output = Path(self.tmp.name) / "one.json"
+        args = [sys.executable, str(generator), "--seed", "1901",
+                "--count", "1", "--output", str(output)]
+        first = subprocess.run(args, cwd=self.tmp.name, capture_output=True, text=True)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        original = output.read_bytes()
+        second = subprocess.run(args, cwd=self.tmp.name, capture_output=True, text=True)
+        self.assertNotEqual(second.returncode, 0)
+        self.assertEqual(output.read_bytes(), original)
 
 
 if __name__ == "__main__":

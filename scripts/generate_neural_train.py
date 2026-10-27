@@ -5,7 +5,9 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from labyrinth.program_maze import generate_program_challenges
 
 
@@ -17,8 +19,6 @@ def main() -> int:
     a = p.parse_args()
     if not 1 <= a.count <= 256:
         p.error("count must be 1..256")
-    if a.output.exists():
-        p.error("refusing to overwrite a committed training corpus")
     challenges = generate_program_challenges(a.seed, a.count, "train")
     records = [
         {"case_id": c.id, "split": c.split, "prompt": c.prompt, "answer": c.answer}
@@ -28,7 +28,11 @@ def main() -> int:
     if len(data) > 1024 * 1024:
         p.error("dataset exceeds bounded CPU pilot limit")
     a.output.parent.mkdir(parents=True, exist_ok=True)
-    a.output.write_bytes(data)
+    try:
+        with a.output.open("xb") as stream:
+            stream.write(data)
+    except FileExistsError:
+        p.error("refusing to overwrite a committed training corpus")
     print(json.dumps({"cases": len(records), "sha256": hashlib.sha256(data).hexdigest(),
                       "output": str(a.output)}, sort_keys=True))
     return 0

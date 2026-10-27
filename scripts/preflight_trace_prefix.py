@@ -5,14 +5,21 @@ import json
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from neural_cpu_pilot import read_training, supervised_target, training_prefix
-from transformers import AutoTokenizer
+_script_directory = Path(__file__).resolve().parent
+if (_script_directory.parent / "labyrinth").is_dir():
+    # Running from a source checkout: imports use the installed package layout.
+    sys.path.insert(0, str(_script_directory.parent))
+    from labyrinth.neural_cpu_pilot import read_training, supervised_target, training_prefix
+else:
+    # Copied into an isolated training-host directory with two standalone modules.
+    sys.path.insert(0, str(_script_directory))
+    from neural_cpu_pilot import read_training, supervised_target, training_prefix
 
 p = argparse.ArgumentParser()
 p.add_argument("--base", required=True)
 p.add_argument("--train-data", required=True)
 a = p.parse_args()
+from transformers import AutoTokenizer
 data = read_training(Path(a.train_data))
 tok = AutoTokenizer.from_pretrained(a.base, local_files_only=True, trust_remote_code=False)
 lengths = []
