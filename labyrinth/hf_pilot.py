@@ -70,6 +70,7 @@ def _paths(config: PilotConfig, *, output_must_be_new: bool) -> tuple[Path, Path
     total = sum(path.stat().st_size for path in weights)
     if not 0 < total <= MAX_LOCAL_WEIGHTS:
         raise ValueError("checkpoint exceeds the 1 GiB no-quantization pilot limit")
+    _validate_sharded_index(model, weights)
     raw_output = Path(config.output_dir).expanduser()
     if raw_output.is_symlink():
         raise ValueError("output path must not be a symlink")
@@ -81,6 +82,26 @@ def _paths(config: PilotConfig, *, output_must_be_new: bool) -> tuple[Path, Path
     if output_must_be_new and not output.parent.is_dir():
         raise ValueError("output parent must already exist")
     return model, output, weights
+
+
+def _validate_sharded_index(model: Path, weights: list[Path]) -> None:
+    """Fail closed if a sharded checkpoint index escapes the pinned local files."""
+    index = model / "model.safetensors.index.json"
+    if not index.exists() and not index.is_symlink():
+        return
+    if not index.is_file() or index.is_symlink():
+        raise ValueError("sharded index must be a regular non-symlink JSON file")
+    try:
+        parsed = load_json(index, strict=True)
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise ValueError(f"invalid sharded index: {exc}") from exc
+    mapping = parsed.get("weight_map") if isinstance(parsed, dict) else None
+    filenames = {p.name for p in weights}
+    if (not isinstance(mapping, dict) or not mapping
+            or any(type(name) is not str or not name or type(target) is not str
+                   or target not in filenames for name, target in mapping.items())
+            or set(mapping.values()) != filenames):
+        raise ValueError("sharded index refers to unknown, unused, or nonlocal weight files")
 
 
 def validate_config(config: PilotConfig, *, output_must_be_new: bool = True) -> tuple[Path, Path, list[Path]]:
@@ -154,6 +175,7 @@ def _weights_digest(weights: list[Path]) -> dict[str, str]:
 def _metadata_digest(model_path: Path) -> dict[str, str]:
     """Bind tokenizer/config bytes alongside model weights for replay."""
     names = {"config.json", "generation_config.json", "special_tokens_map.json",
+             "model.safetensors.index.json",
              "tokenizer_config.json", "tokenizer.json", "added_tokens.json",
              "vocab.json", "vocab.txt", "merges.txt", "sentencepiece.bpe.model",
              "tokenizer.model"}
@@ -163,6 +185,20 @@ def _metadata_digest(model_path: Path) -> dict[str, str]:
            for p in matches):
         raise ValueError("local model metadata must be regular non-symlink files")
     return {p.name: _sha_file(p) for p in matches}
+
+
+def _checkpoint_manifest(model_path: Path, weights: list[Path]) -> dict[str, dict[str, str]]:
+    """Digest declared local model bytes before a load or training operation."""
+    return {"weights": _weights_digest(weights), "metadata": _metadata_digest(model_path)}
+
+
+def _assert_checkpoint_unchanged(model_path: Path, weights: list[Path], expected: dict[str, Any]) -> None:
+    """Detect changes across load/train windows (not an atomic filesystem snapshot)."""
+    current_weights = sorted(model_path.glob("*.safetensors"))
+    if (current_weights != weights
+            or any(not p.is_file() or p.is_symlink() for p in current_weights)
+            or _checkpoint_manifest(model_path, weights) != expected):
+        raise RuntimeError("base model checkpoint files changed during load or evaluation")
 
 
 def _prompt_commitment(cases: list[Challenge]) -> str:
@@ -329,6 +365,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     A separate process must run `reload_evaluate` to qualify persistence.
     """
     model_path, output_dir, weights = validate_config(config)
+    initial_manifest = _checkpoint_manifest(model_path, weights)
     train, heldout = training_cases(config)
     corrupted_answers = derange_answers(train)
     torch, auto_model, auto_tokenizer, peft_parts, device = _deps(config.device)
@@ -345,6 +382,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     torch.use_deterministic_algorithms(True)
     base, tokenizer = _load_base(model_path, device, torch=torch,
                                  auto_model=auto_model, auto_tokenizer=auto_tokenizer)
+    _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
     # Validate all token budgets before creating an output directory.
     for case in train:
         _encode_pair(tokenizer, case.prompt, case.answer, config.max_tokens)
@@ -372,7 +410,11 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     # A clean, newly created output directory is used; no existing run changes.
     output_dir.mkdir(mode=0o700, parents=False, exist_ok=False)
     candidate_dir = output_dir / "candidate_adapter"
+    if candidate_dir.is_symlink():
+        raise RuntimeError("candidate adapter root must not be a symlink")
     model.save_pretrained(str(candidate_dir), safe_serialization=True)
+    if candidate_dir.is_symlink():
+        raise RuntimeError("candidate adapter root was replaced by a symlink")
     with torch.no_grad():
         for name, parameter in model.named_parameters():
             if name in initial_state:
@@ -383,6 +425,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     corrupted_digest = _parameter_digest(model, torch)
     corrupted = _score_model(model, tokenizer, torch, heldout, device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
+    _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
     adapter_files = sorted(p for p in candidate_dir.rglob("*") if p.is_file())
     if not any(p.suffix == ".safetensors" for p in adapter_files):
         raise RuntimeError("PEFT did not save a safetensors adapter")
@@ -394,8 +437,8 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
         "source": _source_state(),
         "training_process_id": os.getpid(),
         "config": {**asdict(config), "model_path": str(model_path), "output_dir": str(output_dir)},
-        "base_weights_sha256": _weights_digest(weights),
-        "model_metadata_sha256": _metadata_digest(model_path),
+        "base_weights_sha256": initial_manifest["weights"],
+        "model_metadata_sha256": initial_manifest["metadata"],
         "runtime_versions": {"python": sys.version.split()[0], "torch": package_version("torch"),
                              "transformers": package_version("transformers"),
                              "peft": package_version("peft")},
@@ -452,6 +495,8 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
         raise ValueError("invalid training pilot config")
     config = PilotConfig(**{**source_config, "tiers": tuple(source_config["tiers"])})
     model_path, output_dir, weights = validate_config(config, output_must_be_new=False)
+    expected_manifest = {"weights": report.get("base_weights_sha256"),
+                         "metadata": report.get("model_metadata_sha256")}
     if output_dir.resolve(strict=True) != root:
         raise ValueError("report output path does not match run directory")
     if _weights_digest(weights) != report.get("base_weights_sha256"):
@@ -459,6 +504,8 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     if _metadata_digest(model_path) != report.get("model_metadata_sha256"):
         raise ValueError("local model tokenizer/config changed after training")
     adapter_dir = root / "candidate_adapter"
+    if adapter_dir.is_symlink():
+        raise ValueError("candidate adapter root must not be a symlink")
     adapter_files = sorted(p for p in adapter_dir.rglob("*") if p.is_file())
     if any(p.is_symlink() for p in adapter_files):
         raise ValueError("adapter checkpoint contains a symlink")
@@ -474,6 +521,7 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     _, peft_model, _ = peft_parts
     base, tokenizer = _load_base(model_path, device, torch=torch,
                                  auto_model=auto_model, auto_tokenizer=auto_tokenizer)
+    _assert_checkpoint_unchanged(model_path, weights, expected_manifest)
     model = peft_model.from_pretrained(base, str(adapter_dir), is_trainable=False,
                                       local_files_only=True)
     observed_adapter_digest = _lora_value_digest(model, torch)
@@ -481,6 +529,7 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
         raise ValueError("reloaded LoRA tensor values differ from trained candidate")
     observed = _score_model(model, tokenizer, torch, heldout, device=device,
                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
+    _assert_checkpoint_unchanged(model_path, weights, expected_manifest)
     value = {"schema": EVAL_SCHEMA, "training_report_sha256": _sha_file(source),
              "adapter_sha256": actual_adapters, "process_id": os.getpid(),
              "reloaded_lora_tensor_value_sha256": observed_adapter_digest,

@@ -1,6 +1,8 @@
 """Dependency-free contract tests; these do not claim that a HF model trained."""
 
 import json
+import hashlib
+from dataclasses import asdict
 from pathlib import Path
 import subprocess
 import sys
@@ -10,6 +12,8 @@ from unittest.mock import patch
 
 from labyrinth.hf_pilot import (
     PilotConfig,
+    _metadata_digest,
+    _weights_digest,
     _device_headroom,
     _encode_pair,
     _lora_value_digest,
@@ -108,6 +112,46 @@ class HfPilotContractTests(unittest.TestCase):
                 run_pilot(self.spec())
         self.assertFalse(self.output.exists())
 
+    def test_pilot_rejects_base_weight_replacement_during_initial_model_load(self):
+        class FakeTorch:
+            @staticmethod
+            def set_num_threads(value):
+                pass
+
+            @staticmethod
+            def get_num_threads():
+                return 1
+
+            @staticmethod
+            def manual_seed(value):
+                pass
+
+            @staticmethod
+            def use_deterministic_algorithms(value):
+                pass
+
+        for change in ("replace-existing", "add-new-shard"):
+            with self.subTest(change=change):
+                (self.model / "model.safetensors").write_bytes(b"small-fixture-not-real-weights")
+                extra = self.model / "extra.safetensors"
+                if extra.exists():
+                    extra.unlink()
+
+                def swapped_load(*args, **kwargs):
+                    if change == "replace-existing":
+                        (self.model / "model.safetensors").write_bytes(b"tampered-after-initial-snapshot")
+                    else:
+                        extra.write_bytes(b"new-unpinned-weight")
+                    return object(), object()
+
+                with patch("labyrinth.hf_pilot._deps", return_value=(FakeTorch, None, None, (None, None, None), "cpu")):
+                    with patch("labyrinth.hf_pilot._load_base", side_effect=swapped_load):
+                        with patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])):
+                            with patch("labyrinth.hf_pilot._score_model", side_effect=AssertionError("model inference should not run")):
+                                with self.assertRaisesRegex(RuntimeError, "base model.*changed"):
+                                    run_pilot(self.spec())
+                self.assertFalse(self.output.exists())
+
     def test_tokenizer_metadata_symlink_rejected(self):
         external = Path(self.temp.name) / "other"
         external.write_text("read me?", encoding="utf-8")
@@ -117,6 +161,92 @@ class HfPilotContractTests(unittest.TestCase):
             self.skipTest("symlinks unavailable")
         with self.assertRaisesRegex(ValueError, "non-symlink"):
             validate_config(self.spec())
+
+    def test_sharded_weight_index_rejects_parent_traversal_before_heavy_import(self):
+        (self.model / "model.safetensors.index.json").write_text(json.dumps({
+            "metadata": {"total_size": 123},
+            "weight_map": {"model.layer": "../outside.safetensors"},
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "index"):
+            validate_config(self.spec())
+
+    def test_valid_local_sharded_index_is_included_in_model_metadata_hash(self):
+        index = self.model / "model.safetensors.index.json"
+        index.write_text(json.dumps({
+            "metadata": {"total_size": 123},
+            "weight_map": {"model.layer": "model.safetensors"},
+        }), encoding="utf-8")
+        validate_config(self.spec())
+        before = _metadata_digest(self.model)
+        self.assertIn(index.name, before)
+        index.write_text(json.dumps({
+            "metadata": {"total_size": 124},
+            "weight_map": {"model.layer": "model.safetensors"},
+        }), encoding="utf-8")
+        self.assertNotEqual(before[index.name], _metadata_digest(self.model)[index.name])
+
+    def test_reload_refuses_symlink_adapter_root_before_loading_model(self):
+        external = Path(self.temp.name) / "outside_adapter"
+        external.mkdir()
+        (external / "adapter_model.safetensors").write_bytes(b"fake-adapter")
+        self.output.mkdir()
+        try:
+            (self.output / "candidate_adapter").symlink_to(external, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        from labyrinth.hf_pilot import _prompt_commitment, training_cases
+        from labyrinth.runner import _source_state
+
+        config = self.spec()
+        _, heldout = training_cases(config)
+        report = {
+            "schema": "labyrinth.hf-lora-pilot.v2",
+            "source": _source_state(),
+            "config": {**asdict(config), "tiers": list(config.tiers)},
+            "base_weights_sha256": _weights_digest([self.model / "model.safetensors"]),
+            "model_metadata_sha256": _metadata_digest(self.model),
+            "candidate_adapter_sha256": {
+                "adapter_model.safetensors": hashlib.sha256(b"fake-adapter").hexdigest()
+            },
+            "heldout_case_ids": [case.id for case in heldout],
+            "heldout_public_prompt_sha256": _prompt_commitment(heldout),
+        }
+        (self.output / "pilot_report.json").write_text(json.dumps(report), encoding="utf-8")
+        with patch("labyrinth.hf_pilot._deps", side_effect=AssertionError("loaded heavy dependencies")):
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                reload_evaluate(self.output, self.output / "verify.json")
+
+    def test_reload_detects_base_weight_changes_while_loading(self):
+        from labyrinth.hf_pilot import _prompt_commitment, training_cases
+        from labyrinth.runner import _source_state
+
+        self.output.mkdir()
+        candidate = self.output / "candidate_adapter"
+        candidate.mkdir()
+        (candidate / "adapter_model.safetensors").write_bytes(b"fixture-adapter")
+        config = self.spec()
+        _, heldout = training_cases(config)
+        (self.output / "pilot_report.json").write_text(json.dumps({
+            "schema": "labyrinth.hf-lora-pilot.v2",
+            "source": _source_state(),
+            "config": {**asdict(config), "tiers": list(config.tiers)},
+            "base_weights_sha256": _weights_digest([self.model / "model.safetensors"]),
+            "model_metadata_sha256": _metadata_digest(self.model),
+            "candidate_adapter_sha256": {
+                "adapter_model.safetensors": hashlib.sha256(b"fixture-adapter").hexdigest()},
+            "heldout_case_ids": [c.id for c in heldout],
+            "heldout_public_prompt_sha256": _prompt_commitment(heldout),
+        }), encoding="utf-8")
+
+        def swapped_load(*args, **kwargs):
+            (self.model / "model.safetensors").write_bytes(b"swapped-during-reloader")
+            return object(), object()
+
+        with patch("labyrinth.hf_pilot._deps", return_value=(None, None, None, (None, None, None), "cpu")):
+            with patch("labyrinth.hf_pilot._load_base", side_effect=swapped_load):
+                with self.assertRaisesRegex(RuntimeError, "base model.*changed"):
+                    reload_evaluate(self.output, self.output / "verify.json")
+        self.assertFalse((self.output / "verify.json").exists())
 
     def test_unknown_report_fails_before_dependency_loading(self):
         self.output.mkdir()
