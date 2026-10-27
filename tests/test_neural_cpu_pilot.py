@@ -48,6 +48,47 @@ class NeuralCpuPilotTests(unittest.TestCase):
                 self.write(bad)
                 read_training(self.path)
 
+    def test_generator_attestation_rejects_relabelled_holdout(self):
+        from labyrinth.neural_cpu_pilot import attest_generated_train_only
+
+        seed = 1807
+        generated = generate_program_challenges(seed, 4, "train")
+        valid = [
+            {"case_id": c.id, "split": c.split, "prompt": c.prompt,
+             "answer": c.answer}
+            for c in generated
+        ]
+        attest_generated_train_only(valid, generator_seed=seed)
+        # Self-reported split used to be the only barrier. Changing it is
+        # insufficient evidence that this is a train-generator example.
+        holdout = generate_program_challenges(seed, 1, "dev")[0]
+        forged = {"case_id": holdout.id, "split": "train",
+                  "prompt": holdout.prompt, "answer": holdout.answer}
+        with self.assertRaisesRegex(ValueError, "generator"):
+            attest_generated_train_only([forged], generator_seed=seed)
+        with self.assertRaisesRegex(ValueError, "generator"):
+            attest_generated_train_only([{**valid[0], "answer": "0"}], generator_seed=seed)
+        with self.assertRaisesRegex(ValueError, "generator"):
+            attest_generated_train_only(valid, generator_seed=seed + 1)
+        with self.assertRaisesRegex(ValueError, "generator"):
+            attest_generated_train_only(valid[::-1], generator_seed=seed)
+
+    def test_existing_train_only_128_case_corpus_attests(self):
+        from labyrinth.neural_cpu_pilot import attest_generated_train_only
+
+        repo = Path(__file__).resolve().parents[1]
+        for name, seed, count in (
+            ("train_cpu_pilot_seed1701.json", 1701, 12),
+            ("train_cpu_pilot_seed1702_32.json", 1702, 32),
+            ("train_cpu_pilot_seed1807_128.json", 1807, 128),
+        ):
+            with self.subTest(fixture=name):
+                fixture = repo / "experiments" / "data" / name
+                self.assertEqual(
+                    len(attest_generated_train_only(
+                        read_training(fixture), generator_seed=seed)), count,
+                )
+
     def test_trace_target_and_corrupted_labels_are_distinct(self):
         ch = generate_program_challenges(1702, 1, "train")[0]
         sample = {"case_id": ch.id, "split": ch.split,
@@ -105,6 +146,14 @@ class NeuralCpuPilotTests(unittest.TestCase):
         second = subprocess.run(args, cwd=self.tmp.name, capture_output=True, text=True)
         self.assertNotEqual(second.returncode, 0)
         self.assertEqual(output.read_bytes(), original)
+
+    def test_train_cli_requires_generator_seed_before_any_neural_load(self):
+        cmd = [sys.executable, "-m", "labyrinth.neural_cpu_pilot", "train",
+               "--base", "missing", "--train-data", "missing", "--output", "missing",
+               "--arm", "trained"]
+        run = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("--train-generator-seed", run.stderr)
 
 
 if __name__ == "__main__":
