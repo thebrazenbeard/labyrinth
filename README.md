@@ -4,6 +4,27 @@ Labyrinth is an offline-first **reasoning challenge, training-lifecycle, and eva
 
 It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path. A bounded CPU smoke run on Lappy demonstrated numerical adapter changes and fresh-process reload with a tiny, **randomly initialized** HF model; it did **not** demonstrate improved reasoning.
 
+## New from-scratch Minotaur neural checkpoint (experimental)
+
+Unlike the existing pretrained LoRA studies, \`labyrinth.minotaur_scratch\`
+constructs **new random neural weights** for a 114,887-parameter Transformer
+first-error verifier. CPU training actually updated **all** of those weights;
+the distinct, versioned 451.5 KiB Safetensors checkpoint lives at
+[\`models/minotaur_scratch_v1\`](models/minotaur_scratch_v1) with a JSON
+training report and independent fresh-process reload.
+
+**Important:** this is an original narrow *neural process verifier*, not a
+large language model pretrained from scratch, not a GGUF, and not an effective
+Labyrinth gatekeeper. Development accuracy was **43/96** and transfer **20/48**;
+false approvals were **39/48** and **22/24** respectively. No graduation,
+deployment, or semantic-generalization claim follows.
+
+Details, hashes, source binding and CLI reload instructions:
+[\`docs/MINOTAUR_SCRATCH_NEURAL_V1_2026-10-27.md\`](docs/MINOTAUR_SCRATCH_NEURAL_V1_2026-10-27.md).
+Core Labyrinth still runs without PyTorch; scratch training and reload require
+optional local CPU PyTorch and \`safetensors\` installed. The checkpoint in
+this draft is **experimental evidence**, not a production model download.
+
 ## Run it
 
 Requires Python 3.10+; core functionality uses the standard library.

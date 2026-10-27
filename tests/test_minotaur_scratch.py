@@ -1,5 +1,6 @@
 """Scratch-initialized Minotaur is a neural process verifier, not an adapter."""
 import json
+import hashlib
 from pathlib import Path
 import shutil
 import tempfile
@@ -25,6 +26,21 @@ class ScratchDataTests(unittest.TestCase):
                 self.assertTrue(all(0 <= t < 256 for t in c["tokens"]))
         self.assertTrue(all(c["slice"] == "longer_program" for c in transfer))
         self.assertEqual(train, encoded_process_cases(123, 3, ("fresh_numbers", "new_composition")))
+
+    def test_versioned_scratch_checkpoint_has_no_pretrained_lineage(self):
+        package = Path(__file__).resolve().parents[1] / "models" / "minotaur_scratch_v1"
+        weights = package / "minotaur.safetensors"
+        report = json.loads((package / "report.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["schema"], "labyrinth.minotaur.scratch-process-verifier.v1")
+        self.assertEqual(report["lineage"]["initialization"], "random_from_seed")
+        self.assertIsNone(report["lineage"]["pretrained_checkpoint"])
+        self.assertIsNone(report["lineage"]["adapter"])
+        self.assertNotEqual(report["initial_weight_sha256"],
+                            report["trained_weight_sha256"])
+        self.assertEqual(hashlib.sha256(weights.read_bytes()).hexdigest(),
+                         report["safetensors_sha256"])
+        self.assertEqual(report["qualification"], "NOT_ESTABLISHED")
+        self.assertEqual(report["graduation_authority"], "none")
 
     def test_invalid_input_does_not_silently_truncate(self):
         data = encoded_process_cases(123, 1, ("fresh_numbers",))

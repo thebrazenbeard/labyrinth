@@ -1,0 +1,86 @@
+{
+  "config": {
+    "heads": 4,
+    "layers": 2,
+    "max_steps": 6,
+    "max_tokens": 96,
+    "seed": 411,
+    "width": 64
+  },
+  "dev_cases": 96,
+  "epochs": 8,
+  "eval_prediction_sha256": {
+    "dev": "37f4a5010d96907c2a03dbcf29e4c849193d9f76e04854c0884193991aa7fc5e",
+    "transfer": "36143fde7dfdd6fd712663ae255eb3a82bca3939ae291356b5af4dcd1e85d6f5"
+  },
+  "evaluations": {
+    "frozen_initial": {
+      "dev": {
+        "accuracy": 0.0,
+        "correct_case_count": 48,
+        "false_approval_rate": 0.0,
+        "false_rejection_rate": 1.0,
+        "first_error_accuracy": 0.0,
+        "prediction_sha256": "41d73e02cd5558d5f3fd73879481c636ec3b98028c86601efbd16e293ae7dcfd",
+        "qualification": "NOT_ESTABLISHED",
+        "total": 96,
+        "wrong_case_count": 48
+      },
+      "transfer": {
+        "accuracy": 0.041666666666666664,
+        "correct_case_count": 24,
+        "false_approval_rate": 0.0,
+        "false_rejection_rate": 1.0,
+        "first_error_accuracy": 0.08333333333333333,
+        "prediction_sha256": "16f35d5a72dc0c8381e6c8703f632bb7e00409659884231760023999d98745a9",
+        "qualification": "NOT_ESTABLISHED",
+        "total": 48,
+        "wrong_case_count": 24
+      }
+    },
+    "trained": {
+      "dev": {
+        "accuracy": 0.4479166666666667,
+        "correct_case_count": 48,
+        "false_approval_rate": 0.8125,
+        "false_rejection_rate": 0.1875,
+        "first_error_accuracy": 0.08333333333333333,
+        "prediction_sha256": "37f4a5010d96907c2a03dbcf29e4c849193d9f76e04854c0884193991aa7fc5e",
+        "qualification": "NOT_ESTABLISHED",
+        "total": 96,
+        "wrong_case_count": 48
+      },
+      "transfer": {
+        "accuracy": 0.4166666666666667,
+        "correct_case_count": 24,
+        "false_approval_rate": 0.9166666666666666,
+        "false_rejection_rate": 0.25,
+        "first_error_accuracy": 0.08333333333333333,
+        "prediction_sha256": "36143fde7dfdd6fd712663ae255eb3a82bca3939ae291356b5af4dcd1e85d6f5",
+        "qualification": "NOT_ESTABLISHED",
+        "total": 48,
+        "wrong_case_count": 24
+      }
+    }
+  },
+  "graduation_authority": "none",
+  "initial_weight_sha256": "4a2876b85dc02e01f5781235077e607773f1d16ad033680ee40e0b6042708154",
+  "limitations": [
+    "Randomly initialized small process-verifier, not an LLM or pretrained foundation model.",
+    "Trained on public finite synthetic structures; not an independent private exam.",
+    "Advisory predictions have no authority to graduate Labyrinth trainees."
+  ],
+  "lineage": {
+    "adapter": null,
+    "initialization": "random_from_seed",
+    "pretrained_checkpoint": null,
+    "training_data": "public_synthetic_register_traces"
+  },
+  "optimizer_steps": 96,
+  "qualification": "NOT_ESTABLISHED",
+  "safetensors_sha256": "ce2d1a8a7e91f32f58ad01de2304ca6241e2f3f4c2a0227447764503d7fd77ec",
+  "schema": "labyrinth.minotaur.scratch-process-verifier.v1",
+  "train_cases": 384,
+  "trained_weight_sha256": "fa43682e6d19e2a2d2b2e32e4b88d2c901961ce7a1f5aac7a43dd8b2bccdd088",
+  "transfer_cases": 48
+}
