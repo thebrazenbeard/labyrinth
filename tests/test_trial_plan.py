@@ -68,11 +68,19 @@ class TrialPlanTests(unittest.TestCase):
     def test_independent_case_identifiers_never_leave_public_manifest(self) -> None:
         manifest = self.make_plan().to_dict()
         self.assertEqual(manifest["independent_case_count"], 24)
-        self.assertEqual(len(manifest["independent_ids_commitment_sha256"]), 64)
+        self.assertNotIn("independent_ids_commitment_sha256", manifest)
         public_serialized = repr(manifest)
         for identifier in self.independent:
             self.assertNotIn(identifier, public_serialized)
         self.assertNotIn("independent_case_ids", manifest)
+
+    def test_public_plan_cannot_be_used_as_dictionary_oracle_for_final_ids(self) -> None:
+        original = self.make_plan(independent_case_ids=["F07"]).to_dict()
+        replacement = self.make_plan(independent_case_ids=["F08"]).to_dict()
+        # Final-set membership changes must not affect anything published by
+        # this training-schedule module. The evaluator owns separate custody.
+        self.assertEqual(original, replacement)
+        self.assertNotIn("independent_ids_commitment_sha256", repr(self.make_plan()))
 
     def test_reject_split_collisions_and_duplicates(self) -> None:
         with self.assertRaisesRegex(ValueError, "across splits"):
@@ -98,8 +106,8 @@ class TrialPlanTests(unittest.TestCase):
         alternate = self.make_plan(seed=1808).to_dict()
         self.assertNotEqual(original["scheduled_case_ids"], alternate["scheduled_case_ids"])
         self.assertEqual(
-            original["independent_ids_commitment_sha256"],
-            alternate["independent_ids_commitment_sha256"],
+            original["development_ids_commitment_sha256"],
+            alternate["development_ids_commitment_sha256"],
         )
 
     def test_real_register_program_generator_produces_disjoint_exposures(self) -> None:

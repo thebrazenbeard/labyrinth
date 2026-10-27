@@ -4,7 +4,9 @@ The plan has *no* answer keys, inference results, optimizer, or model runtime.
 It prevents declared development/final case IDs from entering the generated
 training schedule, but cannot authenticate the caller's split assignments,
 prove structural disjointness or verify independent evaluator custody.
-Public deterministic IDs and hash commitments are not a secrecy boundary.
+Public deterministic IDs and catalog hashes are not a secrecy boundary.
+No independent/final-set membership commitment is released by this planner;
+final-set attestation belongs to an external evaluator with private custody.
 """
 
 from __future__ import annotations
@@ -59,7 +61,6 @@ class TrialPlan:
     independent_case_count: int
     train_ids_commitment_sha256: str
     development_ids_commitment_sha256: str
-    independent_ids_commitment_sha256: str
     scheduled_case_ids: tuple[str, ...]
 
     def to_dict(self) -> dict:
@@ -74,7 +75,6 @@ class TrialPlan:
             "independent_case_count": self.independent_case_count,
             "train_ids_commitment_sha256": self.train_ids_commitment_sha256,
             "development_ids_commitment_sha256": self.development_ids_commitment_sha256,
-            "independent_ids_commitment_sha256": self.independent_ids_commitment_sha256,
             "scheduled_training_visits": self.steps,
             "unique_cases_scheduled": len(set(scheduled)),
             "scheduled_case_ids": scheduled,
@@ -100,8 +100,10 @@ def build_trial_plan(
     Inputs are identifiers only: no gold labels or response payloads are read.
     A future trainer must separately attest *completed* updates, token budgets,
     checkpoint custody and fresh-process inference for each matched arm.
-    Independent IDs are reduced to a commitment, never emitted in the plan.
-    This receipt is not pre-registration or proof of sealed final-set custody.
+    Independent IDs are checked only for collisions and counts. Their public
+    commitment would enable dictionary guessing of predictable hidden IDs.
+    This receipt is not pre-registration or proof of sealed final-set custody;
+    any private evaluator commitment must be maintained outside this module.
     """
     if type(steps) is not int or not 1 <= steps <= _MAX_STEPS:
         raise ValueError(f"steps must be an integer from 1 to {_MAX_STEPS}")
@@ -128,6 +130,5 @@ def build_trial_plan(
         independent_case_count=len(independent),
         train_ids_commitment_sha256=_digest_ids("train", train),
         development_ids_commitment_sha256=_digest_ids("development", development),
-        independent_ids_commitment_sha256=_digest_ids("independent", independent),
         scheduled_case_ids=tuple(visits),
     )
