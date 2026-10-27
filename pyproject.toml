@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "labyrinth-reasoning"
+version = "0.2.0"
+description = "Reproducible, model-agnostic reasoning mazes and evaluation controls"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+labyrinth = "labyrinth.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["labyrinth*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
