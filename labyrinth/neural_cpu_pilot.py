@@ -60,6 +60,30 @@ def read_training(path: Path) -> list[dict[str, str]]:
     return records
 
 
+def attest_generated_train_only(records: list[dict[str, str]], *,
+                                generator_seed: int) -> list[dict[str, str]]:
+    """Authenticate ordered SFT inputs against the source-bound train generator.
+
+    The ``split`` field alone is user-controlled: a held-out record can be
+    relabelled.  Reconstruct every expected record from the *train* generator,
+    then compare all fields before a model or optimizer is loaded.  Do not
+    silently downgrade to split-field-only checking if source is unavailable.
+    """
+    if type(generator_seed) is not int or not isinstance(records, list) or not 1 <= len(records) <= 256:
+        raise ValueError("invalid train generator attestation arguments")
+    try:
+        from labyrinth.program_maze import generate_program_challenges
+    except ImportError as exc:
+        raise ValueError("train generator source unavailable for attestation") from exc
+    expected = generate_program_challenges(generator_seed, len(records), "train")
+    for index, (record, challenge) in enumerate(zip(records, expected)):
+        required = {"case_id": challenge.id, "split": "train",
+                    "prompt": challenge.prompt, "answer": challenge.answer}
+        if record != required:
+            raise ValueError(f"training record {index} does not match train generator")
+    return records
+
+
 def supervised_target(item: dict[str, str], *, policy: str, arm: str,
                       step: int) -> str:
     """Derive train-only supervised suffix, never an evaluator oracle.
@@ -121,7 +145,8 @@ def train(args) -> None:
         raise ValueError("a local safetensors pretrained-model directory is required")
     if output.exists():
         raise FileExistsError("pilot refuses to overwrite an existing run")
-    examples = read_training(data)
+    examples = attest_generated_train_only(
+        read_training(data), generator_seed=args.train_generator_seed)
     torch.set_num_threads(args.threads)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -193,6 +218,7 @@ def train(args) -> None:
         "gradient_steps": 0 if args.arm == "sham" else args.steps,
         "case_visits": args.steps, "unique_training_cases": len(examples),
         "training_data_sha256": file_digest(data),
+        "train_generator": "labyrinth-program-v1", "train_generator_seed": args.train_generator_seed,
         "base_model_sha256": file_digest(base / "model.safetensors"),
         "base_tokenizer_sha256": file_digest(base / "tokenizer.json"),
         "model_parameters": parameter_count, "trainable_parameters": trainable_count,
@@ -232,6 +258,8 @@ def main(argv=None) -> int:
     ptrain = sub.add_parser("train")
     ptrain.add_argument("--base", required=True)
     ptrain.add_argument("--train-data", required=True)
+    ptrain.add_argument("--train-generator-seed", required=True, type=int,
+                        help="Source-bound train-generator seed; checked before neural loading")
     ptrain.add_argument("--output", required=True)
     ptrain.add_argument("--arm", choices=("trained", "sham", "corrupted"), required=True)
     ptrain.add_argument("--target-policy", choices=("answer", "trace"), default="answer")

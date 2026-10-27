@@ -41,6 +41,58 @@ def read_public_cases(path: Path) -> list[dict[str, str]]:
     return cases
 
 
+def render_public_prompt(tokenizer, prompt: str, *, mode: str) -> str:
+    """Render one answer-blind user prompt without implicit demonstrations.
+
+    ``raw`` exactly preserves the earlier pilot's text-plus-newline input.
+    ``chat`` applies the checkpoint tokenizer's *own* instruction wrapper,
+    which can matter for an Instruct-pretrained model. Encoding the returned
+    string with ``add_special_tokens=False`` prevents duplicate BOS tokens.
+    """
+    if not isinstance(prompt, str) or not 1 <= len(prompt) <= 4096:
+        raise ValueError("invalid public inference prompt")
+    if mode == "raw":
+        return prompt + "\n"
+    if mode != "chat":
+        raise ValueError("unknown prompt rendering mode")
+    if not getattr(tokenizer, "chat_template", None):
+        raise ValueError("chat inference requires a tokenizer chat template")
+    rendered = tokenizer.apply_chat_template(
+        [{"role": "user", "content": prompt}],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    if not isinstance(rendered, str) or not 1 <= len(rendered) <= 16_384:
+        raise ValueError("invalid rendered chat prompt")
+    return rendered
+
+
+def generation_configuration(tokenizer, *, max_new_tokens: int, mode: str) -> dict:
+    """Public, hashable decoding/rendering commitment for paired comparisons."""
+    if type(max_new_tokens) is not int or not 1 <= max_new_tokens <= 128:
+        raise ValueError("invalid max-new-token budget")
+    if mode not in ("raw", "chat"):
+        raise ValueError("unknown prompt rendering mode")
+    config = {
+        "max_new_tokens": max_new_tokens,
+        "do_sample": False,
+        "no_demonstrations": True,
+        "prompt_mode": mode,
+    }
+    if mode == "raw":
+        config["prompt_suffix"] = "\\n"
+    else:
+        template = getattr(tokenizer, "chat_template", None)
+        if not template:
+            raise ValueError("chat inference requires a tokenizer chat template")
+        serialized = json.dumps(template, sort_keys=True, ensure_ascii=False,
+                                separators=(",", ":"), allow_nan=False).encode("utf-8")
+        config["chat_template_sha256"] = hashlib.sha256(serialized).hexdigest()
+        config["chat_role"] = "user"
+        config["add_generation_prompt"] = True
+    return config
+
+
 def infer(args) -> None:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -58,6 +110,8 @@ def infer(args) -> None:
     torch.manual_seed(args.seed)
     tok = AutoTokenizer.from_pretrained(str(checkpoint), local_files_only=True,
                                         trust_remote_code=False)
+    config = generation_configuration(tok, max_new_tokens=args.max_new_tokens,
+                                      mode=args.prompt_mode)
     model = AutoModelForCausalLM.from_pretrained(str(checkpoint), local_files_only=True,
                                                 trust_remote_code=False,
                                                 use_safetensors=True)
@@ -66,7 +120,8 @@ def infer(args) -> None:
     started = time.monotonic()
     with torch.inference_mode():
         for i, case in enumerate(cases):
-            encoded = tok(case["prompt"] + "\n", return_tensors="pt",
+            rendered = render_public_prompt(tok, case["prompt"], mode=args.prompt_mode)
+            encoded = tok(rendered, return_tensors="pt",
                           add_special_tokens=False)
             if encoded.input_ids.shape[-1] > 256:
                 raise ValueError("inference prompt exceeds token bound")
@@ -82,17 +137,19 @@ def infer(args) -> None:
             records.append({
                 "case_id": case["case_id"],
                 "prompt_sha256": case["prompt_sha256"],
+                "rendered_prompt_sha256": hashlib.sha256(rendered.encode("utf-8")).hexdigest(),
                 "generation_seed": args.seed + i,
                 "response": completion,
             })
     result = {
         "schema": "labyrinth.neural-public-arm.v1",
         "arm": args.arm,
+        "prompt_mode": args.prompt_mode,
         "checkpoint_sha256": file_digest(checkpoint / "model.safetensors"),
+        "tokenizer_sha256": file_digest(checkpoint / "tokenizer.json"),
         "parameter_sha256": layer_digest(model.model.layers[-1]),
         "generation_config_sha256": hashlib.sha256(
-            json.dumps({"max_new_tokens": args.max_new_tokens, "do_sample": False,
-                        "prompt_suffix": "\\n", "no_demonstrations": True},
+            json.dumps(config,
                        sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest(),
         "trial_count": len(records),
@@ -113,6 +170,8 @@ def main(argv=None) -> int:
     parser.add_argument("--output", required=True)
     parser.add_argument("--arm", choices=("baseline", "trained", "sham", "corrupted"), required=True)
     parser.add_argument("--max-new-tokens", type=int, default=12)
+    parser.add_argument("--prompt-mode", choices=("raw", "chat"), default="raw",
+                        help="Use raw legacy prompt or checkpoint tokenizer chat template")
     parser.add_argument("--seed", type=int, default=8192)
     parser.add_argument("--threads", type=int, default=4)
     infer(parser.parse_args(argv))
