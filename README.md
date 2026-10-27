@@ -18,7 +18,7 @@ python -m labyrinth toy-eval --seed 0 --eval-count 64 --checkpoint toy-checkpoin
 python -m unittest discover -s tests -v
 ```
 
-`--count`, `--train-count`, and `--eval-count` mean tasks **per tier**. Reports are JSON; existing paths are never overwritten. Without a specified model, `replay:constant-zero` is a deterministic negative-control fixture that outputs `ANSWER: 0` for every question. It does not solve problems or learn. To get nontrivial scores offline, pass `--replay-file mapping.json`, where the JSON object maps exact public prompt text to fixed answer strings. Missing fixture keys fail closed.
+`--count`, `--train-count`, and `--eval-count` mean tasks **per tier**. Reports are JSON; existing paths are never overwritten. CLI-supplied replay JSON and saved demonstration artifacts are limited to **8 MiB per input file** before parsing, including files that change during the read. Without a specified model, `replay:constant-zero` is a deterministic negative-control fixture that outputs `ANSWER: 0` for every question. It does not solve problems or learn. To get nontrivial scores offline, pass `--replay-file mapping.json`, where the JSON object maps exact public prompt text to fixed answer strings. Missing fixture keys fail closed.
 
 For a local user-operated Ollama installation:
 
@@ -82,7 +82,7 @@ See the [research landscape and staged local-training gate](docs/REASONING_TRAIN
 python -m unittest discover -s tests -v
 ```
 
-Tests cover seeded determinism, independent register-program interpretation, exact scoring, injection resistance, adapter boundaries, curriculum replay, artifact tampering, valid shuffled controls, separate control-arm adapter instances, bounded untrusted output, toy parameter updates, fresh-process artifact reload, and optional HF pilot preflight, train/eval split separation, label derangement and prompt-loss masking. The new HF tests exercise the **contract**, not an actual backward pass.
+Tests cover seeded determinism, independent register-program interpretation, exact scoring, injection resistance, adapter boundaries, curriculum replay, artifact tampering, bounded input JSON and untrusted output, valid shuffled controls, separate control-arm adapter instances, toy parameter updates, fresh-process artifact reload, and optional HF pilot preflight, train/eval split separation, label derangement and prompt-loss masking. The HF unit tests exercise the **contract**, not an actual backward pass.
 
 Important limitations:
 

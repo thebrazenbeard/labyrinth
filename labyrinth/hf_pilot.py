@@ -26,7 +26,7 @@ from typing import Any
 
 from .evaluation import score_response
 from .maze import Challenge, generate_maze
-from .runner import _source_state
+from .runner import _source_state, load_json
 
 
 SCHEMA = "labyrinth.hf-lora-pilot.v2"
@@ -441,7 +441,7 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     """
     root = Path(run_dir).expanduser().resolve(strict=True)
     source = root / "pilot_report.json"
-    report = json.loads(source.read_text(encoding="utf-8"))
+    report = load_json(source)
     if report.get("schema") != SCHEMA:
         raise ValueError("unknown training pilot report schema")
     source_state = report.get("source")

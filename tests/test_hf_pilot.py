@@ -124,6 +124,14 @@ class HfPilotContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "schema"):
             reload_evaluate(self.output, self.output / "verify.json")
 
+    def test_oversized_report_fails_before_dependency_loading(self):
+        self.output.mkdir()
+        (self.output / "pilot_report.json").write_text('{"padding":"' + "x" * 128 + '"}', encoding="utf-8")
+        with patch("labyrinth.runner._MAX_JSON_BYTES", 64):
+            with patch("labyrinth.hf_pilot._deps", side_effect=AssertionError("loaded heavy dependencies")):
+                with self.assertRaisesRegex(ValueError, "JSON input exceeds"):
+                    reload_evaluate(self.output, self.output / "verify.json")
+
     def test_module_help_does_not_import_optional_packages(self):
         result = subprocess.run([sys.executable, "-m", "labyrinth.hf_pilot", "--help"],
                                 text=True, capture_output=True, check=True)

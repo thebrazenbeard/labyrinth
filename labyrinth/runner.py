@@ -23,6 +23,9 @@ from .maze import Challenge, generate_maze
 REPORT_SCHEMA = "labyrinth.report.v1"
 ARTIFACT_SCHEMA = "labyrinth.demonstrations.v1"
 _MAX_DEMONSTRATIONS = 64
+# Bound CLI-supplied replay mappings and training artifacts before JSON parsing.
+# An 8 MiB input is ample for the maximum 64 bounded demonstrations/trajectories.
+_MAX_JSON_BYTES = 8 * 1024 * 1024
 
 
 class Model(Protocol):
@@ -337,14 +340,14 @@ def run_experiment(
             "baseline": "No examples supplied",
             "candidate": "In-context examples from disjoint training split",
             "placebo": "Text-length-matched neutral passage (not token matched)",
-            "shuffled": "Training questions with cyclically shifted answers",
+            "shuffled": "Training questions with label-multiset-preserving, complete answer derangement",
         },
         "arms": arms,
         "limitations": [
             "In-context conditioning is not parameter training or proof of persistent learning.",
             "Model identity and seed support vary by adapter/runtime; no inference determinism is assumed.",
             "Fresh adapters isolate Python object state but not necessarily external inference server state.",
-            "Shuffled answers can collide when two training answers have the same value.",
+            "Shuffled control fails closed when the answer-label distribution cannot be completely deranged.",
         ],
     }
 
@@ -356,5 +359,13 @@ def save_json_new(path: str | Path, value: Any) -> None:
 
 
 def load_json(path: str | Path) -> Any:
-    with Path(path).open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    # Read at most max+1 bytes even if a local file grows between stat/open;
+    # never hand unbounded input to a JSON decoder.
+    with Path(path).open("rb") as handle:
+        raw = handle.read(_MAX_JSON_BYTES + 1)
+    if len(raw) > _MAX_JSON_BYTES:
+        raise ValueError(f"JSON input exceeds {_MAX_JSON_BYTES} bytes")
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except RecursionError as exc:
+        raise ValueError("JSON input nesting exceeds parser limit") from exc
