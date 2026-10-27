@@ -106,6 +106,16 @@ class ReasoningGymBridgeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "reasoning-gym"):
                 benchmark_reasoning_gym(RecordingAdapter(), "leg_counting", size=2, seed=37)
 
+    def test_reports_distribution_version_not_module_claim(self):
+        from labyrinth.reasoning_gym_bridge import benchmark_reasoning_gym
+
+        self.fake_module.__version__ = "0.1.19"  # Upstream 0.1.25 wheel exposes stale module label.
+        with patch("importlib.metadata.version", return_value="0.1.25") as dist_version:
+            with patch("labyrinth.reasoning_gym_bridge.importlib.import_module", return_value=self.fake_module):
+                report = benchmark_reasoning_gym(RecordingAdapter(), "leg_counting", size=2, seed=37)
+        self.assertEqual(report["reasoning_gym_distribution_version"], "0.1.25")
+        dist_version.assert_called_once_with("reasoning-gym")
+
     def test_cli_runs_optional_benchmark_with_standard_negative_control(self):
         import json
         from labyrinth.cli import main

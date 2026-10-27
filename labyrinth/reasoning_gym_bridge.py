@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+from importlib import metadata
 import math
 import re
 from typing import Any
@@ -56,6 +57,15 @@ def benchmark_reasoning_gym(
     except ModuleNotFoundError as exc:
         raise RuntimeError("optional reasoning-gym package is not installed") from exc
 
+    # The installed 0.1.25 distribution has exposed a stale 0.1.19 module
+    # __version__. Use distribution metadata rather than that module label.
+    # Absence of metadata is explicit, not silently converted to a made-up
+    # version or taken as proof that the imported module is trustworthy.
+    try:
+        distribution_version: str | None = metadata.version("reasoning-gym")
+    except metadata.PackageNotFoundError:
+        distribution_version = None
+
     # Exact upstream scorer semantics are delegated to this dataset object.
     # Do not synthesize a supposedly equivalent oracle in Labyrinth.
     dataset = reasoning_gym.create_dataset(dataset_name, size=size, seed=seed)
@@ -90,6 +100,7 @@ def benchmark_reasoning_gym(
         "status": "development_only",
         "evidence_limit": "self-reported model identity; no sealed evaluator custody or training evidence",
         "dataset_name": dataset_name,
+        "reasoning_gym_distribution_version": distribution_version,
         "generator_seed": seed,
         "case_count": size,
         "model_id": model_id,
