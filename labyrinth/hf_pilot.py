@@ -201,6 +201,29 @@ def _assert_checkpoint_unchanged(model_path: Path, weights: list[Path], expected
         raise RuntimeError("base model checkpoint files changed during load or evaluation")
 
 
+def _adapter_manifest(adapter_dir: Path) -> dict[str, str]:
+    """Pin all local adapter file bytes, including PEFT metadata and scaling."""
+    if not adapter_dir.is_dir() or adapter_dir.is_symlink():
+        raise RuntimeError("adapter checkpoint root must be a non-symlink directory")
+    entries = sorted(adapter_dir.rglob("*"))
+    if any(path.is_symlink() or not (path.is_file() or path.is_dir()) for path in entries):
+        raise RuntimeError("adapter checkpoint contains a symlink or nonregular entry")
+    files = [path for path in entries if path.is_file()]
+    if not any(path.suffix == ".safetensors" for path in files):
+        raise RuntimeError("PEFT adapter safetensors checkpoint is missing")
+    return {path.relative_to(adapter_dir).as_posix(): _sha_file(path) for path in files}
+
+
+def _assert_adapter_unchanged(adapter_dir: Path, expected: dict[str, str]) -> None:
+    """Detect persistent adapter swaps across a load/eval window, not atomic reads."""
+    try:
+        current = _adapter_manifest(adapter_dir)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RuntimeError("adapter checkpoint files changed during load or evaluation") from exc
+    if current != expected:
+        raise RuntimeError("adapter checkpoint files changed during load or evaluation")
+
+
 def _prompt_commitment(cases: list[Challenge]) -> str:
     payload = [{"id": case.id, "prompt": case.prompt} for case in cases]
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
@@ -426,11 +449,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     corrupted = _score_model(model, tokenizer, torch, heldout, device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
     _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
-    adapter_files = sorted(p for p in candidate_dir.rglob("*") if p.is_file())
-    if not any(p.suffix == ".safetensors" for p in adapter_files):
-        raise RuntimeError("PEFT did not save a safetensors adapter")
-    if any(p.is_symlink() for p in adapter_files):
-        raise RuntimeError("adapter checkpoint contains a symlink")
+    candidate_adapter_manifest = _adapter_manifest(candidate_dir)
     result: dict[str, Any] = {
         "schema": SCHEMA,
         "adaptation_kind": "local HF causal-LM PEFT LoRA supervised parameter update",
@@ -442,7 +461,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
         "runtime_versions": {"python": sys.version.split()[0], "torch": package_version("torch"),
                              "transformers": package_version("transformers"),
                              "peft": package_version("peft")},
-        "candidate_adapter_sha256": {p.relative_to(candidate_dir).as_posix(): _sha_file(p) for p in adapter_files},
+        "candidate_adapter_sha256": candidate_adapter_manifest,
         "training_case_ids": [c.id for c in train],
         "heldout_case_ids": [c.id for c in heldout],
         "heldout_public_prompt_sha256": _prompt_commitment(heldout),
@@ -506,10 +525,7 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     adapter_dir = root / "candidate_adapter"
     if adapter_dir.is_symlink():
         raise ValueError("candidate adapter root must not be a symlink")
-    adapter_files = sorted(p for p in adapter_dir.rglob("*") if p.is_file())
-    if any(p.is_symlink() for p in adapter_files):
-        raise ValueError("adapter checkpoint contains a symlink")
-    actual_adapters = {p.relative_to(adapter_dir).as_posix(): _sha_file(p) for p in adapter_files}
+    actual_adapters = _adapter_manifest(adapter_dir)
     if actual_adapters != report.get("candidate_adapter_sha256"):
         raise ValueError("candidate adapter changed after training")
     _, heldout = training_cases(config)
@@ -524,11 +540,13 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     _assert_checkpoint_unchanged(model_path, weights, expected_manifest)
     model = peft_model.from_pretrained(base, str(adapter_dir), is_trainable=False,
                                       local_files_only=True)
+    _assert_adapter_unchanged(adapter_dir, actual_adapters)
     observed_adapter_digest = _lora_value_digest(model, torch)
     if observed_adapter_digest != report.get("candidate_lora_tensor_value_sha256"):
         raise ValueError("reloaded LoRA tensor values differ from trained candidate")
     observed = _score_model(model, tokenizer, torch, heldout, device=device,
                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
+    _assert_adapter_unchanged(adapter_dir, actual_adapters)
     _assert_checkpoint_unchanged(model_path, weights, expected_manifest)
     value = {"schema": EVAL_SCHEMA, "training_report_sha256": _sha_file(source),
              "adapter_sha256": actual_adapters, "process_id": os.getpid(),
