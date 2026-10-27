@@ -147,6 +147,12 @@ fell from **5/8 to 4/8** and transfer remained **2/4**: the mechanism works,
 but reasoning improvement and generalization are NOT ESTABLISHED. See the
 [critic execution protocol](docs/MINOTAUR_CORRECTNESS_CRITIC_PILOT_2026-10-27.md)
 and [live Lappy run evidence E-018](docs/MINOTAUR_CRITIC_LAPPY_RUN_2026-10-27.md).
+A [separate E-021 alternate-objective experiment](docs/MINOTAUR_DIAGNOSIS_AND_PROCESS_PILOTS_2026-10-27.md)
+recorded real pretrained logit-margin, first-error *claim* and binary-loss
+CPU runs. Its experimental implementation lives in a [separate research
+branch](https://github.com/thebrazenbeard/labyrinth/tree/bt2/minotaur-diagnostics-and-windows-20261027),
+**not** in this Minotaur draft or production. These runs also failed to
+demonstrate useful verifier discrimination or safe graduation.
 The follow-up v2 pairs right/wrong answers within every update, but its real
 two- and eight-update runs **still** approved every incorrect development and
 transfer answer. See [E-019](docs/MINOTAUR_CRITIC_PAIRED_LAPPY_RUN_2026-10-27.md).
