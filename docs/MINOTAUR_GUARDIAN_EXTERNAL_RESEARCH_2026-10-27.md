@@ -23,6 +23,18 @@ not evidence that the present implementation reproduces their results.
   zero-update and corrupted-label arms **plus** a paired significance test;
   `skill_mastery` demands demonstrated absolute competence without falsely
   claiming training created that competence. Each policy has its own fingerprint.
+- Hostile review found that configurable zero thresholds could previously
+  graduate a wholly incorrect candidate under `skill_mastery`. The policy now
+  fixes minimum semantic accuracy at 75%, output format rate at 90%, and
+  declared gain at 10%; it requires both `heldout` and `transfer`, excludes
+  training slices, and rejects exam slices smaller than 16 cases. These are
+  conservative source-level floors, not guarantees of out-of-distribution skill.
+- `skill_mastery` additionally applies a one-sided exact binomial tail against
+  the frozen competence floor, corrected across exam slices and possible
+  attempts. An observed 12/16 score can no longer qualify by itself; finite
+  samples cannot establish perfect population mastery. Format rate remains a
+  scored sample requirement, not a separate confidence-certified population
+  reliability claim.
 - For `training_effect`, each slice's exact one-sided sign/McNemar-binomial
   comparison is adjusted across `3 × required_slices × max_attempts` at the
   frozen `significance_alpha` (default 0.05). Thresholds for semantic accuracy,
@@ -59,7 +71,7 @@ not evidence that the present implementation reproduces their results.
 
 ## Verification at source revision
 
-`python -m unittest discover -s tests -q` succeeded locally (160 tests),
+`python -m unittest discover -s tests -q` succeeded locally (163 tests),
 with no external dependency or pretrained-model inference required.
 
 > **Hostile challenge:** A model that gets sixteen near-duplicate problems

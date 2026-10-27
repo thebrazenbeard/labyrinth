@@ -7,7 +7,8 @@ import json
 import unittest
 
 from labyrinth.graduation_gate import (
-    GateState, GraduationPolicy, SCHEMA, _one_sided_exact_paired_p, decide_graduation,
+    GateState, GraduationPolicy, SCHEMA, _one_sided_exact_paired_p,
+    _one_sided_mastery_tail_p, decide_graduation,
 )
 
 
@@ -102,6 +103,8 @@ class MinotaurGraduationTests(unittest.TestCase):
         self.assertEqual(_one_sided_exact_paired_p(1, 1), 0.75)
         self.assertEqual(_one_sided_exact_paired_p(0, 2), 1.0)
         self.assertEqual(_one_sided_exact_paired_p(7, 0), 1 / 128)
+        self.assertAlmostEqual(_one_sided_mastery_tail_p(16, 16, 0.75), 0.75**16)
+        self.assertEqual(_one_sided_mastery_tail_p(0, 16, 0.75), 1.0)
 
     def test_valid_separately_attested_capability_graduates_without_deployment(self):
         result = decision(evaluated_receipt())
@@ -219,6 +222,47 @@ class MinotaurGraduationTests(unittest.TestCase):
         graduated = decision(evidence, policy=mastery_policy)
         self.assertEqual(decide_graduation(POLICY, graduated.state, None, None,
                          independent_evaluator_key=None).disposition, "BLOCKED")
+
+    def test_sample_threshold_alone_does_not_prove_skill_mastery(self):
+        evidence = evaluated_receipt(controls_correct=True)
+        for trials in evidence["slices"].values():
+            for index, trial in enumerate(trials):
+                candidate = index < 12
+                trial["candidate_correct"] = candidate
+                trial["candidate_semantic_correct"] = candidate
+        policy = replace(POLICY, objective_kind="skill_mastery")
+        self.assertEqual(decision(evidence, policy=policy).disposition, "STAY")
+        # Multiplicity includes all three allowed exam attempts; sixteen
+        # successes are still not enough for this stronger campaign policy.
+        self.assertEqual(decision(evaluated_receipt(),
+                         policy=replace(policy, max_attempts=3)).disposition, "STAY")
+        with self.assertRaises(ValueError):
+            replace(policy, min_accuracy=1.0)  # finite exam cannot certify p=1
+
+    def test_zero_threshold_mastery_cannot_graduate_an_all_wrong_model(self):
+        # Hostile review reproduced GRADUATED at the previous head for this
+        # configuration, despite 0/16 substantive success in every slice.
+        for kind in ("skill_mastery", "training_effect"):
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
+                replace(POLICY, objective_kind=kind, min_accuracy=0.0,
+                        min_format_rate=0.0, min_gain_over_controls=0.0)
+        for bad in ({"min_accuracy": 0.74}, {"min_format_rate": 0.89},
+                    {"min_gain_over_controls": 0.0}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                replace(POLICY, **bad)
+
+    def test_graduation_policy_cannot_skip_private_holdout_or_transfer(self):
+        # Before this fix a caller could rename a training-only slice into an
+        # exam and shrink it to two examples. A trusted signer still matters,
+        # but nonsensical policies must be rejected at construction time.
+        for bad in ({"required_slices": ("train",)},
+                    {"required_slices": ("heldout",)},
+                    {"required_slices": ("transfer",)},
+                    {"required_slices": ("heldout", "transfer", "train")},
+                    {"min_cases_per_slice": 2},
+                    {"min_cases_per_slice": 15}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                replace(POLICY, **bad)
 
     def test_statistical_alpha_and_objective_kind_are_frozen_policy(self):
         for kwargs in ({"objective_kind": "flattering_the_evaluator"},
@@ -339,7 +383,7 @@ class MinotaurGraduationTests(unittest.TestCase):
             replace(POLICY, objective_id="other-objective"),
             replace(POLICY, base_sha256="e" * 64),
             replace(POLICY, session_nonce="f" * 32),
-            replace(POLICY, min_accuracy=0.25),
+            replace(POLICY, min_accuracy=0.85),
             replace(POLICY, expected_evaluator_sha256="d" * 64),
             replace(POLICY, expected_conditions_sha256="e" * 64),
         ):

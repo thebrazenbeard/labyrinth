@@ -70,16 +70,31 @@ class GraduationPolicy:
                 or any(type(s) is not str or not _ID.fullmatch(s) for s in self.required_slices)
                 or len(set(self.required_slices)) != len(self.required_slices)):
             raise ValueError("invalid or duplicate required slices")
-        if type(self.min_cases_per_slice) is not int or not 2 <= self.min_cases_per_slice <= 500:
-            raise ValueError("min_cases_per_slice must be in [2, 500]")
+        if (not {"heldout", "transfer"}.issubset(self.required_slices)
+                or any(s.lower().startswith("train") for s in self.required_slices)):
+            raise ValueError("graduation requires heldout and transfer, never a training slice")
+        if type(self.min_cases_per_slice) is not int or not 16 <= self.min_cases_per_slice <= 500:
+            raise ValueError("min_cases_per_slice must be in [16, 500]")
         if type(self.max_attempts) is not int or not 1 <= self.max_attempts <= 100:
             raise ValueError("max_attempts must be in [1, 100]")
         for name in ("min_accuracy", "min_format_rate", "min_gain_over_controls"):
             value = getattr(self, name)
             if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
                 raise ValueError(f"{name} must be finite and in [0, 1]")
+        # These are independent *absolute* minimums; the caller must not turn
+        # the admission gate into a tautology by supplying zero thresholds.
+        # Lower task-specific requirements need a reviewed protocol/version
+        # change, not a runtime switch in a receipt policy.
+        if self.min_accuracy < 0.75:
+            raise ValueError("a graduation objective requires at least 75% semantic accuracy")
+        if self.min_format_rate < 0.90:
+            raise ValueError("a graduation objective requires at least 90% valid output format")
+        if self.min_gain_over_controls < 0.10:
+            raise ValueError("training-effect objectives require a nontrivial declared gain")
         if self.objective_kind not in ("training_effect", "skill_mastery"):
             raise ValueError("objective_kind must distinguish mastery from training effect")
+        if self.objective_kind == "skill_mastery" and self.min_accuracy == 1:
+            raise ValueError("finite samples cannot establish perfect population mastery")
         if (type(self.significance_alpha) not in (float, int)
                 or not math.isfinite(self.significance_alpha)
                 or not 0 < self.significance_alpha <= 0.05):
@@ -159,6 +174,19 @@ def _one_sided_exact_paired_p(wins: int, losses: int) -> float:
     if discordant == 0:
         return 1.0
     return sum(math.comb(discordant, k) for k in range(wins, discordant + 1)) / (1 << discordant)
+
+
+def _one_sided_mastery_tail_p(successes: int, total: int, minimum_accuracy: float) -> float:
+    """Exact binomial survival probability under the specified mastery floor.
+
+    This only interprets genuinely independent evaluation problems. Repeating
+    paraphrases of one public structure invalidates a confidence claim.
+    """
+    if successes == 0:
+        return 1.0
+    return sum(math.comb(total, k) * minimum_accuracy**k
+               * (1 - minimum_accuracy)**(total - k)
+               for k in range(successes, total + 1))
 
 
 def decide_graduation(
@@ -351,7 +379,16 @@ def decide_graduation(
             satisfied = False
         if format_rate < policy.min_format_rate:
             satisfied = False
-        if policy.objective_kind == "training_effect":
+        if policy.objective_kind == "skill_mastery":
+            # H0: true success rate <= the frozen competency floor. Observing
+            # its empirical threshold is not the same as confidently meeting
+            # it. Adjust for both held-out slices and multiple attempts.
+            if (_one_sided_mastery_tail_p(tally["candidate_semantic_correct"], n,
+                                          policy.min_accuracy)
+                    * len(policy.required_slices) * policy.max_attempts
+                    >= policy.significance_alpha):
+                satisfied = False
+        else:  # training_effect
             # A nonzero sample gain alone is weak evidence. Check *paired*
             # discordant wins against all three controls in each slice.
             # Bonferroni controls the family-wise false-positive risk across

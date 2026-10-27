@@ -101,9 +101,26 @@ the frozen pretrained, zero-update and corrupted-label controls, across every
 held-out slice. The exact one-sided paired comparison applies Bonferroni
 correction across all arms, slices and allowed attempts, in addition to
 predeclared accuracy, format and gain thresholds. `"skill_mastery"` is an
-explicit alternative for absolute competence when the pretrained model might
-already know the skill; it **does not** establish a causal training improvement.
-The choice and significance level are fingerprint-bound to persistent gate state.
+explicit alternative for competence when the pretrained model might already
+know the skill; it requires a one-sided exact binomial result above the
+predeclared accuracy floor and **does not** establish a causal training
+improvement. Both paths require held-out and transfer slices with at least 16
+cases each and cannot lower their semantic accuracy, format or gain floors to
+zero. The choice and significance level are fingerprint-bound to persistent
+gate state. All significance statements require genuinely independent cases;
+public repeated program patterns cannot supply independent final evidence.
+
+`labyrinth.graduation_state` adds an **opt-in, local custodian-owned** SQLite
+WAL store for that trusted `GateState`. `initialize_campaign` creates a new,
+exclusive policy-bound campaign; `decide_campaign` serializes signed decisions
+with `BEGIN IMMEDIATE`, authenticates stored state with a separate HMAC key,
+and durably consumes attempts before reporting an exit. A second process
+cannot spend a failed signed receipt again. The caller must keep both keys
+outside trainee control and secure/backup the database directory. This module
+does **not** run checkpoints, generate genuinely private exam cases, attest
+independent structural problem families, or protect against privileged rollback
+of the entire database. It is not installed into production or a credential
+manager, and does not make Minotaur independently qualified.
 
 `labyrinth.guardian_benchmark.generate_guardian_cases` creates public
 development cases with three register-program structure profiles, correct and
@@ -115,6 +132,26 @@ ProcessBench research problem. The associated evaluators report false
 approvals, false rejections, abstentions, coverage and slice metrics; neither
 grants qualification. Public answers must **not** be used for a blind final
 exam. See the [outside-source research mapping and evidence limits](docs/MINOTAUR_GUARDIAN_EXTERNAL_RESEARCH_2026-10-27.md).
+
+For a real pretrained **correctness-critic** rather than a maze-answering
+adapter, `labyrinth.minotaur_critic_pilot` provides a strictly optional,
+offline PEFT/LoRA experiment. It trains Yes/No judgments of another model's
+proposed answers against matched frozen, zero-update, and corrupted-label
+controls, measures false approvals on identical development and structurally
+reserved transfer cases, and requires an unchanged adapter with identical
+predictions after **fresh-process** reload. A same-process or mismatching
+reload fails closed. This code has unit coverage but has **not yet been run on
+a verified small pretrained checkpoint** as a correctness critic, so neural
+learning and generalized reasoning improvement are NOT ESTABLISHED. See the
+[critic execution protocol](docs/MINOTAUR_CORRECTNESS_CRITIC_PILOT_2026-10-27.md).
+
+`labyrinth.processbench_adapter` can score a reviewer on caller-supplied,
+strictly validated **Qwen/ProcessBench** JSONL records, with correct one-based
+first-error translation, class-balanced metrics and false-approval rates.
+It also reports whether judgments on caller-asserted logically equivalent
+reformulations remain consistent **and correct**. It does not fetch or bundle
+the official benchmark, and invented fixture tests are not a real benchmark
+score. See the [external benchmark adapter provenance and protocol](docs/PROCESSBENCH_EXTERNAL_ADAPTER.md).
 
 The next gate is executing this optional path in an isolated environment with independently measured resource use, immutable model/tokenizer identity and a matched repeated-seed experiment. Do not infer from the code or changed adapter bytes that a pretrained language model became better at reasoning.
 
