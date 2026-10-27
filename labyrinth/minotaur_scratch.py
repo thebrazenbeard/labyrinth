@@ -17,6 +17,7 @@ from typing import Any
 from .guardian_benchmark import generate_process_cases
 
 SCHEMA = "labyrinth.minotaur.scratch-process-verifier.v1"
+MICROFIT_SCHEMA = "labyrinth.minotaur.scratch-microfit.v1"
 NUM_BASE = 16
 VOCAB_SIZE = 128
 OPS = {"ADD": 4, "SUB": 5, "MUL": 6}
@@ -185,8 +186,146 @@ def _evaluate(model: Any, cases: list[dict[str, Any]], config: ScratchConfig,
     }
 
 
+def _fit_metrics(model: Any, ids: Any, gold: Any, torch: Any) -> dict[str, Any]:
+    """Return deterministic whole-set loss/accuracy for an optimization diagnostic."""
+    model.eval()
+    with torch.no_grad():
+        logits = model(ids)
+        loss = torch.nn.functional.cross_entropy(logits, gold, reduction="mean")
+        predictions = logits.argmax(dim=-1)
+    return {
+        "loss": float(loss),
+        "accuracy": float((predictions == gold).float().mean()),
+        "correct": int((predictions == gold).sum()),
+        "prediction_sha256": hashlib.sha256(
+            bytes(predictions.cpu().tolist())).hexdigest(),
+    }
+
+
 def _hash_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def run_microfit(output_dir: str | Path,
+                 config: ScratchConfig = ScratchConfig(width=32, heads=4, layers=1),
+                 *, max_optimizer_steps: int = 384,
+                 learning_rate: float = 0.003) -> dict[str, Any]:
+    """Test whether the scratch network can memorize 32 fixed, paired cases.
+
+    This is an optimizer/tokenization diagnostic, not a generalization evaluation.
+    It never reads a checkpoint.  All 32 examples form both the optimization set
+    and the measurement set by design.
+    """
+    config.validate()
+    if (type(max_optimizer_steps) is not int
+            or not 1 <= max_optimizer_steps <= 512
+            or type(learning_rate) is not float
+            or not 0.0001 <= learning_rate <= 0.01):
+        raise ValueError("invalid bounded microfit optimization budget")
+    dest = Path(output_dir)
+    if not dest.is_absolute() or dest.exists() or dest.is_symlink() or not dest.parent.is_dir():
+        raise FileExistsError("microfit output must be a new absolute directory")
+
+    # One declared slice, 16 programs, and paired correct/faulty traces gives
+    # exactly 32 balanced cases. No development or transfer case is consumed.
+    cases = encoded_process_cases(4404, 16, ("fresh_numbers",))
+    if len(cases) != 32 or sum(item["label"] == 0 for item in cases) != 16:
+        raise RuntimeError("microfit fixture lost its paired 32-case boundary")
+
+    torch, _, save_file = _torch()
+    torch.set_num_threads(min(4, torch.get_num_threads()))
+    torch.manual_seed(config.seed)
+    torch.use_deterministic_algorithms(True)
+    model = _model(config, torch)
+    ids, gold = _features(cases, config.max_tokens, torch)
+    initial_digest = _parameter_digest(model)
+    before = _fit_metrics(model, ids, gold, torch)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=learning_rate, weight_decay=0.0)
+
+    preclip_norms: list[float] = []
+    postclip_norms: list[float] = []
+    clipped_steps = 0
+    clip_threshold = 5.0
+    for _ in range(max_optimizer_steps):
+        model.train()
+        optimizer.zero_grad(set_to_none=True)
+        logits = model(ids)
+        # Explicit mean reduction fixes gradient scale at 1 / 32 examples.
+        loss = torch.nn.functional.cross_entropy(logits, gold, reduction="mean")
+        if not bool(torch.isfinite(loss)):
+            raise RuntimeError("nonfinite microfit loss")
+        loss.backward()
+        norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), clip_threshold))
+        if not (norm >= 0.0 and torch.isfinite(torch.tensor(norm)).item()):
+            raise RuntimeError("nonfinite microfit gradient norm")
+        preclip_norms.append(norm)
+        clipped_steps += int(norm > clip_threshold)
+        postclip_norms.append(min(norm, clip_threshold))
+        optimizer.step()
+        current = _fit_metrics(model, ids, gold, torch)
+        if current["accuracy"] == 1.0 and current["loss"] <= 0.05:
+            break
+
+    after = _fit_metrics(model, ids, gold, torch)
+    trained_digest = _parameter_digest(model)
+    finite_positive_gradients = bool(preclip_norms) and all(
+        value > 0.0 for value in preclip_norms)
+    success = bool(
+        trained_digest != initial_digest
+        and finite_positive_gradients
+        and after["accuracy"] == 1.0
+        and after["loss"] <= 0.05
+        and after["loss"] < before["loss"])
+
+    dest.mkdir(mode=0o700)
+    weights = dest / "microfit.safetensors"
+    save_file({key: value.cpu().contiguous()
+               for key, value in model.state_dict().items()}, str(weights))
+    report = {
+        "schema": MICROFIT_SCHEMA,
+        "purpose": "32-case training-set memorization diagnostic only",
+        "config": asdict(config),
+        "case_count": len(cases),
+        "case_ids_sha256": hashlib.sha256(
+            "\n".join(item["case_id"] for item in cases).encode()).hexdigest(),
+        "slice": "fresh_numbers",
+        "class_counts": {"0": 16, "nonzero": 16},
+        "optimizer": "AdamW",
+        "optimizer_steps": len(preclip_norms),
+        "max_optimizer_steps": max_optimizer_steps,
+        "learning_rate": learning_rate,
+        "loss_reduction": "mean_over_32_cases",
+        "gradient_clip_l2": clip_threshold,
+        "gradient_norms": {
+            "all_finite": all(torch.isfinite(torch.tensor(preclip_norms)).tolist()),
+            "all_positive": finite_positive_gradients,
+            "minimum": min(preclip_norms),
+            "maximum": max(preclip_norms),
+            "first": preclip_norms[0],
+            "last": preclip_norms[-1],
+            "postclip_maximum": max(postclip_norms),
+            "clipped_steps": clipped_steps,
+        },
+        "before": before,
+        "after": after,
+        "success_criteria": {
+            "exact_training_accuracy": 1.0,
+            "maximum_final_mean_loss": 0.05,
+            "weights_must_change": True,
+            "all_gradient_norms_finite_and_positive": True,
+        },
+        "success": success,
+        "initial_weight_sha256": initial_digest,
+        "trained_weight_sha256": trained_digest,
+        "safetensors_sha256": _hash_file(weights),
+        "lineage": {"initialization": "random_from_seed",
+                    "pretrained_checkpoint": None, "adapter": None},
+        "qualification": "NOT_ESTABLISHED",
+    }
+    (dest / "microfit-report.json").write_text(
+        json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    return report
 
 
 def run_scratch(output_dir: str | Path, config: ScratchConfig = ScratchConfig(),
@@ -305,7 +444,11 @@ def reload_scratch(model_dir: str | Path) -> dict[str, Any]:
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Strict scratch Minotaur checkpoint reload")
-    parser.add_argument("--reload", required=True)
+    parser = argparse.ArgumentParser(description="Scratch Minotaur local diagnostics")
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--reload")
+    action.add_argument("--microfit-output")
     args = parser.parse_args()
-    print(json.dumps(reload_scratch(args.reload), sort_keys=True))
+    result = (reload_scratch(args.reload) if args.reload else
+              run_microfit(Path(args.microfit_output).resolve()))
+    print(json.dumps(result, sort_keys=True))

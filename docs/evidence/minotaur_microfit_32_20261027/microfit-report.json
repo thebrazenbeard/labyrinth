@@ -1,0 +1,63 @@
+{
+  "after": {
+    "accuracy": 1.0,
+    "correct": 32,
+    "loss": 0.047883063554763794,
+    "prediction_sha256": "839e480b094ae8341f3e3ddbad94ecdceeb6efd016ac79c18447bec3d65fc401"
+  },
+  "before": {
+    "accuracy": 0.09375,
+    "correct": 3,
+    "loss": 1.9917196035385132,
+    "prediction_sha256": "9f4fb68f3e1dac82202f9aa581ce0bbf1f765df0e9ac3c8c57e20f685abab8ed"
+  },
+  "case_count": 32,
+  "case_ids_sha256": "c38c5931c5ec2f43ca0b69a6365fb032ea70c74671dfc243d3167728dc932d98",
+  "class_counts": {
+    "0": 16,
+    "nonzero": 16
+  },
+  "config": {
+    "heads": 4,
+    "layers": 1,
+    "max_steps": 6,
+    "max_tokens": 96,
+    "seed": 411,
+    "width": 32
+  },
+  "gradient_clip_l2": 5.0,
+  "gradient_norms": {
+    "all_finite": true,
+    "all_positive": true,
+    "clipped_steps": 0,
+    "first": 2.8811402320861816,
+    "last": 0.1361454576253891,
+    "maximum": 2.8811402320861816,
+    "minimum": 0.07590366899967194,
+    "postclip_maximum": 2.8811402320861816
+  },
+  "initial_weight_sha256": "f81c8232437824e071a39dc35e5fc6a554dc6550ed7fc92d6c00fe02633b14e2",
+  "learning_rate": 0.003,
+  "lineage": {
+    "adapter": null,
+    "initialization": "random_from_seed",
+    "pretrained_checkpoint": null
+  },
+  "loss_reduction": "mean_over_32_cases",
+  "max_optimizer_steps": 384,
+  "optimizer": "AdamW",
+  "optimizer_steps": 68,
+  "purpose": "32-case training-set memorization diagnostic only",
+  "qualification": "NOT_ESTABLISHED",
+  "safetensors_sha256": "a0af11f2e84152d007d0df83f1a235549908e48d215cf0cdf9d86e0578973f2d",
+  "schema": "labyrinth.minotaur.scratch-microfit.v1",
+  "slice": "fresh_numbers",
+  "success": true,
+  "success_criteria": {
+    "all_gradient_norms_finite_and_positive": true,
+    "exact_training_accuracy": 1.0,
+    "maximum_final_mean_loss": 0.05,
+    "weights_must_change": true
+  },
+  "trained_weight_sha256": "8be96b7d96e8557e0f66b6f47c4c32a3da2043584e5531e5e2cd2339af27eecc"
+}
