@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sqlite3
+from contextlib import closing
 import subprocess
 import sys
 import tempfile
@@ -68,7 +69,7 @@ class GraduationStateTests(unittest.TestCase):
             decide_campaign(self.database, POLICY, raw, signature,
                             independent_evaluator_key=KEY,
                             state_key=b"wrong-state-key-does-not-open-this-store")
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("UPDATE campaign SET serialized_state = ? WHERE id = 1",
                                ('{"next_attempt":99}',))
         with self.assertRaises(CustodyError):
@@ -96,12 +97,15 @@ class GraduationStateTests(unittest.TestCase):
             "from labyrinth.graduation_state import decide_campaign; "
             "from tests.test_graduation_gate import KEY,POLICY; "
             "from tests.test_graduation_state import STATE_KEY; "
+            "raw,signature=Path(sys.argv[2]).read_text().splitlines(); "
             "result=decide_campaign(Path(sys.argv[1]),POLICY,"
-            "bytes.fromhex(sys.argv[2]),sys.argv[3],"
+            "bytes.fromhex(raw),signature,"
             "independent_evaluator_key=KEY,state_key=STATE_KEY); "
             "print(result.disposition)"
         )
-        argv = [sys.executable, "-c", command, str(self.database), raw.hex(), signature]
+        receipt_path = Path(self.temp.name) / "same-receipt.txt"
+        receipt_path.write_text(raw.hex() + "\n" + signature + "\n", encoding="utf-8")
+        argv = [sys.executable, "-c", command, str(self.database), str(receipt_path)]
         first = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  text=True)
         second = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

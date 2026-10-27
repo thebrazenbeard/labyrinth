@@ -9,7 +9,7 @@ import unittest
 from labyrinth.minotaur_critic_pilot import (
     CriticConfig, critic_examples, training_schedule, score_binary,
     encode_supervised_verdict, validate_dataset_separation, reload_critic, SCHEMA,
-    verify_reload_contract, prepare_verdict_pair,
+    verify_reload_contract, prepare_verdict_pair, score_selective_margins,
 )
 
 
@@ -99,6 +99,24 @@ class CriticPilotTests(unittest.TestCase):
         self.assertEqual(result["false_rejection_rate"], 0.5)
         with self.assertRaises(ValueError):
             score_binary(examples, predictions[:-1])
+
+    def test_selective_verdict_threshold_reports_abstention_and_false_approvals(self):
+        examples = critic_examples(3, "critic_dev", 2, (1,))
+        result = score_selective_margins(examples, [3.0, 0.1, -0.1, -3.0], threshold=0.5)
+        self.assertEqual(result["total"], 4)
+        self.assertEqual(result["coverage"], 0.5)
+        self.assertEqual(result["abstentions"], 2)
+        self.assertEqual(result["selective_accuracy"], 1.0)
+        self.assertEqual(result["false_approval_rate"], 0.0)
+        self.assertEqual(result["approval_rate"], 0.25)
+        empty = score_selective_margins(examples, [0.1] * 4, threshold=0.5)
+        self.assertEqual(empty["coverage"], 0.0)
+        self.assertIsNone(empty["selective_accuracy"])
+        self.assertEqual(empty["abstentions"], 4)
+        with self.assertRaises(ValueError):
+            score_selective_margins(examples, [float("nan")] * 4, threshold=0.0)
+        with self.assertRaises(ValueError):
+            score_selective_margins(examples, [0.1] * 4, threshold=-1.0)
 
     def test_config_bounds_no_auto_download(self):
         config = CriticConfig(model_path="/not-a-real-model", output_dir="/tmp/not-a-run")

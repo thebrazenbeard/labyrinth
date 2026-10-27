@@ -227,6 +227,48 @@ def score_binary(examples: Sequence[CriticExample], predictions: Sequence[bool])
     }
 
 
+def score_selective_margins(
+    examples: Sequence[CriticExample], margins: Sequence[float], *, threshold: float,
+) -> dict[str, Any]:
+    """Report reject/approve/abstain at a frozen absolute Yes-minus-No logit margin.
+
+    This is a development diagnostic, NEVER graduation evidence. Thresholds
+    selected by looking at evaluation scores have no independent calibration.
+    """
+    if (not examples or len(examples) != len(margins)
+            or any(type(ex) is not CriticExample for ex in examples)
+            or type(threshold) not in (int, float)
+            or not math.isfinite(threshold) or threshold < 0
+            or any(type(m) not in (int, float) or not math.isfinite(m) for m in margins)):
+        raise ValueError("finite aligned margins and a nonnegative threshold required")
+    approved = rejected = abstained = right = false_approved = false_rejected = 0
+    for ex, margin in zip(examples, margins):
+        if abs(margin) <= threshold:
+            abstained += 1
+        elif margin > threshold:
+            approved += 1
+            right += int(ex.is_correct)
+            false_approved += int(not ex.is_correct)
+        else:
+            rejected += 1
+            right += int(not ex.is_correct)
+            false_rejected += int(ex.is_correct)
+    positives = sum(ex.is_correct for ex in examples)
+    negatives = len(examples) - positives
+    covered = approved + rejected
+    return {
+        "total": len(examples), "threshold": threshold,
+        "coverage": covered / len(examples), "abstentions": abstained,
+        "approvals": approved, "rejections": rejected,
+        "approval_rate": approved / len(examples),
+        "selective_accuracy": right / covered if covered else None,
+        "false_approvals": false_approved, "false_rejections": false_rejected,
+        "false_approval_rate": false_approved / negatives if negatives else None,
+        "false_rejection_rate": false_rejected / positives if positives else None,
+        "qualification": "NOT_ESTABLISHED",
+    }
+
+
 def verify_reload_contract(*, training_pid: int, reload_pid: int,
                            measured: dict[str, Any],
                            expected: dict[str, Any]) -> None:
@@ -260,6 +302,7 @@ def _score(model: Any, tokenizer: Any, torch: Any, examples: list[CriticExample]
         raise ValueError("verdict tokens unavailable or ambiguous")
     model.eval()
     preds: list[bool] = []
+    margins: list[float] = []
     with torch.no_grad():
         for example in examples:
             tokens = tokenizer.encode(example.prompt, add_special_tokens=True)
@@ -269,10 +312,32 @@ def _score(model: Any, tokenizer: Any, torch: Any, examples: list[CriticExample]
             logits = model(input_ids=ids, attention_mask=torch.ones_like(ids)).logits[0, -1]
             if not bool(torch.isfinite(logits[yes[0]])) or not bool(torch.isfinite(logits[no[0]])):
                 raise RuntimeError("nonfinite Minotaur verdict logits")
-            preds.append(bool(logits[yes[0]] > logits[no[0]]))
+            margin = float((logits[yes[0]] - logits[no[0]]).detach().cpu().item())
+            if not math.isfinite(margin):
+                raise RuntimeError("nonfinite Minotaur verdict margin")
+            margins.append(margin)
+            preds.append(margin > 0)
     report = score_binary(examples, preds)
     report["predictions_sha256"] = hashlib.sha256(
         bytes(int(p) for p in preds)).hexdigest()
+    report["verdict_margin_diagnostic"] = {
+        "qualification": "NOT_ESTABLISHED",
+        "margin_min": min(margins),
+        "margin_max": max(margins),
+        "margin_mean": sum(margins) / len(margins),
+        "mean_margin_on_correct": (sum(m for m, ex in zip(margins, examples)
+                                      if ex.is_correct) /
+                                   sum(ex.is_correct for ex in examples)
+                                   if any(ex.is_correct for ex in examples) else None),
+        "mean_margin_on_incorrect": (sum(m for m, ex in zip(margins, examples)
+                                        if not ex.is_correct) /
+                                     sum(not ex.is_correct for ex in examples)
+                                     if any(not ex.is_correct for ex in examples) else None),
+        "predeclared_thresholds": {
+            str(threshold): score_selective_margins(examples, margins, threshold=threshold)
+            for threshold in (0.0, 0.5, 1.0, 2.0)
+        },
+    }
     report["by_kind"] = {
         kind: score_binary([ex for ex in examples if ex.kind == kind],
                            [p for ex, p in zip(examples, preds) if ex.kind == kind])

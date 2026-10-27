@@ -180,6 +180,10 @@ class ToyLinearAdapter:
     @classmethod
     def load_checkpoint(cls, path: str | Path) -> "ToyLinearAdapter":
         """Reject unknown fields/versions, duplicate keys, bad numbers and hashes."""
+        # Windows does not implement O_NOFOLLOW: reject symlinks before open.
+        # This is defense-in-depth, not race-free custody on Windows.
+        if Path(path).is_symlink():
+            raise ValueError("checkpoint path must not be a symlink")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
         fd = os.open(os.fspath(path), flags)
         with os.fdopen(fd, "rb") as stream:
