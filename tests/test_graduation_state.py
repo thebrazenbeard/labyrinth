@@ -1,6 +1,7 @@
 """Atomic, tamper-evident custody of Minotaur's signed qualification state."""
 
 from pathlib import Path
+from contextlib import closing
 import sqlite3
 import subprocess
 import sys
@@ -68,9 +69,10 @@ class GraduationStateTests(unittest.TestCase):
             decide_campaign(self.database, POLICY, raw, signature,
                             independent_evaluator_key=KEY,
                             state_key=b"wrong-state-key-does-not-open-this-store")
-        with sqlite3.connect(self.database) as connection:
-            connection.execute("UPDATE campaign SET serialized_state = ? WHERE id = 1",
-                               ('{"next_attempt":99}',))
+        with closing(sqlite3.connect(self.database)) as connection:
+            with connection:
+                connection.execute("UPDATE campaign SET serialized_state = ? WHERE id = 1",
+                                   ('{"next_attempt":99}',))
         with self.assertRaises(CustodyError):
             self.decide(evaluated_receipt())
 
@@ -96,18 +98,33 @@ class GraduationStateTests(unittest.TestCase):
             "from labyrinth.graduation_state import decide_campaign; "
             "from tests.test_graduation_gate import KEY,POLICY; "
             "from tests.test_graduation_state import STATE_KEY; "
+            "raw,signature=sys.stdin.read().splitlines(); "
             "result=decide_campaign(Path(sys.argv[1]),POLICY,"
-            "bytes.fromhex(sys.argv[2]),sys.argv[3],"
+            "bytes.fromhex(raw),signature,"
             "independent_evaluator_key=KEY,state_key=STATE_KEY); "
             "print(result.disposition)"
         )
-        argv = [sys.executable, "-c", command, str(self.database), raw.hex(), signature]
-        first = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 text=True)
-        second = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  text=True)
-        stdout1, stderr1 = first.communicate(timeout=15)
-        stdout2, stderr2 = second.communicate(timeout=15)
+        argv = [sys.executable, "-c", command, str(self.database)]
+        processes = []
+        try:
+            for _ in range(2):
+                processes.append(subprocess.Popen(
+                    argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True))
+            # Feed both before waiting, preserving a real interprocess race.
+            payload = f"{raw.hex()}\n{signature}\n"
+            for process in processes:
+                process.stdin.write(payload)
+                process.stdin.close()
+                process.stdin = None
+            stdout1, stderr1 = processes[0].communicate(timeout=15)
+            stdout2, stderr2 = processes[1].communicate(timeout=15)
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                process.communicate()
+        first, second = processes
         self.assertEqual((first.returncode, second.returncode), (0, 0),
                          stderr1 + stderr2)
         self.assertEqual(sorted((stdout1.strip(), stdout2.strip())), ["BLOCKED", "STAY"])
