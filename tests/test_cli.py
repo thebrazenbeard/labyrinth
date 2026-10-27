@@ -20,6 +20,7 @@ from labyrinth.maze import Challenge, generate_maze
 from labyrinth.runner import (
     build_training_artifact,
     digest,
+    load_json,
     run_experiment,
     run_maze,
     validate_training_artifact,
@@ -37,6 +38,32 @@ def invoke(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 class RunnerTests(unittest.TestCase):
+    def test_json_loader_rejects_oversized_input_before_parsing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "oversized.json"
+            source.write_text(json.dumps({"payload": "x" * 64}), encoding="utf-8")
+            with patch("labyrinth.runner._MAX_JSON_BYTES", 32):
+                with patch("labyrinth.runner.json.loads") as parse:
+                    with self.assertRaisesRegex(ValueError, "JSON input exceeds"):
+                        load_json(source)
+                    parse.assert_not_called()
+
+    def test_json_loader_accepts_exact_size_limit_and_utf8(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "bounded.json"
+            payload = {"payload": "résumé"}
+            raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            source.write_bytes(raw)
+            with patch("labyrinth.runner._MAX_JSON_BYTES", len(raw)):
+                self.assertEqual(load_json(source), payload)
+
+    def test_json_loader_rejects_deep_nesting_without_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "deep.json"
+            source.write_bytes(b"[" * 20000 + b"0" + b"]" * 20000)
+            with self.assertRaisesRegex(ValueError, "nesting exceeds"):
+                load_json(source)
+
     def test_replay_correct_answers_and_private_answer_keys(self):
         cases = generate_maze(seed=21, count=2, tiers=(1, 2, 3), split="eval")
         model = ReplayAdapter({c.prompt: f"ANSWER: {c.answer}" for c in cases})
@@ -158,6 +185,24 @@ class RunnerTests(unittest.TestCase):
 
 
 class CLITests(unittest.TestCase):
+    def test_cli_rejects_oversized_replay_file_with_bounded_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "too-big.json"
+            source.write_bytes(b'{"payload":"' + b"x" * (8 * 1024 * 1024) + b'"}')
+            result = invoke("run", "--count", "1", "--replay-file", str(source))
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("JSON input exceeds", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
+    def test_cli_rejects_deeply_nested_replay_json_with_bounded_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "deep.json"
+            source.write_bytes(b"[" * 20000 + b"0" + b"]" * 20000)
+            result = invoke("run", "--count", "1", "--replay-file", str(source))
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("nesting exceeds", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
     def test_offline_cli_smoke(self):
         proc = invoke("run", "--seed", "17", "--count", "2", "--tiers", "1,2")
         self.assertEqual(proc.returncode, 0, proc.stderr)
