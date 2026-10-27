@@ -1,0 +1,770 @@
+[
+  {
+    "answer": "42",
+    "case_id": "train-t4-0-b2099af6f9f66c8a",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=82, B=61\n1. ADD A 7\n2. MUL B 4\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "5",
+    "case_id": "train-t4-1-08bc2d1397e3eac0",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=62, B=77\n1. ADD A 3\n2. MUL B 3\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "20",
+    "case_id": "train-t4-2-9815432fe500e33c",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=84, B=18\n1. MUL A 4\n2. SUB B A\n3. ADD B 2\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "96",
+    "case_id": "train-t4-3-74afda89ed00ad21",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=66, B=92\n1. MUL A 6\n2. SUB B A\n3. ADD B 4\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "71",
+    "case_id": "train-t4-4-60cfbc72b2caf273",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=17, B=67\n1. ADD A 3\n2. MUL B 8\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "3",
+    "case_id": "train-t4-5-12754c0faa093e27",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=74, B=94\n1. MUL A 7\n2. SUB B A\n3. ADD B 6\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "53",
+    "case_id": "train-t4-6-19a406da04619170",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=59, B=31\n1. ADD A 2\n2. MUL B 6\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "64",
+    "case_id": "train-t4-7-5e383109002a184f",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=22, B=27\n1. ADD A 4\n2. MUL B 5\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "21",
+    "case_id": "train-t4-8-f464707d7b4fc7fa",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=43, B=68\n1. ADD B A\n2. MUL B 2\n3. SUB A B\n4. ADD A 6\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "72",
+    "case_id": "train-t4-9-feec5e6481f7d4d4",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=87, B=94\n1. ADD A 6\n2. MUL B 7\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "27",
+    "case_id": "train-t4-10-901f505020b6d5e8",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=46, B=68\n1. ADD B A\n2. MUL B 7\n3. SUB A B\n4. ADD A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "62",
+    "case_id": "train-t4-11-b5b81c4225b0a28c",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=84, B=60\n1. MUL A 3\n2. SUB B A\n3. ADD B 2\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "55",
+    "case_id": "train-t4-12-0e5939a538ddee17",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=68, B=49\n1. MUL A 6\n2. SUB B A\n3. ADD B 6\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "84",
+    "case_id": "train-t4-13-0ac5fa5e4ff9bd3a",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=28, B=82\n1. MUL A 6\n2. SUB B A\n3. ADD B 2\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "50",
+    "case_id": "train-t4-14-659681e3879e20bb",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=7, B=18\n1. ADD A 7\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "86",
+    "case_id": "train-t4-15-00b582b8449baa58",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=22, B=28\n1. ADD A 8\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "91",
+    "case_id": "train-t4-16-6fe56ea9298750c2",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=91, B=19\n1. ADD B A\n2. MUL B 8\n3. SUB A B\n4. ADD A 7\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "22",
+    "case_id": "train-t4-17-2c2258ba34c558c8",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=31, B=43\n1. ADD A 2\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "87",
+    "case_id": "train-t4-18-ac68ea23c8790223",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=29, B=38\n1. ADD B A\n2. MUL B 5\n3. SUB A B\n4. ADD A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "10",
+    "case_id": "train-t4-19-842f3025b32d0703",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=54, B=7\n1. MUL A 6\n2. SUB B A\n3. ADD B 3\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "19",
+    "case_id": "train-t4-20-fb45aea4643115cd",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=60, B=6\n1. SUB B 3\n2. ADD A B\n3. MUL A 8\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "1",
+    "case_id": "train-t4-21-cfe1674b67d371c6",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=51, B=29\n1. SUB B 7\n2. ADD A B\n3. MUL A 4\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "43",
+    "case_id": "train-t4-22-c324f5dcbf4a3424",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=95, B=86\n1. SUB B 5\n2. ADD A B\n3. MUL A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "64",
+    "case_id": "train-t4-23-637a1fa42848fe37",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=39, B=38\n1. ADD B A\n2. MUL B 6\n3. SUB A B\n4. ADD A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "47",
+    "case_id": "train-t4-24-f7cb9d081fc154a6",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=10, B=40\n1. MUL A 2\n2. SUB B A\n3. ADD B 7\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "2",
+    "case_id": "train-t4-25-7029eb135099cec1",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=80, B=91\n1. MUL A 5\n2. SUB B A\n3. ADD B 8\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "2",
+    "case_id": "train-t4-26-ea91ba8f3fefbc54",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=1, B=55\n1. SUB B 7\n2. ADD A B\n3. MUL A 4\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "89",
+    "case_id": "train-t4-27-3131070c7a89fa37",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=30, B=83\n1. MUL A 8\n2. SUB B A\n3. ADD B 6\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "69",
+    "case_id": "train-t4-28-9b28aa45f62f619c",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=70, B=64\n1. MUL A 3\n2. SUB B A\n3. ADD B 5\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "26",
+    "case_id": "train-t4-29-3ae344af1e737476",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=59, B=19\n1. SUB B 9\n2. ADD A B\n3. MUL A 6\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "82",
+    "case_id": "train-t4-30-562311bee4024b80",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=27, B=47\n1. ADD B A\n2. MUL B 2\n3. SUB A B\n4. ADD A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "45",
+    "case_id": "train-t4-31-979d78f3967f87af",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=62, B=84\n1. ADD A 9\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "23",
+    "case_id": "train-t4-32-c77450b75a32cd7e",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=41, B=42\n1. ADD A 8\n2. MUL B 4\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "67",
+    "case_id": "train-t4-33-ae25164c531a4ba4",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=19, B=55\n1. SUB B 9\n2. ADD A B\n3. MUL A 7\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "38",
+    "case_id": "train-t4-34-322b451b1e7f19bd",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=15, B=56\n1. ADD A 8\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "80",
+    "case_id": "train-t4-35-91b84c0b6ec39f85",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=15, B=26\n1. ADD B A\n2. MUL B 8\n3. SUB A B\n4. ADD A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "34",
+    "case_id": "train-t4-36-2c84be894e636158",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=72, B=17\n1. ADD A 8\n2. MUL B 3\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "51",
+    "case_id": "train-t4-37-a6f83ec0f4f2be47",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=7, B=14\n1. SUB B 4\n2. ADD A B\n3. MUL A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "17",
+    "case_id": "train-t4-38-f0d0a5f0b36ea5e4",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=60, B=15\n1. MUL A 3\n2. SUB B A\n3. ADD B 2\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "2",
+    "case_id": "train-t4-39-6c769296055284eb",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=90, B=88\n1. SUB B 8\n2. ADD A B\n3. MUL A 8\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "49",
+    "case_id": "train-t4-40-e5c3ed4c2efacb91",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=77, B=45\n1. MUL A 6\n2. SUB B A\n3. ADD B 4\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "7",
+    "case_id": "train-t4-41-15888fedd9ef51e3",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=19, B=95\n1. SUB B 4\n2. ADD A B\n3. MUL A 8\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "5",
+    "case_id": "train-t4-42-a066010a171b3e5f",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=91, B=26\n1. ADD A 4\n2. MUL B 4\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "68",
+    "case_id": "train-t4-43-cea25606ef91d643",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=4, B=62\n1. ADD B A\n2. MUL B 2\n3. SUB A B\n4. ADD A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "4",
+    "case_id": "train-t4-44-4d4e376d0b6e5f53",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=28, B=1\n1. MUL A 9\n2. SUB B A\n3. ADD B 3\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "26",
+    "case_id": "train-t4-45-be2b042256bbc69a",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=4, B=19\n1. MUL A 8\n2. SUB B A\n3. ADD B 7\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "88",
+    "case_id": "train-t4-46-42c6dac4cba97ea7",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=13, B=48\n1. ADD B A\n2. MUL B 2\n3. SUB A B\n4. ADD A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "79",
+    "case_id": "train-t4-47-89d684e3b9c96f87",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=27, B=67\n1. SUB B 6\n2. ADD A B\n3. MUL A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "24",
+    "case_id": "train-t4-48-5310702ce7c94812",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=93, B=4\n1. ADD A 8\n2. MUL B 5\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "62",
+    "case_id": "train-t4-49-ee03ddb43d0777b1",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=66, B=1\n1. ADD B A\n2. MUL B 3\n3. SUB A B\n4. ADD A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "24",
+    "case_id": "train-t4-50-35b90b671e391be4",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=66, B=80\n1. ADD B A\n2. MUL B 5\n3. SUB A B\n4. ADD A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "88",
+    "case_id": "train-t4-51-69324d5386ea8f85",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=71, B=72\n1. SUB B 9\n2. ADD A B\n3. MUL A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "71",
+    "case_id": "train-t4-52-93aaf8ddabbbe620",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=56, B=23\n1. ADD A 2\n2. MUL B 9\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "74",
+    "case_id": "train-t4-53-e79c6b34ce69cac5",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=67, B=72\n1. MUL A 8\n2. SUB B A\n3. ADD B 2\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "84",
+    "case_id": "train-t4-54-8821cde85f2d1852",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=76, B=4\n1. SUB B 6\n2. ADD A B\n3. MUL A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "23",
+    "case_id": "train-t4-55-e1f7662d0b2a5996",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=61, B=17\n1. ADD B A\n2. MUL B 8\n3. SUB A B\n4. ADD A 4\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "0",
+    "case_id": "train-t4-56-83a49568acc39b41",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=53, B=50\n1. SUB B 6\n2. ADD A B\n3. MUL A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "5",
+    "case_id": "train-t4-57-8e36c83b135a1ebe",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=71, B=1\n1. MUL A 3\n2. SUB B A\n3. ADD B 4\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "40",
+    "case_id": "train-t4-58-5ec4778c39f2d44b",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=81, B=89\n1. ADD B A\n2. MUL B 6\n3. SUB A B\n4. ADD A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "63",
+    "case_id": "train-t4-59-494ac30b2abbae08",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=91, B=91\n1. ADD A 8\n2. MUL B 6\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "1",
+    "case_id": "train-t4-60-3fa3d07a246ab548",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=39, B=50\n1. ADD A 6\n2. MUL B 3\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "77",
+    "case_id": "train-t4-61-ea61b211b0bc146c",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=62, B=83\n1. ADD A 2\n2. MUL B 6\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "28",
+    "case_id": "train-t4-62-6b97a38d026e1222",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=69, B=76\n1. ADD B A\n2. MUL B 5\n3. SUB A B\n4. ADD A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "68",
+    "case_id": "train-t4-63-33e8fcb4523823ce",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=29, B=5\n1. ADD A 4\n2. MUL B 7\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "77",
+    "case_id": "train-t4-64-a41cd4bfcfb85189",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=18, B=86\n1. ADD A 6\n2. MUL B 4\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "44",
+    "case_id": "train-t4-65-2f3c210cb13641bc",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=65, B=23\n1. ADD A 7\n2. MUL B 3\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "29",
+    "case_id": "train-t4-66-a383d14086546ceb",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=64, B=24\n1. SUB B 8\n2. ADD A B\n3. MUL A 4\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "73",
+    "case_id": "train-t4-67-e6b567c3c8549fd2",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=88, B=73\n1. SUB B 2\n2. ADD A B\n3. MUL A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "45",
+    "case_id": "train-t4-68-99c118782e6957a6",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=76, B=95\n1. SUB B 3\n2. ADD A B\n3. MUL A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "75",
+    "case_id": "train-t4-69-0cbd5ca579777ee1",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=18, B=73\n1. MUL A 3\n2. SUB B A\n3. ADD B 2\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "2",
+    "case_id": "train-t4-70-a9ff6a36c893a32f",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=65, B=13\n1. ADD A 8\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "6",
+    "case_id": "train-t4-71-0c25084c01e77ec2",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=51, B=4\n1. MUL A 6\n2. SUB B A\n3. ADD B 2\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "75",
+    "case_id": "train-t4-72-e4a88ad090d58767",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=79, B=10\n1. ADD A 3\n2. MUL B 9\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "29",
+    "case_id": "train-t4-73-1b80a5918ed4cc16",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=15, B=71\n1. SUB B 6\n2. ADD A B\n3. MUL A 4\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "38",
+    "case_id": "train-t4-74-94db46607db6d55b",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=53, B=87\n1. ADD A 5\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "44",
+    "case_id": "train-t4-75-6c9034e953ace4ab",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=12, B=75\n1. ADD B A\n2. MUL B 3\n3. SUB A B\n4. ADD A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "79",
+    "case_id": "train-t4-76-bb4424a6b58c7797",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=30, B=72\n1. ADD A 2\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "70",
+    "case_id": "train-t4-77-2b64c7f43e79ae9a",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=48, B=61\n1. MUL A 2\n2. SUB B A\n3. ADD B 9\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "86",
+    "case_id": "train-t4-78-6a9eef4e7a54f84b",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=25, B=77\n1. ADD A 7\n2. MUL B 7\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "49",
+    "case_id": "train-t4-79-5ad7997c38427a83",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=2, B=44\n1. MUL A 8\n2. SUB B A\n3. ADD B 5\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "83",
+    "case_id": "train-t4-80-5119789c5e18bf90",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=31, B=89\n1. SUB B 3\n2. ADD A B\n3. MUL A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "89",
+    "case_id": "train-t4-81-134acc7aaf81ad7b",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=79, B=25\n1. ADD A 7\n2. MUL B 4\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "22",
+    "case_id": "train-t4-82-0ce8cc471f1ff65c",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=69, B=17\n1. MUL A 8\n2. SUB B A\n3. ADD B 5\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "80",
+    "case_id": "train-t4-83-fc2de4fcd79c892c",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=52, B=60\n1. ADD A 5\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "38",
+    "case_id": "train-t4-84-34839bf3ce4d8086",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=17, B=21\n1. SUB B 9\n2. ADD A B\n3. MUL A 8\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "50",
+    "case_id": "train-t4-85-61b840bb326fc4d7",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=3, B=41\n1. MUL A 2\n2. SUB B A\n3. ADD B 9\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "40",
+    "case_id": "train-t4-86-128873cf9f524c20",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=52, B=53\n1. ADD B A\n2. MUL B 2\n3. SUB A B\n4. ADD A 4\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "72",
+    "case_id": "train-t4-87-f23987f38fd83527",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=52, B=65\n1. MUL A 4\n2. SUB B A\n3. ADD B 7\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "9",
+    "case_id": "train-t4-88-33244cd44727583e",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=71, B=20\n1. ADD B A\n2. MUL B 5\n3. SUB A B\n4. ADD A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "91",
+    "case_id": "train-t4-89-de1765e9ff187b43",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=80, B=72\n1. SUB B 8\n2. ADD A B\n3. MUL A 4\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "43",
+    "case_id": "train-t4-90-30ae7f5eb891f418",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=77, B=40\n1. MUL A 7\n2. SUB B A\n3. ADD B 3\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "17",
+    "case_id": "train-t4-91-a000cc38dd4f3d64",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=40, B=83\n1. ADD A 5\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "74",
+    "case_id": "train-t4-92-ec03bb7c18c11efe",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=71, B=74\n1. ADD B A\n2. MUL B 2\n3. SUB A B\n4. ADD A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "96",
+    "case_id": "train-t4-93-9ccf862169204527",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=55, B=93\n1. ADD B A\n2. MUL B 5\n3. SUB A B\n4. ADD A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "94",
+    "case_id": "train-t4-94-f29b8043d018706d",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=87, B=1\n1. ADD A 4\n2. MUL B 3\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "42",
+    "case_id": "train-t4-95-885488e32da94564",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=7, B=77\n1. SUB B 6\n2. ADD A B\n3. MUL A 8\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "23",
+    "case_id": "train-t4-96-c74c595b4d71210f",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=7, B=25\n1. SUB B 2\n2. ADD A B\n3. MUL A 4\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "59",
+    "case_id": "train-t4-97-0ce9556ef31bb692",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=89, B=51\n1. MUL A 7\n2. SUB B A\n3. ADD B 8\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "27",
+    "case_id": "train-t4-98-6425de8d5e587861",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=67, B=78\n1. ADD B A\n2. MUL B 9\n3. SUB A B\n4. ADD A 4\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "73",
+    "case_id": "train-t4-99-a0f5491ea00309b7",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=71, B=66\n1. MUL A 7\n2. SUB B A\n3. ADD B 7\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "47",
+    "case_id": "train-t4-100-de10f7e7a04a83d7",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=77, B=2\n1. ADD B A\n2. MUL B 9\n3. SUB A B\n4. ADD A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "66",
+    "case_id": "train-t4-101-487ff1141342b399",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=19, B=63\n1. MUL A 3\n2. SUB B A\n3. ADD B 3\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "52",
+    "case_id": "train-t4-102-090c9c1ecc5f4b1d",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=43, B=44\n1. MUL A 5\n2. SUB B A\n3. ADD B 8\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "93",
+    "case_id": "train-t4-103-04c53d6b802dd988",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=82, B=4\n1. ADD A 3\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "41",
+    "case_id": "train-t4-104-2a5e5f57533b578c",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=78, B=63\n1. ADD A 2\n2. MUL B 4\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "73",
+    "case_id": "train-t4-105-604879babe9de97b",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=73, B=68\n1. MUL A 5\n2. SUB B A\n3. ADD B 5\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "77",
+    "case_id": "train-t4-106-bbc9227fffbe691f",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=46, B=5\n1. ADD B A\n2. MUL B 9\n3. SUB A B\n4. ADD A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "48",
+    "case_id": "train-t4-107-df2ed73eac088224",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=9, B=5\n1. SUB B 6\n2. ADD A B\n3. MUL A 6\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "46",
+    "case_id": "train-t4-108-990efb511e16a6a9",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=95, B=31\n1. ADD B A\n2. MUL B 2\n3. SUB A B\n4. ADD A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "32",
+    "case_id": "train-t4-109-e6d0aad494c61a58",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=68, B=47\n1. SUB B 2\n2. ADD A B\n3. MUL A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "12",
+    "case_id": "train-t4-110-60bb4702d1296827",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=51, B=38\n1. ADD A 3\n2. MUL B 4\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "95",
+    "case_id": "train-t4-111-e22c4e913f07b6c2",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=22, B=86\n1. ADD A 9\n2. MUL B 3\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "74",
+    "case_id": "train-t4-112-724e4a6098603cc8",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=73, B=67\n1. MUL A 3\n2. SUB B A\n3. ADD B 7\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "60",
+    "case_id": "train-t4-113-ec8d12118c3e1b2c",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=70, B=45\n1. SUB B 3\n2. ADD A B\n3. MUL A 4\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "93",
+    "case_id": "train-t4-114-6723ae16b047943e",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=4, B=85\n1. MUL A 6\n2. SUB B A\n3. ADD B 8\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "71",
+    "case_id": "train-t4-115-3a7b9a2bbee28adc",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=37, B=88\n1. SUB B 4\n2. ADD A B\n3. MUL A 7\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "34",
+    "case_id": "train-t4-116-afdce5c3c8abce7d",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=52, B=89\n1. ADD A 6\n2. MUL B 3\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "90",
+    "case_id": "train-t4-117-75cc44818ccdf7a0",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=73, B=86\n1. MUL A 5\n2. SUB B A\n3. ADD B 4\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "3",
+    "case_id": "train-t4-118-be0915719bb5c6c7",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=22, B=56\n1. ADD A 7\n2. MUL B 3\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "67",
+    "case_id": "train-t4-119-b53bcaeb85b54142",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=21, B=69\n1. ADD A 5\n2. MUL B 2\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "21",
+    "case_id": "train-t4-120-b3e1a62aa081b07e",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=58, B=63\n1. ADD A 7\n2. MUL B 7\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "52",
+    "case_id": "train-t4-121-076fd55e9c26a98a",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=93, B=31\n1. ADD A 2\n2. MUL B 8\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "16",
+    "case_id": "train-t4-122-28743cef68035ef9",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=11, B=55\n1. ADD B A\n2. MUL B 3\n3. SUB A B\n4. ADD A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "7",
+    "case_id": "train-t4-123-d72458877f1f944d",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=68, B=4\n1. MUL A 8\n2. SUB B A\n3. ADD B 3\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "1",
+    "case_id": "train-t4-124-18617275cdf4700b",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=32, B=88\n1. ADD A 5\n2. MUL B 4\n3. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "0",
+    "case_id": "train-t4-125-91f6969608feb652",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=54, B=92\n1. MUL A 3\n2. SUB B A\n3. ADD B 5\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "68",
+    "case_id": "train-t4-126-e84ee86c046c8713",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=11, B=65\n1. MUL A 4\n2. SUB B A\n3. ADD B 3\n4. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "55",
+    "case_id": "train-t4-127-7d0d8400d1a42096",
+    "prompt": "Execute this register program in order. ADD, SUB, and MUL update the named target register using its current value and the operand. An operand is either a literal integer or the current value of the named register. After each instruction, replace the updated value with its nonnegative remainder modulo 97. Other registers do not change.\nInitial registers: A=42, B=55\n1. SUB B 7\n2. ADD A B\n3. MUL A 6\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  }
+]
