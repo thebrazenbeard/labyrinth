@@ -151,6 +151,36 @@ class HfReportAuditTests(unittest.TestCase):
         trial["response_sha256"] = "not-a-hash"
         self.assertEqual(audit_hf_report(report)["status"], "FAIL")
 
+    def test_unpaired_unicode_surrogate_is_a_structured_fail(self):
+        report = pilot_fixture()
+        report["evaluations"]["candidate"]["trials"][0]["response_preview"] = "\ud800"
+        result = audit_hf_report(report)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertTrue(any("response" in item for item in result["failures"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "malformed_preview.json"
+            source.write_text(json.dumps(report, ensure_ascii=True), encoding="utf-8")
+            checked = subprocess.run(
+                [sys.executable, "-m", "labyrinth", "audit-hf-report", "--input", str(source)],
+                text=True, capture_output=True, timeout=30,
+            )
+            self.assertEqual(checked.returncode, 2)
+            self.assertEqual(json.loads(checked.stdout)["status"], "FAIL")
+
+    def test_checksum_maps_require_structural_checkpoint_filenames(self):
+        cases = (
+            ("base_weights_sha256", {"unrelated.json": "a" * 64}),
+            ("candidate_adapter_sha256", {"adapter_config.json": "b" * 64}),
+            ("model_metadata_sha256", {"unrelated.json": "c" * 64}),
+        )
+        for field, forged in cases:
+            with self.subTest(field=field):
+                report = pilot_fixture()
+                report[field] = forged
+                result = audit_hf_report(report)
+                self.assertEqual(result["status"], "FAIL")
+                self.assertTrue(any(field in item for item in result["failures"]))
+
     def test_cli_checks_neural_pilot_without_importing_heavy_ml_deps(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "pilot_report.json"
