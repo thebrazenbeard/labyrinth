@@ -10,6 +10,7 @@ from labyrinth.minotaur_critic_pilot import (
     CriticConfig, critic_examples, training_schedule, score_binary,
     encode_supervised_verdict, validate_dataset_separation, reload_critic, SCHEMA,
     verify_reload_contract, prepare_verdict_pair,
+    verdict_logit_diagnostics,
 )
 
 
@@ -23,6 +24,22 @@ class FakeTokenizer:
 
 
 class CriticPilotTests(unittest.TestCase):
+    def test_logit_diagnostics_expose_all_yes_and_class_margin_separation(self):
+        examples = critic_examples(3, "critic_dev", 2, (1,))
+        result = verdict_logit_diagnostics(examples, [(3, 1), (4, 1), (2, 1), (5, 1)])
+        self.assertEqual([row["gold"] for row in result["examples"]],
+                         ["Yes", "No", "Yes", "No"])
+        self.assertEqual([row["margin_yes_minus_no"] for row in result["examples"]],
+                         [2, 3, 1, 4])
+        self.assertEqual(result["by_gold"]["Yes"]["mean_margin_yes_minus_no"], 1.5)
+        self.assertEqual(result["by_gold"]["No"]["mean_margin_yes_minus_no"], 3.5)
+        self.assertEqual(result["by_gold"]["No"]["predicted_yes"], 2)
+        self.assertEqual(result["metrics"]["false_approval_rate"], 1.0)
+        with self.assertRaises(ValueError):
+            verdict_logit_diagnostics(examples, [(3, 1)])
+        with self.assertRaises(ValueError):
+            verdict_logit_diagnostics(examples, [(float("nan"), 1)] * 4)
+
     def test_train_dev_and_transfer_are_deterministic_and_disjoint(self):
         train = critic_examples(1357, "train", 24, (1, 2))
         dev = critic_examples(2468, "critic_dev", 8, (1, 2))

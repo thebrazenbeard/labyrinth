@@ -32,8 +32,8 @@ from .maze import generate_maze
 from .runner import _source_state, load_json
 
 
-SCHEMA = "labyrinth.minotaur-critic-pilot.v2"
-RELOAD_SCHEMA = "labyrinth.minotaur-critic-reload.v2"
+SCHEMA = "labyrinth.minotaur-critic-pilot.v3"
+RELOAD_SCHEMA = "labyrinth.minotaur-critic-reload.v3"
 _ARMS = ("frozen", "candidate", "zero_update", "corrupted")
 
 
@@ -227,6 +227,51 @@ def score_binary(examples: Sequence[CriticExample], predictions: Sequence[bool])
     }
 
 
+def verdict_logit_diagnostics(
+    examples: Sequence[CriticExample], logits: Sequence[tuple[float, float]],
+) -> dict[str, Any]:
+    """Auditable, bounded next-token evidence; margins are not probabilities.
+
+    Logits are ordered (Yes, No). Gold labels derive from the generated oracle,
+    never from model predictions. A zero margin predicts No, matching _score.
+    """
+    if (not examples or len(examples) != len(logits)
+            or any(len(pair) != 2 or not all(math.isfinite(x) for x in pair)
+                   for pair in logits)):
+        raise ValueError("complete finite Yes/No logit pairs required")
+    rows = []
+    predictions = []
+    for ex, (yes, no) in zip(examples, logits):
+        margin = float(yes - no)
+        if not math.isfinite(margin):
+            raise ValueError("nonfinite verdict margin")
+        predicted_yes = margin > 0
+        predictions.append(predicted_yes)
+        rows.append({
+            "example_id": ex.example_id, "case_id": ex.case_id,
+            "kind": ex.kind, "gold": "Yes" if ex.is_correct else "No",
+            "yes_logit": float(yes), "no_logit": float(no),
+            "margin_yes_minus_no": margin,
+            "predicted": "Yes" if predicted_yes else "No",
+        })
+    by_gold = {}
+    for gold in ("Yes", "No"):
+        subset = [row for row in rows if row["gold"] == gold]
+        by_gold[gold] = {
+            "count": len(subset),
+            "predicted_yes": sum(row["predicted"] == "Yes" for row in subset),
+            "mean_margin_yes_minus_no": (
+                sum(row["margin_yes_minus_no"] for row in subset) / len(subset)
+                if subset else None),
+            "min_margin_yes_minus_no": min(
+                (row["margin_yes_minus_no"] for row in subset), default=None),
+            "max_margin_yes_minus_no": max(
+                (row["margin_yes_minus_no"] for row in subset), default=None),
+        }
+    return {"examples": rows, "by_gold": by_gold,
+            "metrics": score_binary(examples, predictions)}
+
+
 def verify_reload_contract(*, training_pid: int, reload_pid: int,
                            measured: dict[str, Any],
                            expected: dict[str, Any]) -> None:
@@ -259,7 +304,7 @@ def _score(model: Any, tokenizer: Any, torch: Any, examples: list[CriticExample]
     if len(yes) != 1 or len(no) != 1 or yes == no:
         raise ValueError("verdict tokens unavailable or ambiguous")
     model.eval()
-    preds: list[bool] = []
+    pairs: list[tuple[float, float]] = []
     with torch.no_grad():
         for example in examples:
             tokens = tokenizer.encode(example.prompt, add_special_tokens=True)
@@ -269,8 +314,11 @@ def _score(model: Any, tokenizer: Any, torch: Any, examples: list[CriticExample]
             logits = model(input_ids=ids, attention_mask=torch.ones_like(ids)).logits[0, -1]
             if not bool(torch.isfinite(logits[yes[0]])) or not bool(torch.isfinite(logits[no[0]])):
                 raise RuntimeError("nonfinite Minotaur verdict logits")
-            preds.append(bool(logits[yes[0]] > logits[no[0]]))
+            pairs.append((float(logits[yes[0]].item()), float(logits[no[0]].item())))
+    diagnostics = verdict_logit_diagnostics(examples, pairs)
+    preds = [row["predicted"] == "Yes" for row in diagnostics["examples"]]
     report = score_binary(examples, preds)
+    report["logit_diagnostics"] = diagnostics
     report["predictions_sha256"] = hashlib.sha256(
         bytes(int(p) for p in preds)).hexdigest()
     report["by_kind"] = {
