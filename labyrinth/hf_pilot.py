@@ -273,11 +273,15 @@ def _score_model(model: Any, tokenizer: Any, torch: Any, cases: list[Challenge],
     with torch.no_grad():
         for challenge in cases:
             prompt = f"Task:\n{challenge.prompt}\nAssistant:\n"
-            ids = tokenizer(prompt, add_special_tokens=True, return_tensors="pt")["input_ids"]
+            encoded = tokenizer(prompt, add_special_tokens=True, return_tensors="pt")
+            ids = encoded["input_ids"]
+            mask = encoded.get("attention_mask")
+            if mask is None or mask.shape != ids.shape:
+                raise ValueError("tokenizer must supply an aligned attention mask")
             if ids.shape[1] + max_new_tokens > max_tokens:
                 raise ValueError("evaluation prompt exceeds context budget")
             ids = ids.to(device)
-            output = model.generate(input_ids=ids, do_sample=False, max_new_tokens=max_new_tokens,
+            output = model.generate(input_ids=ids, attention_mask=mask.to(device), do_sample=False, max_new_tokens=max_new_tokens,
                                     pad_token_id=tokenizer.pad_token_id,
                                     eos_token_id=tokenizer.eos_token_id)
             response = tokenizer.decode(output[0, ids.shape[1]:], skip_special_tokens=True).strip()
