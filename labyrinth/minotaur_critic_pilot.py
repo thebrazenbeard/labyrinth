@@ -32,8 +32,8 @@ from .maze import generate_maze
 from .runner import _source_state, load_json
 
 
-SCHEMA = "labyrinth.minotaur-critic-pilot.v1"
-RELOAD_SCHEMA = "labyrinth.minotaur-critic-reload.v1"
+SCHEMA = "labyrinth.minotaur-critic-pilot.v2"
+RELOAD_SCHEMA = "labyrinth.minotaur-critic-reload.v2"
 _ARMS = ("frozen", "candidate", "zero_update", "corrupted")
 
 
@@ -86,7 +86,7 @@ class CriticConfig:
         if len({self.train_seed, self.dev_seed, self.transfer_seed}) != 3:
             raise ValueError("training and evaluation seeds must differ")
         if self.steps > self.train_count_per_tier * 2:
-            raise ValueError("one scheduled example per distinct training case maximum")
+            raise ValueError("one paired optimizer update per distinct training case maximum")
 
     def validate(self, *, output_must_be_new: bool = True) -> tuple[Path, Path, list[Path]]:
         self.validate_fields()
@@ -143,22 +143,34 @@ def validate_dataset_separation(*groups: Sequence[CriticExample]) -> None:
 
 
 def training_schedule(examples: Sequence[CriticExample], *, steps: int,
-                      seed: int) -> list[CriticExample]:
-    if type(steps) is not int or steps < 2 or steps % 2 or type(seed) is not int:
-        raise ValueError("training steps must be positive even with a valid seed")
+                      seed: int) -> list[tuple[CriticExample, CriticExample]]:
+    """One balanced correct/wrong *pair per task* per optimizer update.
+
+    Distinct case IDs prevent an update schedule from consuming the same
+    problem twice, while pairing prevents class-prior learning from an
+    entire optimizer step seeing only a positive or negative example.
+    """
+    if type(steps) is not int or steps < 1 or type(seed) is not int:
+        raise ValueError("training steps must be positive with a valid seed")
     grouped: dict[str, list[CriticExample]] = {}
     for ex in examples:
         grouped.setdefault(ex.case_id, []).append(ex)
-    if steps > len(grouped) or any(len(pair) != 2 or {x.is_correct for x in pair} != {True, False}
-                                   for pair in grouped.values()):
-        raise ValueError("need one balanced pair per independent training task")
+    if steps > len(grouped) or any(
+        len(pair) != 2 or {x.is_correct for x in pair} != {True, False}
+        or len({x.example_id for x in pair}) != 2
+        or len({x.case_prompt_sha256 for x in pair}) != 1
+        or len({x.trainee_answer for x in pair}) != 2
+        for pair in grouped.values()
+    ):
+        raise ValueError("need one unique balanced pair per distinct training task")
     rng = random.Random(seed)
     case_ids = sorted(grouped)
     rng.shuffle(case_ids)
-    result: list[CriticExample] = []
-    for index, case_id in enumerate(case_ids[:steps]):
-        label = index % 2 == 0
-        result.append(next(ex for ex in grouped[case_id] if ex.is_correct is label))
+    result: list[tuple[CriticExample, CriticExample]] = []
+    for case_id in case_ids[:steps]:
+        pair = list(grouped[case_id])
+        rng.shuffle(pair)
+        result.append((pair[0], pair[1]))
     return result
 
 
@@ -171,6 +183,29 @@ def encode_supervised_verdict(tokenizer: Any, example: CriticExample,
     if not prefix or len(prefix) + 1 > max_tokens:
         raise ValueError("example exceeds max token length")
     return prefix + label, [-100] * len(prefix) + label
+
+
+def prepare_verdict_pair(
+    tokenizer: Any, pair: tuple[CriticExample, CriticExample],
+    *, max_tokens: int, corrupt: bool,
+) -> tuple[tuple[list[int], list[int]], tuple[list[int], list[int]]]:
+    """Supervise both opposite labels on an identical task each step."""
+    if (type(pair) is not tuple or len(pair) != 2
+            or any(type(ex) is not CriticExample for ex in pair)
+            or pair[0].case_id != pair[1].case_id
+            or pair[0].case_prompt_sha256 != pair[1].case_prompt_sha256
+            or pair[0].example_id == pair[1].example_id
+            or pair[0].trainee_answer == pair[1].trainee_answer
+            or {ex.is_correct for ex in pair} != {True, False}
+            or type(corrupt) is not bool):
+        raise ValueError("each update must have correct/wrong examples of one distinct task")
+    prepared: list[tuple[list[int], list[int]]] = []
+    for ex in pair:
+        target = (ex if not corrupt else
+                  CriticExample(**{**asdict(ex), "is_correct": not ex.is_correct}))
+        prepared.append(encode_supervised_verdict(tokenizer, target,
+                                                  max_tokens=max_tokens))
+    return prepared[0], prepared[1]
 
 
 def score_binary(examples: Sequence[CriticExample], predictions: Sequence[bool]) -> dict[str, Any]:
@@ -246,16 +281,14 @@ def _score(model: Any, tokenizer: Any, torch: Any, examples: list[CriticExample]
     return report
 
 
-def _updates(model: Any, tokenizer: Any, torch: Any, examples: list[CriticExample],
+def _updates(model: Any, tokenizer: Any, torch: Any,
+             pairs: list[tuple[CriticExample, CriticExample]],
              config: CriticConfig, *, mode: str) -> dict[str, Any]:
     if mode not in ("candidate", "zero_update", "corrupted"):
         raise ValueError("unsupported arm")
-    prepared = []
-    for ex in examples:
-        target_ex = (ex if mode != "corrupted" else
-                     CriticExample(**{**asdict(ex), "is_correct": not ex.is_correct}))
-        prepared.append(encode_supervised_verdict(tokenizer, target_ex,
-                                                  max_tokens=config.max_tokens))
+    prepared = [prepare_verdict_pair(tokenizer, pair,
+                                     max_tokens=config.max_tokens,
+                                     corrupt=mode == "corrupted") for pair in pairs]
     random.seed(config.seed)
     torch.manual_seed(config.seed)
     model.train()
@@ -264,14 +297,19 @@ def _updates(model: Any, tokenizer: Any, torch: Any, examples: list[CriticExampl
         lr=config.learning_rate, weight_decay=0.0,
     )
     losses: list[float] = []
-    for tokens, labels in prepared:
-        ids = torch.tensor([tokens], dtype=torch.long, device=config.device)
-        targets = torch.tensor([labels], dtype=torch.long, device=config.device)
+    for prepared_pair in prepared:
         optimizer.zero_grad(set_to_none=True)
-        loss = model(input_ids=ids, attention_mask=torch.ones_like(ids), labels=targets).loss
-        if not bool(torch.isfinite(loss)):
-            raise RuntimeError("nonfinite critic loss")
-        loss.backward()
+        paired_loss = 0.0
+        # Accumulate equal positive/negative gradients before one step.
+        # Sequential backward saves memory versus retaining both graphs.
+        for tokens, labels in prepared_pair:
+            ids = torch.tensor([tokens], dtype=torch.long, device=config.device)
+            targets = torch.tensor([labels], dtype=torch.long, device=config.device)
+            loss = model(input_ids=ids, attention_mask=torch.ones_like(ids), labels=targets).loss
+            if not bool(torch.isfinite(loss)):
+                raise RuntimeError("nonfinite critic loss")
+            (loss / 2).backward()
+            paired_loss += float(loss.detach().cpu().item()) / 2
         if mode == "zero_update":
             for parameter in model.parameters():
                 if parameter.grad is not None:
@@ -283,9 +321,10 @@ def _updates(model: Any, tokenizer: Any, torch: Any, examples: list[CriticExampl
         if any(not bool(torch.isfinite(parameter).all()) for parameter in model.parameters()
                if parameter.requires_grad):
             raise RuntimeError("nonfinite critic adapter value after optimizer step")
-        losses.append(float(loss.detach().cpu().item()))
-    return {"optimizer_steps": len(losses), "forward_backward_steps": len(losses),
-            "visited_example_ids": [ex.example_id for ex in examples],
+        losses.append(paired_loss)
+    return {"optimizer_steps": len(losses), "forward_backward_steps": 2 * len(losses),
+            "examples_per_optimizer_step": 2,
+            "visited_example_ids": [ex.example_id for pair in pairs for ex in pair],
             "zeroed_gradients": mode == "zero_update", "losses": losses}
 
 

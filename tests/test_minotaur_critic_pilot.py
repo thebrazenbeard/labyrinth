@@ -9,7 +9,7 @@ import unittest
 from labyrinth.minotaur_critic_pilot import (
     CriticConfig, critic_examples, training_schedule, score_binary,
     encode_supervised_verdict, validate_dataset_separation, reload_critic, SCHEMA,
-    verify_reload_contract,
+    verify_reload_contract, prepare_verdict_pair,
 )
 
 
@@ -47,9 +47,14 @@ class CriticPilotTests(unittest.TestCase):
         selected = training_schedule(train, steps=24, seed=777)
         self.assertEqual(selected, training_schedule(train, steps=24, seed=777))
         self.assertEqual(len(selected), 24)
-        self.assertEqual(sum(x.is_correct for x in selected), 12)
-        self.assertEqual(len({x.example_id for x in selected}), 24)
-        self.assertEqual(len({x.case_id for x in selected}), 24)
+        self.assertTrue(all(len(pair) == 2 for pair in selected))
+        self.assertTrue(all({x.is_correct for x in pair} == {True, False} for pair in selected))
+        self.assertTrue(all(len({x.case_id for x in pair}) == 1 for pair in selected))
+        self.assertEqual(sum(x.is_correct for pair in selected for x in pair), 24)
+        self.assertEqual(len({x.example_id for pair in selected for x in pair}), 48)
+        self.assertEqual(len({x.case_id for pair in selected for x in pair}), 24)
+        with self.assertRaises(ValueError):
+            training_schedule(train[:2] + train[:2], steps=2, seed=777)
 
     def test_target_mask_supervises_only_one_verdict_token(self):
         correct = critic_examples(4, "train", 1, (1,))[0]
@@ -62,6 +67,24 @@ class CriticPilotTests(unittest.TestCase):
             self.assertEqual(labels[:-1], [-100] * (len(labels) - 1))
         with self.assertRaises(ValueError):
             encode_supervised_verdict(tokenizer, correct, max_tokens=10)
+
+    def test_paired_supervision_uses_both_labels_on_same_problem_every_update(self):
+        correct, incorrect = critic_examples(4, "train", 1, (1,))
+        tokenizer = FakeTokenizer()
+        prepared = prepare_verdict_pair(tokenizer, (correct, incorrect),
+                                        max_tokens=512, corrupt=False)
+        self.assertEqual(len(prepared), 2)
+        self.assertEqual({labels[-1] for _, labels in prepared}, {11, 12})
+        corrupted = prepare_verdict_pair(tokenizer, (correct, incorrect),
+                                         max_tokens=512, corrupt=True)
+        self.assertEqual([labels[-1] for _, labels in corrupted], [12, 11])
+        with self.assertRaises(ValueError):
+            prepare_verdict_pair(tokenizer, (correct, correct),
+                                 max_tokens=512, corrupt=False)
+        other = critic_examples(5, "train", 1, (1,))[1]
+        with self.assertRaises(ValueError):
+            prepare_verdict_pair(tokenizer, (correct, other),
+                                 max_tokens=512, corrupt=False)
 
     def test_false_approval_and_rejection_metrics_are_separate(self):
         examples = critic_examples(3, "critic_dev", 2, (1,))

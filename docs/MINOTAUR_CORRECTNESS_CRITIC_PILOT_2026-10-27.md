@@ -38,10 +38,14 @@ python -m labyrinth.minotaur_critic_pilot reload \
   --report /absolute/path/to/new/minotaur-critic-reload.json
 ```
 
-The immutable default protocol has 48 tier-1 and tier-2 training *tasks*,
-each with paired right/wrong proposed answers. It selects **24 distinct tasks**,
-one answer apiece and balanced labels, for 24 supervised AdamW updates. The
-loss is masked to a single next-token Yes or No verdict. No eval answer or
+The default v2 protocol has 48 tier-1 and tier-2 training *tasks*, each
+with paired right/wrong proposed answers. It selects **24 distinct tasks**,
+and for each task accumulates the equally weighted gradients from **both**
+correct and incorrect proposed answers before one AdamW update. Thus each
+optimizer step is class-balanced within a single problem, instead of allowing
+a single-label step to follow the class prior. Each arm records
+`forward_backward_steps = 2 * optimizer_steps`. The loss is masked to a
+single next-token Yes or No verdict. No eval answer or
 reference solution enters the prompt at inference time. The model must contain
 both Yes and No as unambiguous single tokens or the pilot fails closed.
 
@@ -50,7 +54,8 @@ All arms use the same pretrained checkpoint and evaluation prompts:
 1. `frozen`: no adapter, no gradient updates.
 2. `candidate`: correct Yes/No supervision and real PEFT updates.
 3. `zero_update`: identical candidate LoRA initialization, same prompts and
-   forward/backward/optimizer steps, **zeroed gradients and zero weight decay**;
+   **two forward/backward passes per optimizer step**, **zeroed gradients and
+   zero weight decay**;
    adapter digest must remain identical to initialization.
 4. `corrupted`: the same initialization and budget as candidate, with labels
    inverted to test whether mere exposure and format learning explain changes.
@@ -78,8 +83,12 @@ reproducibility metadata, **not independently authenticated evidence**.
 - **Generalization supported** only with truly independent, structurally novel
   problems beyond this finite and fully public generator.
 
-This protocol is deliberately bounded to 24 steps and tiny public tasks. It
-cannot support general claims even if observed transfer is positive. Before
+This protocol defaults to 24 paired steps on tiny public tasks. The v2
+schedule consumes twice as many labeled examples per optimizer step as v1;
+**cross-version results are not compute-matched**, though all v2 arms retain
+equal budgets. The added balance is a testable hypothesis, not evidence of
+improvement. The protocol cannot support general claims even if observed
+transfer is positive. Before
 graduation, a separate evaluator must maintain privately custodied tests and
 sign evidence under a pinned acceptance policy. The neural critic does not
 possess the credential that can graduate a trainee.
@@ -90,8 +99,10 @@ The scratch Python lacks the optional Torch runtime. On Lappy, the canonical
 base-model directory initially did not contain an eligible checkpoint, but a
 fresh inventory found a preexisting donor `Open-Reasoner-Zero-0.5B` under
 the distinct donor-model directory. A real, bounded two-update CPU run and
-fresh-process reload subsequently succeeded. **The candidate regressed in
+fresh-process reload of the *original v1 schedule* subsequently succeeded.
+**That candidate regressed in
 development accuracy and false approvals**; see [E-018](MINOTAUR_CRITIC_LAPPY_RUN_2026-10-27.md)
 for exact source, weight, model, adapter, control and scoring evidence. This
-does not establish that Minotaur learned a useful verifier skill. No model
-weight or dependency download was needed.
+does not establish that Minotaur learned a useful verifier skill. V2 paired
+supervision has not yet been validated by pretrained inference merely because
+the source was changed. No model weight or dependency download was needed.
