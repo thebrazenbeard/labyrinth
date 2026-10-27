@@ -140,10 +140,13 @@ proposed answers against matched frozen, zero-update, and corrupted-label
 controls, measures false approvals on identical development and structurally
 reserved transfer cases, and requires an unchanged adapter with identical
 predictions after **fresh-process** reload. A same-process or mismatching
-reload fails closed. This code has unit coverage but has **not yet been run on
-a verified small pretrained checkpoint** as a correctness critic, so neural
-learning and generalized reasoning improvement are NOT ESTABLISHED. See the
-[critic execution protocol](docs/MINOTAUR_CORRECTNESS_CRITIC_PILOT_2026-10-27.md).
+reload fails closed. A **real pretrained CPU pilot** subsequently ran two
+candidate LoRA optimizer updates, verified an unchanged zero-update control,
+and reloaded the adapter in a separate process. However, development accuracy
+fell from **5/8 to 4/8** and transfer remained **2/4**: the mechanism works,
+but reasoning improvement and generalization are NOT ESTABLISHED. See the
+[critic execution protocol](docs/MINOTAUR_CORRECTNESS_CRITIC_PILOT_2026-10-27.md)
+and [live Lappy run evidence E-018](docs/MINOTAUR_CRITIC_LAPPY_RUN_2026-10-27.md).
 
 `labyrinth.processbench_adapter` can score a reviewer on caller-supplied,
 strictly validated **Qwen/ProcessBench** JSONL records, with correct one-based

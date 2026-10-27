@@ -84,11 +84,14 @@ graduation, a separate evaluator must maintain privately custodied tests and
 sign evidence under a pinned acceptance policy. The neural critic does not
 possess the credential that can graduate a trainee.
 
-### Known environment blocker
+### Environment and live pilot
 
-The current scratch Python lacks the optional Torch runtime. Lappy has
-CPU-only Torch/Transformers/PEFT but **no verified small pretrained HF model
-directory** in the checked canonical model location. Training and reload were
-therefore not executed by merely adding this code. A suitable local checkpoint
-must be confirmed before calling the above commands. Do not silently download
-large model weights onto Lappy's capacity-constrained disk.
+The scratch Python lacks the optional Torch runtime. On Lappy, the canonical
+base-model directory initially did not contain an eligible checkpoint, but a
+fresh inventory found a preexisting donor `Open-Reasoner-Zero-0.5B` under
+the distinct donor-model directory. A real, bounded two-update CPU run and
+fresh-process reload subsequently succeeded. **The candidate regressed in
+development accuracy and false approvals**; see [E-018](MINOTAUR_CRITIC_LAPPY_RUN_2026-10-27.md)
+for exact source, weight, model, adapter, control and scoring evidence. This
+does not establish that Minotaur learned a useful verifier skill. No model
+weight or dependency download was needed.
