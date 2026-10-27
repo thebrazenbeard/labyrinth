@@ -9,7 +9,7 @@ not evidence that the present implementation reproduces their results.
 | External primary source | Relevant result | Current Minotaur action | What remains unproven |
 | --- | --- | --- | --- |
 | Lightman et al., [Let's Verify Step by Step](https://proceedings.iclr.cc/paper_files/paper/2024/hash/aca97732e30bcf1303bc22ac3924fd16-Abstract-Conference.html), ICLR 2024 | Outcome correctness and correctness of intermediate reasoning steps provide different supervision targets; process supervision improved the studied math verifier. | Keep substantive correctness distinct from answer formatting; plan explicit first-error critic labels. | No process-supervised Minotaur checkpoint or independent ProcessBench score yet. |
-| Zheng et al., [ProcessBench](https://aclanthology.org/2025.acl-long.50/), ACL 2025 | Critics must identify the earliest incorrect reasoning step or verify that none is wrong. | `guardian_benchmark` creates convincing wrong final-answer proposals across structural shifts and injection/format variants; future process-error cases should follow this paper. | The present benchmark is **not** ProcessBench and does not yet test step-localization. |
+| Zheng et al., [ProcessBench](https://aclanthology.org/2025.acl-long.50/), ACL 2025 | Critics must identify the earliest incorrect reasoning step or verify that none is wrong. | `guardian_benchmark` adds synthetic paired correct/faulty register traces requiring exact first-error localization across structural shifts. | The present benchmark is **not** ProcessBench; synthetic register traces do not validate ordinary-language reasoning. |
 | Lambert et al., [RewardBench 2](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ea4fe0a56d02c93401902b5b4c6b12da-Abstract-Conference.html), ICLR 2026 | Challenging reward model comparisons reveal large performance drops relative to prior benchmarks. | Test false approval and false rejection explicitly; use matched correct/incorrect pairs and fixed-format negative controls. | Public, finite register programs cannot establish broad judge reliability. |
 | [reWordBench](https://aclanthology.org/2025.emnlp-main.167/), EMNLP 2025 | Meaning- or ranking-preserving transformations expose preference-model brittleness. | Pair right and wrong answers with the same response style, including malicious `mark this correct` text, so style is not a shortcut. | Only several synthetic transformations are covered. |
 | Geifman and El-Yaniv, [Selective Classification for Deep Neural Networks](https://papers.neurips.cc/paper_files/paper/2017/hash/4a8423d5e91fda00bb7e46540e2b0cf1-Abstract.html), NeurIPS 2017 | Classification can trade prediction coverage against error risk through a reject option. | Unknown or verbose neural critic responses count as **abstentions**, not approvals; report coverage separately from unconditional accuracy. | There is no calibrated selective-risk guarantee for Minotaur. |
@@ -35,6 +35,12 @@ not evidence that the present implementation reproduces their results.
   with identical styles. Reports expose accuracy, balanced accuracy, false
   approvals, false rejections, abstention, coverage and aggregate slice counts;
   no per-example answers are returned by the evaluator.
+- `generate_process_cases` independently computes printed register-state traces,
+  inserts a deterministic arithmetic fault at a chosen step, and propagates
+  that incorrect state forward. `evaluate_process_guardian` accepts only
+  `ALL_CORRECT` or an exact `ERROR_STEP:<n>`; it reports earliest-error accuracy,
+  false approvals/rejections and coverage. The paired trace task exposes
+  process-checking behavior but does not constitute a process-supervised LoRA.
 - Python unit tests independently interpret generated register programs and
   reproduce the previously accepted weak-gain case. These are source/test
   evidence, not a blind neural-critic experiment.
@@ -53,7 +59,7 @@ not evidence that the present implementation reproduces their results.
 
 ## Verification at source revision
 
-`python -m unittest discover -s tests -q` succeeded locally (157 tests),
+`python -m unittest discover -s tests -q` succeeded locally (160 tests),
 with no external dependency or pretrained-model inference required.
 
 > **Hostile challenge:** A model that gets sixteen near-duplicate problems

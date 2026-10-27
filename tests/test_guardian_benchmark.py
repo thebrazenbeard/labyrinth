@@ -3,7 +3,10 @@
 import re
 import unittest
 
-from labyrinth.guardian_benchmark import evaluate_guardian, generate_guardian_cases
+from labyrinth.guardian_benchmark import (
+    evaluate_guardian, evaluate_process_guardian, generate_guardian_cases,
+    generate_process_cases,
+)
 
 
 class GuardianBenchmarkTests(unittest.TestCase):
@@ -90,6 +93,49 @@ class GuardianBenchmarkTests(unittest.TestCase):
         cases = generate_guardian_cases(seed=1, count_per_slice=4)
         with self.assertRaises(ValueError):
             evaluate_guardian(cases + [cases[0]], lambda _q, _p: "INCORRECT")
+
+    def test_process_verifier_locates_earliest_step_error(self):
+        cases = generate_process_cases(seed=91, count_per_slice=8)
+        self.assertEqual(cases, generate_process_cases(seed=91, count_per_slice=8))
+        self.assertEqual(len(cases), 48)
+        self.assertEqual(sum(c.first_error_step is None for c in cases), 24)
+        for case in cases:
+            registers = {"A": int(re.search(r"Initial registers: A=(\d+)", case.question)[1]),
+                         "B": int(re.search(r"B=(\d+)", case.question)[1])}
+            instructions = re.findall(r"^\d+\. (ADD|SUB|MUL) ([AB]) ([AB]|\d+)$",
+                                      case.question, re.MULTILINE)
+            observed_first_error = None
+            for idx, (op, target, operand) in enumerate(instructions, 1):
+                operand_value = registers[operand] if operand in registers else int(operand)
+                if op == "ADD":
+                    registers[target] = (registers[target] + operand_value) % 97
+                elif op == "SUB":
+                    registers[target] = (registers[target] - operand_value) % 97
+                else:
+                    registers[target] = (registers[target] * operand_value) % 97
+                line = f"Step {idx}: A={registers['A']}, B={registers['B']}"
+                if line != case.steps[idx - 1] and observed_first_error is None:
+                    observed_first_error = idx
+                # After a faulty step, the independent correct trajectory still
+                # uses the correct state, so the *first* mismatch is decisive.
+            self.assertEqual(observed_first_error, case.first_error_step)
+
+    def test_process_verifier_negative_control_and_strict_abstention(self):
+        cases = generate_process_cases(seed=12, count_per_slice=4)
+        approvals = evaluate_process_guardian(cases,
+                     lambda _q, _steps: "ALL_CORRECT")
+        self.assertEqual(approvals["false_approval_rate"], 1.0)
+        self.assertEqual(approvals["accuracy"], 0.5)
+        perfect = {(c.question, c.steps):
+                   "ALL_CORRECT" if c.first_error_step is None else f"ERROR_STEP:{c.first_error_step}"
+                   for c in cases}
+        result = evaluate_process_guardian(cases, lambda q, steps: perfect[(q, steps)])
+        self.assertEqual(result["accuracy"], 1.0)
+        self.assertEqual(result["false_approval_rate"], 0.0)
+        self.assertEqual(result["reasoning_qualification"], "NOT_ESTABLISHED")
+        abstain = evaluate_process_guardian(cases, lambda _q, _steps: "ALL_CORRECT\nERROR_STEP:1")
+        self.assertEqual(abstain["coverage"], 0.0)
+        self.assertEqual(abstain["accuracy"], 0.0)
 
 
 if __name__ == "__main__":

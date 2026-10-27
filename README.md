@@ -108,10 +108,13 @@ The choice and significance level are fingerprint-bound to persistent gate state
 `labyrinth.guardian_benchmark.generate_guardian_cases` creates public
 development cases with three register-program structure profiles, correct and
 convincing incorrect trainee answers in matched styles, plus injected claims
-that a judge should mark answers correct. `evaluate_guardian` reports false
-approvals, false rejections, abstentions, coverage and structural slice metrics;
-it never grants qualification. Its public answers must **not** be used for a
-blind final exam. See the [outside-source research mapping and evidence limits](docs/MINOTAUR_GUARDIAN_EXTERNAL_RESEARCH_2026-10-27.md).
+that a judge should mark answers correct. Its process counterpart,
+`generate_process_cases`, creates paired valid/faulty execution traces and
+asks the guardian to identify the **first incorrect step**, as in the
+ProcessBench research problem. The associated evaluators report false
+approvals, false rejections, abstentions, coverage and slice metrics; neither
+grants qualification. Public answers must **not** be used for a blind final
+exam. See the [outside-source research mapping and evidence limits](docs/MINOTAUR_GUARDIAN_EXTERNAL_RESEARCH_2026-10-27.md).
 
 The next gate is executing this optional path in an isolated environment with independently measured resource use, immutable model/tokenizer identity and a matched repeated-seed experiment. Do not infer from the code or changed adapter bytes that a pretrained language model became better at reasoning.
 
