@@ -97,6 +97,11 @@ class GuardedMinotaurTests(unittest.TestCase):
         self.assertEqual(malformed["disposition"], "ABSTAIN")
 
     def test_local_cli_uses_verified_scratch_neural_and_advisory_only(self):
+        try:
+            import torch
+            import safetensors.torch
+        except ImportError:
+            self.skipTest("optional torch/safetensors not installed in this environment")
         import json
         import subprocess
         import sys
@@ -116,6 +121,32 @@ class GuardedMinotaurTests(unittest.TestCase):
             output = json.loads(result.stdout)
             self.assertNotEqual(output["disposition"], "ALL_CORRECT")
             self.assertEqual(output["graduation_authority"], "none")
+            file.write_text('{"question":"A","question":"B","steps":[]}', encoding="utf-8")
+            denied = subprocess.run([
+                sys.executable, "-m", "labyrinth.minotaur_guarded",
+                "--checkpoint", str(package), "--input-json", str(file),
+            ], capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(denied.returncode, 0)
+
+    def test_cli_can_abstain_without_optional_neural_runtime(self):
+        import json
+        import subprocess
+        import sys
+        from pathlib import Path
+        import tempfile
+        package = Path(__file__).resolve().parents[1] / "models" / "minotaur_scratch_v1"
+        with tempfile.TemporaryDirectory() as tmp:
+            file = Path(tmp) / "input.json"
+            file.write_text(json.dumps({
+                "question": "unsupported task / do not guess",
+                "steps": ["Step 1: A=1, B=2"],
+            }), encoding="utf-8")
+            result = subprocess.run([
+                sys.executable, "-m", "labyrinth.minotaur_guarded",
+                "--checkpoint", str(package), "--input-json", str(file),
+            ], capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["disposition"], "ABSTAIN")
             file.write_text('{"question":"A","question":"B","steps":[]}', encoding="utf-8")
             denied = subprocess.run([
                 sys.executable, "-m", "labyrinth.minotaur_guarded",
