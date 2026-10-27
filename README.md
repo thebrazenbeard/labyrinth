@@ -75,9 +75,13 @@ The `train-hf` and `eval-hf` commands operate on an **already-local**, small Hug
 python -m labyrinth train-hf --model-path LOCAL_HF_MODEL_DIR --output-dir NEW_EMPTY_PARENT/RUN_001 --device cpu --steps 2
 # Invoke separately to qualify persistence; report path must not exist.
 python -m labyrinth eval-hf --run-dir NEW_EMPTY_PARENT/RUN_001 --report NEW_EMPTY_PARENT/reload.json
+# Offline check of a saved HF pilot report's internally reproducible fields:
+python -m labyrinth audit-hf-report --input NEW_EMPTY_PARENT/RUN_001/pilot_report.json
 ```
 
 This path never downloads weights, installs packages, runs arbitrary model text, or replaces the base checkpoint. It rejects existing output directories and checkpoints exceeding its strict 1 GiB no-quantization limit; therefore the existing ~6.15 GB 3B-class local checkpoint on Lappy is **not eligible** for this initial pilot. Its default two steps consume only two of eight default generated training examples. The public finite mazes are a mechanism smoke test, **not** a qualified learning effect. The current untrained-adapter `sham` performs no training visits or optimizer steps, so it is **not a compute-matched placebo**.
+
+`audit-hf-report` is dependency-free and re-generates the declared train/eval case IDs, held-out prompt commitment, control metadata, training visit order, and reported evaluation metrics. It verifies file/tensor **digest receipt syntax**, but does not open or authenticate the checkpoint files. For responses whose entire text is recoverable from the stored 128-character preview, it independently rechecks the response digest and answer score. Longer responses whose hashes differ from their preview yield `INCOMPLETE`, never an unqualified `PASS`. Inconsistent records yield `FAIL`; the command exits nonzero for both. Source fingerprints must match the auditor checkout, so older reports should be audited at their source revision. All receipts and model-origin claims are self-reported: even `PASS` is **not proof** that training actually occurred or improved reasoning. The original run's full generated text was not always retained; future run schemas should save auditable full text in a separately controlled evidence artifact.
 
 **Executed Lappy CPU smoke (exact source commit `6f7b2924d7f6178623c9d014dece3762890bcf82`, 2026-10-26):** locally generated random tiny GPT-2 model, two PEFT LoRA optimizer updates, changed trainable tensor SHA-256, saved adapter, independent Python process reload and verified equality of the trained/reloaded tensor-value SHA-256. Both processes exited successfully. Held-out scores were **baseline 0/2, trained 0/2, untrained-adapter 0/2, corrupted supervision 0/2**. This is direct evidence of a working neural adapter training/persistence *mechanism*, not improved reasoning, pretrained adaptation or GPU training. See the [exact evidence record](docs/RESEARCH_LOG_2026-10-26.md) and [hostile review](docs/HF_PILOT_HOSTILE_REVIEW_2026-10-26.md). Independent structural/paraphrase holdouts are still needed before higher claims.
 
@@ -118,6 +122,7 @@ Important limitations:
 - `labyrinth/report_audit.py`: offline report consistency verifier; neither provenance authentication nor a learning claim
 - `labyrinth/toy_backend.py`: explicitly limited CPU parameter learning and checkpoint reload
 - `labyrinth/hf_pilot.py`: opt-in local HF/PEFT LoRA SFT and same-checkpoint controls; no default ML dependency
+- `labyrinth/hf_report_audit.py`: dependency-free self-consistency audit of HF pilot receipts and available predictions
 - `labyrinth/cli.py`: `run`, `experiment`, `audit-report`, `train-toy`, `toy-eval`, `train-hf`, and `eval-hf` commands
 
 Labyrinth deliberately does not install itself into Vera, execute model responses, mutate Git repositories, or claim any externally deployed training effect.
