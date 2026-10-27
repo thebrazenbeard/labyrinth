@@ -52,6 +52,14 @@ class ProcessBenchAdapterTests(unittest.TestCase):
         self.assertNotIn("predictions", report)
         self.assertNotIn("cases", report)
 
+    def test_one_class_benchmark_does_not_claim_zero_error_rate(self):
+        good = evaluate_processbench(self.cases[:1], lambda _q, _steps: "ALL_CORRECT")
+        wrong = evaluate_processbench(self.cases[1:2], lambda _q, _steps: "ALL_CORRECT")
+        self.assertIsNone(good["false_approval_rate"])
+        self.assertIsNone(wrong["false_rejection_rate"])
+        self.assertEqual(good["error_cases"], 0)
+        self.assertEqual(wrong["correct_cases"], 0)
+
     def test_abstain_and_accept_all_negative_controls(self):
         allow = evaluate_processbench(self.cases, lambda _q, _steps: "ALL_CORRECT")
         self.assertEqual(allow["accuracy"], 0.5)

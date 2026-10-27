@@ -116,7 +116,7 @@ def load_processbench_jsonl(data: bytes, *, split: str) -> tuple[ProcessBenchCas
 def evaluate_processbench(
     cases: Sequence[ProcessBenchCase],
     reviewer: Callable[[str, tuple[str, ...]], str],
-) -> dict[str, str | int | float]:
+) -> dict[str, str | int | float | None]:
     """Compute first-error agreement, matching ProcessBench's class accuracies.
 
     No answer label, generator, or final-answer correctness is shown to the
@@ -184,8 +184,8 @@ def evaluate_processbench(
         "harmonic_f1": harmonic,
         "coverage": (len(cases) - abstentions) / len(cases),
         "abstentions": abstentions,
-        "false_approval_rate": false_approvals / error_cases if error_cases else 0.0,
-        "false_rejection_rate": false_rejections / correct_cases if correct_cases else 0.0,
+        "false_approval_rate": false_approvals / error_cases if error_cases else None,
+        "false_rejection_rate": false_rejections / correct_cases if correct_cases else None,
     }
 
 
