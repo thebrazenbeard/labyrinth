@@ -272,6 +272,42 @@ def verdict_logit_diagnostics(
             "metrics": score_binary(examples, predictions)}
 
 
+def _diagnostic_logit_values_match(measured: Any, expected: Any) -> bool:
+    """Permit tiny CPU logit rounding, never decision/label/metric drift."""
+    if type(measured) is not dict or type(expected) is not dict:
+        return False
+    if measured.keys() != expected.keys() or measured.get("metrics") != expected.get("metrics"):
+        return False
+
+    def same(a: Any, b: Any) -> bool:
+        if type(a) is dict and type(b) is dict:
+            return a.keys() == b.keys() and all(same(a[k], b[k]) for k in a)
+        if type(a) is list and type(b) is list:
+            return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
+        if type(a) is float and type(b) is float:
+            return math.isfinite(a) and math.isfinite(b) and abs(a - b) <= 0.00005
+        return type(a) is type(b) and a == b
+
+    return (same(measured.get("examples"), expected.get("examples"))
+            and same(measured.get("by_gold"), expected.get("by_gold")))
+
+
+def _reload_scores_match(measured: Any, expected: Any) -> bool:
+    if measured == expected:
+        return True
+    if type(measured) is not dict or type(expected) is not dict or measured.keys() != expected.keys():
+        return False
+    for slice_name in expected:
+        left, right = measured[slice_name], expected[slice_name]
+        if type(left) is not dict or type(right) is not dict or left.keys() != right.keys():
+            return False
+        if any(left[k] != right[k] for k in right if k != "logit_diagnostics"):
+            return False
+        if not _diagnostic_logit_values_match(left.get("logit_diagnostics"), right.get("logit_diagnostics")):
+            return False
+    return True
+
+
 def verify_reload_contract(*, training_pid: int, reload_pid: int,
                            measured: dict[str, Any],
                            expected: dict[str, Any]) -> None:
@@ -280,7 +316,7 @@ def verify_reload_contract(*, training_pid: int, reload_pid: int,
         raise RuntimeError("Minotaur reload process identity is invalid")
     if training_pid == reload_pid:
         raise RuntimeError("Minotaur reload must run in a fresh process")
-    if measured != expected:
+    if not _reload_scores_match(measured, expected):
         raise RuntimeError("Minotaur reloaded predictions or metrics differ")
 
 
@@ -512,7 +548,7 @@ def reload_critic(run_dir: str, report_path: str) -> dict[str, Any]:
         "process_id": os.getpid(),
         "different_process_id": os.getpid() != prior["process_id"],
         "reloaded_lora_value_sha256": digest,
-        "same_predictions_and_metrics": measurements == prior["evaluations"]["candidate"],
+        "same_predictions_and_metrics": _reload_scores_match(measurements, prior["evaluations"]["candidate"]),
         "evaluations": measurements,
         "qualification": "NOT_ESTABLISHED",
     }

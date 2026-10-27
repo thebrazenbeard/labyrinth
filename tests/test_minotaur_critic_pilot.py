@@ -134,6 +134,26 @@ class CriticPilotTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "source tree changed"):
                 reload_critic(tmp, str(Path(tmp) / "reload.json"))
 
+    def test_reload_accepts_only_tiny_logit_drift_with_identical_verdicts(self):
+        examples = critic_examples(3, "critic_dev", 2, (1,))
+        original = [(1.5, 1.0), (0.5, 1.0), (1.4, 1.0), (0.4, 1.0)]
+        def record(values):
+            return {"dev": {"accuracy": 0.5, "predictions_sha256": "unchanged",
+                            "logit_diagnostics": verdict_logit_diagnostics(examples, values)}}
+        baseline = record(original)
+        slight = record([(a + 0.00002, b) for a, b in original])
+        verify_reload_contract(training_pid=12, reload_pid=13,
+                               measured=slight, expected=baseline)
+        with self.assertRaisesRegex(RuntimeError, "differ"):
+            verify_reload_contract(training_pid=12, reload_pid=13,
+                                   measured=record([(a + 0.002, b) for a, b in original]),
+                                   expected=baseline)
+        changed_verdict = list(original)
+        changed_verdict[1] = (2.0, 1.0)
+        with self.assertRaisesRegex(RuntimeError, "differ"):
+            verify_reload_contract(training_pid=12, reload_pid=13,
+                                   measured=record(changed_verdict), expected=baseline)
+
     def test_reload_contract_fails_closed_on_same_process_or_changed_predictions(self):
         with self.assertRaisesRegex(RuntimeError, "fresh process"):
             verify_reload_contract(training_pid=12, reload_pid=12,
