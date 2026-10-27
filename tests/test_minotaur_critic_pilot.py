@@ -118,6 +118,15 @@ class CriticPilotTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             score_selective_margins(examples, [0.1] * 4, threshold=-1.0)
 
+    def test_binary_only_verdict_objective_must_be_explicitly_selected(self):
+        config = CriticConfig(model_path="model", output_dir="new",
+                              loss_kind="binary_logits_ce")
+        config.validate_fields()
+        self.assertEqual(config.loss_kind, "binary_logits_ce")
+        with self.assertRaises(ValueError):
+            CriticConfig(model_path="model", output_dir="new",
+                         loss_kind="unknown").validate_fields()
+
     def test_config_bounds_no_auto_download(self):
         config = CriticConfig(model_path="/not-a-real-model", output_dir="/tmp/not-a-run")
         with self.assertRaises((FileNotFoundError, ValueError)):

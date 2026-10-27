@@ -66,6 +66,7 @@ class CriticConfig:
     lora_alpha: int = 8
     device: str = "cpu"
     objective: str = "answer_correctness"  # or process_first_error
+    loss_kind: str = "causal_token_ce"  # or binary_logits_ce
 
     def validate_fields(self) -> None:
         for name in ("seed", "train_seed", "dev_seed", "transfer_seed"):
@@ -87,6 +88,8 @@ class CriticConfig:
             raise ValueError("device must be cpu or cuda")
         if self.objective not in ("answer_correctness", "process_first_error"):
             raise ValueError("unsupported Minotaur critic objective")
+        if self.loss_kind not in ("causal_token_ce", "binary_logits_ce"):
+            raise ValueError("unsupported Minotaur critic loss objective")
         if len({self.train_seed, self.dev_seed, self.transfer_seed}) != 3:
             raise ValueError("training and evaluation seeds must differ")
         if self.steps > self.train_count_per_tier * 2:
@@ -442,6 +445,10 @@ def _updates(model: Any, tokenizer: Any, torch: Any,
     prepared = [prepare_verdict_pair(tokenizer, pair,
                                      max_tokens=config.max_tokens,
                                      corrupt=mode == "corrupted") for pair in pairs]
+    yes_tokens = tokenizer.encode(" Yes", add_special_tokens=False)
+    no_tokens = tokenizer.encode(" No", add_special_tokens=False)
+    if len(yes_tokens) != 1 or len(no_tokens) != 1 or yes_tokens == no_tokens:
+        raise ValueError("verdict token IDs unavailable or ambiguous")
     random.seed(config.seed)
     torch.manual_seed(config.seed)
     model.train()
@@ -456,9 +463,24 @@ def _updates(model: Any, tokenizer: Any, torch: Any,
         # Accumulate equal positive/negative gradients before one step.
         # Sequential backward saves memory versus retaining both graphs.
         for tokens, labels in prepared_pair:
-            ids = torch.tensor([tokens], dtype=torch.long, device=config.device)
-            targets = torch.tensor([labels], dtype=torch.long, device=config.device)
-            loss = model(input_ids=ids, attention_mask=torch.ones_like(ids), labels=targets).loss
+            if config.loss_kind == "binary_logits_ce":
+                # Directly train the two permitted verdicts, rather than
+                # competing with the entire causal-LM vocabulary. Masked
+                # labels still constrain the target to the final verdict.
+                if labels[:-1] != [-100] * (len(labels) - 1):
+                    raise ValueError("binary-CE verdict labels must be suffix-only")
+                if labels[-1] not in (yes_tokens[0], no_tokens[0]):
+                    raise ValueError("unexpected binary-CE verdict label")
+                ids = torch.tensor([tokens[:-1]], dtype=torch.long, device=config.device)
+                logits = model(input_ids=ids, attention_mask=torch.ones_like(ids)).logits[0, -1]
+                binary_logits = torch.stack((logits[no_tokens[0]], logits[yes_tokens[0]]))
+                target = torch.tensor([int(labels[-1] == yes_tokens[0])],
+                                      dtype=torch.long, device=config.device)
+                loss = torch.nn.functional.cross_entropy(binary_logits.unsqueeze(0), target)
+            else:
+                ids = torch.tensor([tokens], dtype=torch.long, device=config.device)
+                targets = torch.tensor([labels], dtype=torch.long, device=config.device)
+                loss = model(input_ids=ids, attention_mask=torch.ones_like(ids), labels=targets).loss
             if not bool(torch.isfinite(loss)):
                 raise RuntimeError("nonfinite critic loss")
             (loss / 2).backward()
