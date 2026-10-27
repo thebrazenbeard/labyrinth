@@ -160,6 +160,29 @@ class PairedAnalysisTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     analyze(manifest, trials)
 
+    def test_frozen_baseline_cannot_claim_optimizer_steps_or_training_visits(self):
+        # A baseline that consumed training is not a valid before-training
+        # comparator, even if it submits a different checkpoint digest.
+        for changed_key in ("optimizer_steps", "train_case_visits"):
+            with self.subTest(changed_key=changed_key):
+                manifest, trials = fixture()
+                trials["arms"]["baseline"][changed_key] = 1
+                with self.assertRaisesRegex(ValueError, "baseline.*frozen"):
+                    analyze(manifest, trials)
+
+    def test_corrupted_control_cannot_claim_unchanged_parameters(self):
+        manifest, trials = fixture()
+        trials["arms"]["corrupted"]["parameter_sha256"] = trials["arms"]["baseline"]["parameter_sha256"]
+        with self.assertRaisesRegex(ValueError, "corrupted.*unchanged"):
+            analyze(manifest, trials)
+
+    def test_matched_training_controls_must_visit_training_cases(self):
+        manifest, trials = fixture()
+        for name in ("trained", "sham", "corrupted"):
+            trials["arms"][name]["train_case_visits"] = 0
+        with self.assertRaisesRegex(ValueError, "case visits.*zero"):
+            analyze(manifest, trials)
+
     def test_structural_slice_alias_cannot_bypass_overlap_check(self):
         manifest, trials = fixture()
         # Previous implementation accepted 'novel_structure' without checking

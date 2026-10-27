@@ -212,12 +212,16 @@ def analyze(manifest: dict[str, Any], trials: dict[str, Any]) -> dict[str, Any]:
         results[arm_name] = _summary(scores[arm_name], formats[arm_name])
     if arms["baseline"]["parameter_sha256"] != arms["sham"]["parameter_sha256"]:
         _fail("sham parameter digest differs from frozen baseline")
+    if arms["baseline"]["optimizer_steps"] != 0 or arms["baseline"]["train_case_visits"] != 0:
+        _fail("baseline must be frozen with zero optimizer steps and training-case visits")
     if arms["trained"]["parameter_sha256"] == arms["baseline"]["parameter_sha256"]:
         _fail("claimed trained arm has unchanged parameter digest")
+    if arms["corrupted"]["parameter_sha256"] == arms["baseline"]["parameter_sha256"]:
+        _fail("corrupted control claims unchanged parameters relative to baseline")
     budget = {(arms[name]["optimizer_steps"], arms[name]["train_case_visits"])
               for name in ("trained", "sham", "corrupted")}
-    if len(budget) != 1 or next(iter(budget))[0] == 0:
-        _fail("trained/sham/corrupted optimizer and case budgets differ or are zero")
+    if len(budget) != 1 or any(value == 0 for value in next(iter(budget))):
+        _fail("trained/sham/corrupted optimizer and case visits budgets differ or are zero")
     if "uniform" in arms:
         if (arms["uniform"]["optimizer_steps"], arms["uniform"]["train_case_visits"]) != (
             arms["adaptive"]["optimizer_steps"], arms["adaptive"]["train_case_visits"]
