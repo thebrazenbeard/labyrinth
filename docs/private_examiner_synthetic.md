@@ -52,3 +52,7 @@ custodied secret set and oracle, verified adapter/weight loading, authenticated
 training provenance, trusted evaluator-source/condition hashing, and operational
 key separation. Never treat a synthetic gate `GRADUATED` decision as permission
 for deployment or as evidence of real model skill.
+
+## Synthetic and production receipt isolation
+
+The synthetic harness uses a separate schema and separate HMAC domain and explicitly sets fresh_process_reload=false and independent_private_oracle=false. The production decide_graduation gate rejects synthetic receipts, even if the same secret key is mistakenly provided to both contexts. A successful synthetic test demonstrates subprocess/oracle wiring ONLY and must never yield a production GRADUATED decision.

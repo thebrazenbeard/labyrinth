@@ -22,7 +22,10 @@ import re
 import subprocess
 import sys
 
-from .graduation_gate import GateState, GraduationPolicy, SCHEMA, _DOMAIN
+from .graduation_gate import GateState, GraduationPolicy
+
+SYNTHETIC_SCHEMA = "labyrinth.minotaur-synthetic-exam-attestation.v1"
+_SYNTHETIC_DOMAIN = b"labyrinth.minotaur.synthetic-exam.v1\x00"
 
 
 _FINAL = re.compile(r"ANSWER: (-?[0-9]+)\Z")
@@ -135,20 +138,20 @@ def run_exam(*, policy: GraduationPolicy, state: GateState,
     suite = [{"slice": name, "id": c.id, "prompt_sha256": _sha(c.prompt.encode())}
              for name, group in cases.items() for c in group]
     receipt = {
-        "schema": SCHEMA, "objective_id": policy.objective_id,
+        "schema": SYNTHETIC_SCHEMA, "objective_id": policy.objective_id,
         "trainee_sha256": policy.trainee_sha256, "base_sha256": policy.base_sha256,
         "session_nonce": policy.session_nonce, "run_id": run_id,
         "attempt": state.next_attempt, "evaluator_sha256": evaluator_sha256,
         "conditions_sha256": conditions_sha256,
         "suite_sha256": _sha(json.dumps(suite, sort_keys=True).encode()),
-        "fresh_process_reload": True, "independent_private_oracle": True,
+        "fresh_process_reload": False, "independent_private_oracle": False,
         "training_case_ids": [c.id for c in training_cases],
         "training_prompt_commitments": [_sha(c.prompt.encode()) for c in training_cases],
         "arm_checkpoint_sha256s": checkpoints, "arm_training_steps": steps,
         "slices": groups,
     }
     raw = json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return raw, hmac.new(key, _DOMAIN + raw, hashlib.sha256).hexdigest()
+    return raw, hmac.new(key, _SYNTHETIC_DOMAIN + raw, hashlib.sha256).hexdigest()
 
 
 def main() -> int:

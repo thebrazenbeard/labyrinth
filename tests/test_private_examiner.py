@@ -45,11 +45,13 @@ class PrivateExaminerTests(unittest.TestCase):
         args.update(overrides)
         return run_exam(**args)
 
-    def test_actual_subprocess_predictions_are_scored_and_gate_accepts(self):
+    def test_synthetic_subprocess_receipt_cannot_graduate(self):
         raw, sig = self.examine()
         decision = decide_graduation(self.policy, GateState(), raw, sig,
                                      independent_evaluator_key=self.key)
-        self.assertEqual(decision.disposition, "GRADUATED")
+        self.assertEqual(decision.disposition, "BLOCKED")
+        self.assertEqual(json.loads(raw)["fresh_process_reload"], False)
+        self.assertEqual(json.loads(raw)["independent_private_oracle"], False)
         self.assertNotIn(b"answer is", raw)
         self.assertNotIn(b"Synthetic example", raw)
         self.assertNotIn(b'"answer"', raw)
@@ -69,7 +71,7 @@ class PrivateExaminerTests(unittest.TestCase):
         raw, sig = self.examine(cases=bad)
         decision = decide_graduation(self.policy, GateState(), raw, sig,
                                      independent_evaluator_key=self.key)
-        self.assertEqual(decision.disposition, "STAY")
+        self.assertEqual(decision.disposition, "BLOCKED")
 
     def test_subprocess_failure_does_not_sign(self):
         arms = dict(self.arms)
@@ -106,7 +108,7 @@ class PrivateExaminerTests(unittest.TestCase):
         raw = prefix.with_suffix(".receipt.json").read_bytes()
         sig = prefix.with_suffix(".signature.txt").read_text().strip()
         self.assertEqual(decide_graduation(self.policy, GateState(), raw, sig,
-                         independent_evaluator_key=self.key).disposition, "GRADUATED")
+                         independent_evaluator_key=self.key).disposition, "BLOCKED")
         self.assertNotIn(self.key.hex(), valid.stdout + valid.stderr)
 
 
