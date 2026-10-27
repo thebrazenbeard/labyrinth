@@ -10,7 +10,7 @@ from labyrinth.minotaur_critic_pilot import (
     CriticConfig, critic_examples, training_schedule, score_binary,
     encode_supervised_verdict, validate_dataset_separation, reload_critic, SCHEMA,
     verify_reload_contract, prepare_verdict_pair,
-    verdict_logit_diagnostics,
+    verdict_logit_diagnostics, score_pairwise_margins,
 )
 
 
@@ -116,6 +116,17 @@ class CriticPilotTests(unittest.TestCase):
         self.assertEqual(result["false_rejection_rate"], 0.5)
         with self.assertRaises(ValueError):
             score_binary(examples, predictions[:-1])
+
+    def test_pairwise_margin_rank_keeps_same_task_discrimination_separate(self):
+        examples = critic_examples(3, "critic_dev", 2, (1,))
+        rank = score_pairwise_margins(examples, [3.0, 2.0, 4.0, 1.0])
+        self.assertEqual(rank["pairs"], 2)
+        self.assertEqual(rank["pairwise_accuracy"], 1.0)
+        self.assertEqual(rank["ties"], 0)
+        with self.assertRaises(ValueError):
+            score_pairwise_margins(examples, [0.0, 1.0, 2.0])
+        CriticConfig(model_path="model", output_dir="new",
+                     loss_kind="pairwise_margin_rank").validate_fields()
 
     def test_config_bounds_no_auto_download(self):
         config = CriticConfig(model_path="/not-a-real-model", output_dir="/tmp/not-a-run")

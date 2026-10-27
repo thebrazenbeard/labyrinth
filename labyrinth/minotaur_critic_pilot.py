@@ -64,6 +64,7 @@ class CriticConfig:
     lora_rank: int = 4
     lora_alpha: int = 8
     device: str = "cpu"
+    loss_kind: str = "causal_token_ce"  # alternatively pairwise_margin_rank
 
     def validate_fields(self) -> None:
         for name in ("seed", "train_seed", "dev_seed", "transfer_seed"):
@@ -83,6 +84,8 @@ class CriticConfig:
             raise ValueError("learning_rate must be a finite supported float")
         if self.device not in ("cpu", "cuda"):
             raise ValueError("device must be cpu or cuda")
+        if self.loss_kind not in ("causal_token_ce", "pairwise_margin_rank"):
+            raise ValueError("unsupported critic loss objective")
         if len({self.train_seed, self.dev_seed, self.transfer_seed}) != 3:
             raise ValueError("training and evaluation seeds must differ")
         if self.steps > self.train_count_per_tier * 2:
@@ -227,6 +230,38 @@ def score_binary(examples: Sequence[CriticExample], predictions: Sequence[bool])
     }
 
 
+def score_pairwise_margins(examples: Sequence[CriticExample],
+                           margins: Sequence[float]) -> dict[str, Any]:
+    """Report paired ranking distinct from absolute Yes/No classification.
+
+    The paired items must share a problem but have opposite true labels.
+    Correct > incorrect margin is one discrimination success; ties are failures.
+    This PUBLIC development diagnostic is not graduation evidence.
+    """
+    if (not examples or len(examples) != len(margins)
+            or any(type(ex) is not CriticExample for ex in examples)
+            or any(type(m) not in (int, float) or not math.isfinite(m)
+                   for m in margins)):
+        raise ValueError("complete finite paired verdict margins required")
+    grouped: dict[str, list[tuple[CriticExample, float]]] = {}
+    for example, margin in zip(examples, margins):
+        grouped.setdefault(example.case_id, []).append((example, float(margin)))
+    if any(len(pair) != 2 or {ex.is_correct for ex, _ in pair} != {True, False}
+           or len({ex.case_prompt_sha256 for ex, _ in pair}) != 1
+           or len({ex.example_id for ex, _ in pair}) != 2
+           for pair in grouped.values()):
+        raise ValueError("pairwise margins require one positive and one negative per task")
+    wins = ties = 0
+    for pair in grouped.values():
+        good = next(m for ex, m in pair if ex.is_correct)
+        bad = next(m for ex, m in pair if not ex.is_correct)
+        wins += int(good > bad)
+        ties += int(good == bad)
+    return {"pairs": len(grouped), "wins": wins, "ties": ties,
+            "pairwise_accuracy": wins / len(grouped),
+            "qualification": "NOT_ESTABLISHED"}
+
+
 def verdict_logit_diagnostics(
     examples: Sequence[CriticExample], logits: Sequence[tuple[float, float]],
 ) -> dict[str, Any]:
@@ -357,6 +392,8 @@ def _score(model: Any, tokenizer: Any, torch: Any, examples: list[CriticExample]
     report["logit_diagnostics"] = diagnostics
     report["predictions_sha256"] = hashlib.sha256(
         bytes(int(p) for p in preds)).hexdigest()
+    report["pairwise_rank_diagnostic"] = score_pairwise_margins(
+        examples, [row["margin_yes_minus_no"] for row in diagnostics["examples"]])
     report["by_kind"] = {
         kind: score_binary([ex for ex in examples if ex.kind == kind],
                            [p for ex, p in zip(examples, preds) if ex.kind == kind])
@@ -373,6 +410,10 @@ def _updates(model: Any, tokenizer: Any, torch: Any,
     prepared = [prepare_verdict_pair(tokenizer, pair,
                                      max_tokens=config.max_tokens,
                                      corrupt=mode == "corrupted") for pair in pairs]
+    yes_tokens = tokenizer.encode(" Yes", add_special_tokens=False)
+    no_tokens = tokenizer.encode(" No", add_special_tokens=False)
+    if len(yes_tokens) != 1 or len(no_tokens) != 1 or yes_tokens == no_tokens:
+        raise ValueError("verdict token IDs unavailable or ambiguous")
     random.seed(config.seed)
     torch.manual_seed(config.seed)
     model.train()
@@ -384,16 +425,48 @@ def _updates(model: Any, tokenizer: Any, torch: Any,
     for prepared_pair in prepared:
         optimizer.zero_grad(set_to_none=True)
         paired_loss = 0.0
-        # Accumulate equal positive/negative gradients before one step.
-        # Sequential backward saves memory versus retaining both graphs.
-        for tokens, labels in prepared_pair:
-            ids = torch.tensor([tokens], dtype=torch.long, device=config.device)
-            targets = torch.tensor([labels], dtype=torch.long, device=config.device)
-            loss = model(input_ids=ids, attention_mask=torch.ones_like(ids), labels=targets).loss
-            if not bool(torch.isfinite(loss)):
-                raise RuntimeError("nonfinite critic loss")
-            (loss / 2).backward()
-            paired_loss += float(loss.detach().cpu().item()) / 2
+        # Pairwise compares only relative Yes-minus-No margins for the
+        # correct and incorrect answer to one task. A global Yes/No shift
+        # cannot directly improve this loss. Recomputing one activation
+        # graph at a time avoids doubling peak memory on CPU.
+        if config.loss_kind == "pairwise_margin_rank":
+            detached: list[tuple[bool, float]] = []
+            with torch.no_grad():
+                for tokens, labels in prepared_pair:
+                    if (labels[:-1] != [-100] * (len(labels) - 1)
+                            or labels[-1] not in (yes_tokens[0], no_tokens[0])):
+                        raise ValueError("pairwise target must be suffix-only Yes/No")
+                    ids = torch.tensor([tokens[:-1]], dtype=torch.long, device=config.device)
+                    logits = model(input_ids=ids, attention_mask=torch.ones_like(ids)).logits[0, -1]
+                    margin = float((logits[yes_tokens[0]] - logits[no_tokens[0]]).item())
+                    if not math.isfinite(margin):
+                        raise RuntimeError("nonfinite pairwise margin")
+                    detached.append((labels[-1] == yes_tokens[0], margin))
+            if {truth for truth, _ in detached} != {True, False}:
+                raise ValueError("pairwise training requires opposite labels")
+            good = next(m for truth, m in detached if truth)
+            bad = next(m for truth, m in detached if not truth)
+            difference = good - bad
+            coefficient = (math.exp(-difference) / (1 + math.exp(-difference))
+                           if difference >= 0 else 1 / (1 + math.exp(difference)))
+            paired_loss = (math.log1p(math.exp(-difference)) if difference >= 0
+                           else -difference + math.log1p(math.exp(difference)))
+            for (tokens, labels), (truth, _) in zip(prepared_pair, detached):
+                ids = torch.tensor([tokens[:-1]], dtype=torch.long, device=config.device)
+                logits = model(input_ids=ids, attention_mask=torch.ones_like(ids)).logits[0, -1]
+                margin = logits[yes_tokens[0]] - logits[no_tokens[0]]
+                (margin * (-coefficient if truth else coefficient)).backward()
+        else:
+            # Matched training exposures under the original token-CE path.
+            for tokens, labels in prepared_pair:
+                ids = torch.tensor([tokens], dtype=torch.long, device=config.device)
+                targets = torch.tensor([labels], dtype=torch.long, device=config.device)
+                loss = model(input_ids=ids, attention_mask=torch.ones_like(ids),
+                             labels=targets).loss
+                if not bool(torch.isfinite(loss)):
+                    raise RuntimeError("nonfinite critic loss")
+                (loss / 2).backward()
+                paired_loss += float(loss.detach().cpu().item()) / 2
         if mode == "zero_update":
             for parameter in model.parameters():
                 if parameter.grad is not None:
@@ -407,6 +480,8 @@ def _updates(model: Any, tokenizer: Any, torch: Any,
             raise RuntimeError("nonfinite critic adapter value after optimizer step")
         losses.append(paired_loss)
     return {"optimizer_steps": len(losses), "forward_backward_steps": 2 * len(losses),
+            "detached_forward_passes": (2 * len(losses)
+                if config.loss_kind == "pairwise_margin_rank" else 0),
             "examples_per_optimizer_step": 2,
             "visited_example_ids": [ex.example_id for pair in pairs for ex in pair],
             "zeroed_gradients": mode == "zero_update", "losses": losses}
