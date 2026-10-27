@@ -50,6 +50,8 @@ For prompt-only `experiment` comparisons, every shuffled label must differ from 
 
 Never replace these slices with a single pooled score. The register-program evaluator has a simple deterministic interpreter baseline; a model's scientific question is whether it learned the procedure, not whether a computer can execute it.
 
+The public `generate_transfer_slices(seed, count)` development utility supplies three explicit tier-four slices: `fresh_numbers` (familiar training structures, new numeric instances); `new_composition` (unseen structures at matched training lengths of 3–4 instructions); and `longer_program` (unseen structures at lengths 5–6). This separates a composition shift from a length-plus-composition shift, **not** a pure length-only causal intervention. Each profile has only four finite structures; report the number of distinct fingerprints, and treat per-case confidence intervals based on many numeric variants as potentially pseudoreplicated. A blinded, independently authored family and more diverse grammar remain necessary for generalization claims.
+
 ## Measurement and falsifiers
 
 - Publish paired accuracy deltas, correct/total, discordant counts, format adherence, per-family breakdowns and uncertainty intervals; account for repeated templates/clusters when estimating independence.
