@@ -207,6 +207,31 @@ def zero_trainable_gradients(parameters) -> None:
             gradient.zero_()
 
 
+def training_visit_plan(examples: list[dict[str, str]], steps: int) -> tuple[list[dict[str, str]], dict]:
+    """Return the exact ordered examples visited and receipt-visible coverage.
+
+    Keep this plan shared by the optimizer and its receipt.  The pilot's
+    historical selection policy is ordered round robin, *not* a seeded random
+    draw.  When steps < available examples, unvisited examples must not count
+    as learned-from training cases.
+    """
+    if not examples or type(steps) is not int or steps < 1:
+        raise ValueError("training visit plan requires examples and positive steps")
+    visits = [examples[step % len(examples)] for step in range(steps)]
+    ids = [item["case_id"] for item in visits]
+    unique = len(set(ids))
+    metrics = {
+        "case_visits": len(visits),
+        "available_training_cases": len(examples),
+        "unique_cases_seen": unique,
+        # Retain this historical field for consumers but correct its semantics.
+        "unique_training_cases": unique,
+        "visited_case_ids": ids,
+        "training_selection_policy": "ordered-round-robin-v1",
+    }
+    return visits, metrics
+
+
 def train(args) -> None:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -224,6 +249,7 @@ def train(args) -> None:
         raise FileExistsError("pilot refuses to overwrite an existing run")
     examples = attest_generated_train_only(
         read_training(data), generator_seed=args.train_generator_seed)
+    training_visits, visit_metrics = training_visit_plan(examples, args.steps)
     torch.set_num_threads(args.threads)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -253,8 +279,7 @@ def train(args) -> None:
     rendered_prompt_hashes = []
     rendering_commitment = None
     started = time.monotonic()
-    for step in range(args.steps):
-        item = examples[step % len(examples)]
+    for step, item in enumerate(training_visits):
         ids, prefix_length, rendering = render_supervised_tokens(
             tokenizer, item, policy=args.target_policy, arm=args.arm,
             step=step, mode=args.prompt_mode)
@@ -299,7 +324,7 @@ def train(args) -> None:
         "gradient_steps": 0 if args.arm == "sham" else args.steps,
         "backward_steps": args.steps,
         "zeroed_grad_steps": args.steps if args.arm == "sham" else 0,
-        "case_visits": args.steps, "unique_training_cases": len(examples),
+        **visit_metrics,
         "training_data_sha256": file_digest(data),
         "train_generator": "labyrinth-program-v1", "train_generator_seed": args.train_generator_seed,
         "base_model_sha256": file_digest(base / "model.safetensors"),

@@ -10,7 +10,7 @@ import unittest
 
 from labyrinth.neural_cpu_pilot import (
     file_digest, read_training, supervised_target, training_prefix,
-    render_supervised_tokens, zero_trainable_gradients,
+    render_supervised_tokens, training_visit_plan, zero_trainable_gradients,
 )
 from labyrinth.program_maze import generate_program_challenges
 
@@ -78,6 +78,33 @@ class NeuralCpuPilotTests(unittest.TestCase):
 
     def write(self, records):
         self.path.write_text(json.dumps(records), encoding="utf-8")
+
+    def test_training_receipt_counts_actual_visits_not_available_cases(self):
+        # In the 32-step/128-example experiment only 32 examples can be seen.
+        examples = [{"case_id": f"train-{i}"} for i in range(128)]
+        visits, metrics = training_visit_plan(examples, 32)
+        expected_ids = [f"train-{i}" for i in range(32)]
+        self.assertEqual([item["case_id"] for item in visits], expected_ids)
+        self.assertEqual(metrics["case_visits"], 32)
+        self.assertEqual(metrics["available_training_cases"], 128)
+        self.assertEqual(metrics["unique_cases_seen"], 32)
+        self.assertEqual(metrics["unique_training_cases"], 32)
+        self.assertEqual(metrics["visited_case_ids"], expected_ids)
+        self.assertEqual(metrics["training_selection_policy"], "ordered-round-robin-v1")
+
+    def test_training_receipt_tracks_wraparound_and_matched_schedule(self):
+        examples = [{"case_id": f"train-{i}"} for i in range(3)]
+        expected = ["train-0", "train-1", "train-2", "train-0", "train-1"]
+        for _ in ("trained", "sham", "corrupted"):
+            visits, metrics = training_visit_plan(examples, 5)
+            self.assertEqual([item["case_id"] for item in visits], expected)
+            self.assertEqual(metrics["visited_case_ids"], expected)
+            self.assertEqual(metrics["unique_cases_seen"], 3)
+            self.assertEqual(metrics["case_visits"], 5)
+        with self.assertRaises(ValueError):
+            training_visit_plan([], 1)
+        with self.assertRaises(ValueError):
+            training_visit_plan(examples, 0)
 
     def test_valid_train_only_data_and_digest(self):
         self.write(self.sample)
