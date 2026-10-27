@@ -155,6 +155,13 @@ cases each and cannot lower their semantic accuracy, format or gain floors to
 zero. The choice and significance level are fingerprint-bound to persistent
 gate state. All significance statements require genuinely independent cases;
 public repeated program patterns cannot supply independent final evidence.
+Production receipts must also carry the signed
+`score_provenance: "independent_private_exam.v1"` attestation. This is a
+fail-closed interface boundary: Minotaur's bounded/public advisory scores have
+no qualifying provenance and cannot be silently recast as graduation evidence.
+It is not a substitute for custody—the external signer must actually own the
+private oracle and credential; software cannot turn a fabricated key or false
+assertion into independent examination.
 
 `labyrinth.graduation_state` adds an **opt-in, local custodian-owned** SQLite
 WAL store for that trusted `GateState`. `initialize_campaign` creates a new,

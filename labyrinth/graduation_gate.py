@@ -27,6 +27,7 @@ from typing import Any
 
 SCHEMA = "labyrinth.minotaur-evaluator-attestation.v1"
 _DOMAIN = b"labyrinth.minotaur.graduation.v1\x00"
+_PRIVATE_EXAM_SCORE_PROVENANCE = "independent_private_exam.v1"
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z", re.ASCII)
 _NONCE = re.compile(r"[0-9a-f]{32,128}\Z", re.ASCII)
@@ -148,7 +149,7 @@ def _policy_fingerprint(policy: GraduationPolicy) -> str:
 _ROOT_KEYS = frozenset({
     "schema", "objective_id", "trainee_sha256", "base_sha256", "session_nonce", "run_id",
     "attempt", "evaluator_sha256", "conditions_sha256", "fresh_process_reload",
-    "independent_private_oracle", "training_case_ids", "training_prompt_commitments",
+    "independent_private_oracle", "score_provenance", "training_case_ids", "training_prompt_commitments",
     "slices", "suite_sha256", "arm_checkpoint_sha256s", "arm_training_steps",
 })
 _TRIAL_KEYS = frozenset({
@@ -264,7 +265,12 @@ def decide_graduation(
             or receipt["evaluator_sha256"] != policy.expected_evaluator_sha256
             or receipt["conditions_sha256"] != policy.expected_conditions_sha256
             or receipt["fresh_process_reload"] is not True
-            or receipt["independent_private_oracle"] is not True):
+            or receipt["independent_private_oracle"] is not True
+            # A correct score from Minotaur's bounded/public advisor remains
+            # advisory evidence. Only the independently custodied examiner
+            # may attest private-exam provenance; callers cannot silently
+            # recast a domain-limited score as final qualification.
+            or receipt["score_provenance"] != _PRIVATE_EXAM_SCORE_PROVENANCE):
         return GateDecision("BLOCKED", ("untrusted, stale, or wrong-subject evaluation",), state)
 
     checkpoints = receipt["arm_checkpoint_sha256s"]

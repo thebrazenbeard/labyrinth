@@ -39,6 +39,7 @@ def evaluated_receipt(*, attempt=1, run_id="fresh-run-001", candidate_correct=Tr
         "suite_sha256": hashlib.sha256(run_id.encode()).hexdigest(),
         "fresh_process_reload": True,
         "independent_private_oracle": True,
+        "score_provenance": "independent_private_exam.v1",
         "training_case_ids": ["train-001", "train-002"],
         "training_prompt_commitments": [hashlib.sha256(f"train:{i}".encode()).hexdigest()
                                         for i in range(2)],
@@ -114,6 +115,18 @@ class MinotaurGraduationTests(unittest.TestCase):
         self.assertTrue(result.state.graduated)
         self.assertFalse(hasattr(result, "metrics"))
 
+    def test_domain_limited_advisory_scores_cannot_be_recast_as_private_qualification(self):
+        # The bounded mod-97 guarded advisor can produce correct booleans, but
+        # it is explicitly advisory-only and its public, narrow task domain is
+        # not independently custodied final-exam evidence.  Before a receipt
+        # can be considered, it must declare a qualifying score provenance.
+        advisory_wrapped = evaluated_receipt()
+        advisory_wrapped.pop("score_provenance")
+        self.assertEqual(decision(advisory_wrapped).disposition, "BLOCKED")
+
+        advisory_wrapped["score_provenance"] = "domain_limited_advisory"
+        self.assertEqual(decision(advisory_wrapped).disposition, "BLOCKED")
+
     def test_missing_or_self_reported_evidence_cannot_qualify(self):
         valid = evaluated_receipt()
         raw, sig = independently_signed(valid)
@@ -137,6 +150,7 @@ class MinotaurGraduationTests(unittest.TestCase):
             ("base_sha256", "d" * 64),
             ("session_nonce", "f" * 32), ("attempt", 2),
             ("fresh_process_reload", False), ("independent_private_oracle", False),
+            ("score_provenance", "domain_limited_advisory"),
             ("conditions_sha256", "d" * 64), ("evaluator_sha256", "e" * 64),
         ):
             with self.subTest(field=field):
