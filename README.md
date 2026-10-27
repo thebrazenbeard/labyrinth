@@ -25,6 +25,31 @@ Core Labyrinth still runs without PyTorch; scratch training and reload require
 optional local CPU PyTorch and \`safetensors\` installed. The checkpoint in
 this draft is **experimental evidence**, not a production model download.
 
+### Guarded Minotaur v1 ? bounded register-trace advice
+
+\`labyrinth.minotaur_guarded\` connects the **actual scratch checkpoint**
+to a second, independent modulo-97 register-program interpreter. A wrong
+neural approval can never overrule the independent checker: disagreement,
+unknown grammar, malformed inputs, and invalid checkpoint identity cause
+**ABSTAIN**, not a pass. This is a deliberately small domain-specific
+neuro-symbolic system, **not general reasoning or neural mastery**.
+
+To try it locally, supply a JSON file with exactly \`question\` (the printed
+register program) and \`steps\` (its observed trace, as an array of strings):
+
+\`\`\`bash
+python -m labyrinth.minotaur_guarded --checkpoint models/minotaur_scratch_v1 --input-json trace.json
+\`\`\`
+
+The checkpoint is never downloaded; only the existing local CPU PyTorch and
+Safetensors libraries are needed. Output includes \`graduation_authority: none\`
+and \`qualification: NOT_ESTABLISHED\`. The independent executable interpreter
+does the authoritative arithmetic checking **within its tiny public grammar**.
+The neural model may contribute agreement but has no final-exam signing key,
+permission to release trainees, or access to production inference routing.
+See \`docs/MINOTAUR_GUARDED_TRACE_EVIDENCE_2026-10-27.md\` for all results
+and limitations.
+
 ## Run it
 
 Requires Python 3.10+; core functionality uses the standard library.
