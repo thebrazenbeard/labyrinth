@@ -147,6 +147,9 @@ fell from **5/8 to 4/8** and transfer remained **2/4**: the mechanism works,
 but reasoning improvement and generalization are NOT ESTABLISHED. See the
 [critic execution protocol](docs/MINOTAUR_CORRECTNESS_CRITIC_PILOT_2026-10-27.md)
 and [live Lappy run evidence E-018](docs/MINOTAUR_CRITIC_LAPPY_RUN_2026-10-27.md).
+The follow-up v2 pairs right/wrong answers within every update, but its real
+two- and eight-update runs **still** approved every incorrect development and
+transfer answer. See [E-019](docs/MINOTAUR_CRITIC_PAIRED_LAPPY_RUN_2026-10-27.md).
 
 `labyrinth.processbench_adapter` can score a reviewer on caller-supplied,
 strictly validated **Qwen/ProcessBench** JSONL records, with correct one-based

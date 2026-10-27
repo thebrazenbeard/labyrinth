@@ -103,6 +103,8 @@ fresh-process reload of the *original v1 schedule* subsequently succeeded.
 **That candidate regressed in
 development accuracy and false approvals**; see [E-018](MINOTAUR_CRITIC_LAPPY_RUN_2026-10-27.md)
 for exact source, weight, model, adapter, control and scoring evidence. This
-does not establish that Minotaur learned a useful verifier skill. V2 paired
-supervision has not yet been validated by pretrained inference merely because
-the source was changed. No model weight or dependency download was needed.
+does not establish that Minotaur learned a useful verifier skill. Subsequent
+v2 paired-label runs with both two and eight optimizer updates successfully
+adapted/reloaded the pretrained checkpoint, but again produced 100% candidate
+false approvals on these small test sets. See [E-019](MINOTAUR_CRITIC_PAIRED_LAPPY_RUN_2026-10-27.md).
+No model weight or dependency download was needed.
