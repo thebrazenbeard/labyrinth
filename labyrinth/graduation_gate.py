@@ -85,6 +85,8 @@ class GateState:
     next_attempt: int = 1
     consumed_run_ids: frozenset[str] = frozenset()
     consumed_suite_sha256s: frozenset[str] = frozenset()
+    consumed_eval_case_ids: frozenset[str] = frozenset()
+    consumed_eval_prompt_commitments: frozenset[str] = frozenset()
     graduated: bool = False
     policy_fingerprint: str | None = None
 
@@ -161,6 +163,12 @@ def decide_graduation(
             or type(state.consumed_suite_sha256s) is not frozenset
             or any(type(r) is not str or not _SHA256.fullmatch(r)
                    for r in state.consumed_suite_sha256s)
+            or type(state.consumed_eval_case_ids) is not frozenset
+            or any(type(r) is not str or not _ID.fullmatch(r)
+                   for r in state.consumed_eval_case_ids)
+            or type(state.consumed_eval_prompt_commitments) is not frozenset
+            or any(type(r) is not str or not _SHA256.fullmatch(r)
+                   for r in state.consumed_eval_prompt_commitments)
             or type(state.graduated) is not bool
             or (state.policy_fingerprint is not None
                 and (type(state.policy_fingerprint) is not str
@@ -171,7 +179,8 @@ def decide_graduation(
         return GateDecision("BLOCKED", ("trusted state belongs to another policy or model",), state)
     if (state.policy_fingerprint is None
             and (state.next_attempt != 1 or state.consumed_run_ids
-                 or state.consumed_suite_sha256s or state.graduated)):
+                 or state.consumed_suite_sha256s or state.consumed_eval_case_ids
+                 or state.consumed_eval_prompt_commitments or state.graduated)):
         return GateDecision("BLOCKED", ("unbound trusted state cannot authorize graduation",), state)
     if state.graduated:
         return GateDecision("GRADUATED", ("previous trusted graduation retained",), state)
@@ -239,8 +248,14 @@ def decide_graduation(
             or type(groups) is not dict or set(groups) != set(policy.required_slices)):
         return GateDecision("BLOCKED", ("invalid or incomplete evaluation slice custody",), state)
 
-    encountered = set(training_ids)
-    seen_prompts = set(training_prompts)
+    if (set(training_ids) & state.consumed_eval_case_ids
+            or set(training_prompts) & state.consumed_eval_prompt_commitments):
+        return GateDecision("BLOCKED", ("prior final evaluation leaked into training",), state)
+
+    encountered = set(training_ids) | state.consumed_eval_case_ids
+    seen_prompts = set(training_prompts) | state.consumed_eval_prompt_commitments
+    new_case_ids: set[str] = set()
+    new_prompt_commitments: set[str] = set()
     satisfied = True
     count_total = 0
     for slice_name in policy.required_slices:
@@ -263,11 +278,13 @@ def decide_graduation(
             if type(case_id) is not str or not _ID.fullmatch(case_id) or case_id in encountered:
                 return GateDecision("BLOCKED", ("training/evaluation overlap or repeated case",), state)
             encountered.add(case_id)
+            new_case_ids.add(case_id)
             prompt_commitment = trial["prompt_commitment"]
             if (type(prompt_commitment) is not str or not _SHA256.fullmatch(prompt_commitment)
                     or prompt_commitment in seen_prompts):
                 return GateDecision("BLOCKED", ("training/evaluation prompt overlap",), state)
             seen_prompts.add(prompt_commitment)
+            new_prompt_commitments.add(prompt_commitment)
             for name in tally:
                 if type(trial[name]) is not bool:
                     return GateDecision("BLOCKED", ("nonboolean scoring evidence",), state)
@@ -314,7 +331,10 @@ def decide_graduation(
     advanced = replace(state, next_attempt=state.next_attempt + 1,
                        policy_fingerprint=binding,
                        consumed_run_ids=state.consumed_run_ids | {receipt["run_id"]},
-                       consumed_suite_sha256s=state.consumed_suite_sha256s | {receipt["suite_sha256"]})
+                       consumed_suite_sha256s=state.consumed_suite_sha256s | {receipt["suite_sha256"]},
+                       consumed_eval_case_ids=state.consumed_eval_case_ids | new_case_ids,
+                       consumed_eval_prompt_commitments=(
+                           state.consumed_eval_prompt_commitments | new_prompt_commitments))
     if satisfied:
         return GateDecision("GRADUATED", ("objective demonstrated under signed conditions",),
                             replace(advanced, graduated=True))

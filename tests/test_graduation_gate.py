@@ -51,9 +51,9 @@ def evaluated_receipt(*, attempt=1, run_id="fresh-run-001", candidate_correct=Tr
         "slices": {
             slice_name: [
                 {
-                    "case_id": f"{slice_name}-{index:03d}",
+                    "case_id": f"{run_id}-{slice_name}-{index:03d}",
                     "prompt_commitment": hashlib.sha256(
-                        f"prompt:{slice_name}:{index}".encode()).hexdigest(),
+                        f"prompt:{run_id}:{slice_name}:{index}".encode()).hexdigest(),
                     "candidate_correct": candidate_correct,
                     "candidate_format": True,
                     "candidate_semantic_correct": candidate_correct,
@@ -190,7 +190,7 @@ class MinotaurGraduationTests(unittest.TestCase):
         missing["slices"].pop("transfer")
         self.assertEqual(decision(missing).disposition, "BLOCKED")
         overlap = evaluated_receipt()
-        overlap["slices"]["transfer"][0]["case_id"] = "heldout-000"
+        overlap["slices"]["transfer"][0]["case_id"] = overlap["slices"]["heldout"][0]["case_id"]
         self.assertEqual(decision(overlap).disposition, "BLOCKED")
         train_leak = evaluated_receipt()
         train_leak["slices"]["heldout"][0]["case_id"] = "train-001"
@@ -231,6 +231,38 @@ class MinotaurGraduationTests(unittest.TestCase):
         reused_suite = evaluated_receipt(attempt=2, run_id="fresh-run-002", candidate_correct=False)
         reused_suite["suite_sha256"] = hashlib.sha256(b"fresh-run-001").hexdigest()
         self.assertEqual(decision(reused_suite, first.state).disposition, "BLOCKED")
+
+    def test_new_run_id_and_suite_digest_cannot_recycle_eval_cases_or_prompts(self):
+        first_receipt = evaluated_receipt(candidate_correct=False)
+        first = decision(first_receipt)
+        self.assertEqual(first.disposition, "STAY")
+        self.assertEqual(len(first.state.consumed_eval_case_ids), 32)
+        self.assertEqual(len(first.state.consumed_eval_prompt_commitments), 32)
+        # A dishonest evaluator relabels the very same sealed final tasks as a
+        # second suite and flips results to perfect. Neither identifier change
+        # nor a valid signature grants another attempt on those questions.
+        relabeled = evaluated_receipt(attempt=2, run_id="new-suite-002")
+        for name in POLICY.required_slices:
+            for index, trial in enumerate(relabeled["slices"][name]):
+                prior = first_receipt["slices"][name][index]
+                trial["case_id"] = prior["case_id"]
+                trial["prompt_commitment"] = prior["prompt_commitment"]
+        self.assertEqual(decision(relabeled, first.state).disposition, "BLOCKED")
+        self.assertFalse(first.state.graduated)
+
+        # Even with fresh-looking case IDs, known questions cannot be reused.
+        relabeled_ids = evaluated_receipt(attempt=2, run_id="new-suite-002")
+        for name in POLICY.required_slices:
+            for index, trial in enumerate(relabeled_ids["slices"][name]):
+                trial["prompt_commitment"] = first_receipt["slices"][name][index]["prompt_commitment"]
+        self.assertEqual(decision(relabeled_ids, first.state).disposition, "BLOCKED")
+
+        # Reusing previous *evaluation* questions as new training data would
+        # also invalidate a later purported blind qualification.
+        contaminated = evaluated_receipt(attempt=2, run_id="clean-eval-dirty-train")
+        contaminated["training_prompt_commitments"][0] = (
+            first_receipt["slices"]["heldout"][0]["prompt_commitment"])
+        self.assertEqual(decision(contaminated, first.state).disposition, "BLOCKED")
 
     def test_graduated_state_cannot_be_reused_for_new_subject_or_weaker_policy(self):
         qualified = decision(evaluated_receipt())
