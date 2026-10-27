@@ -248,6 +248,84 @@ class HfPilotContractTests(unittest.TestCase):
                     reload_evaluate(self.output, self.output / "verify.json")
         self.assertFalse((self.output / "verify.json").exists())
 
+    def _write_reload_adapter_fixture(self):
+        from labyrinth.hf_pilot import _prompt_commitment
+        from labyrinth.runner import _source_state
+
+        self.output.mkdir()
+        candidate = self.output / "candidate_adapter"
+        candidate.mkdir()
+        (candidate / "adapter_model.safetensors").write_bytes(b"fixture-adapter")
+        config_file = candidate / "adapter_config.json"
+        config_file.write_text('{"lora_alpha":8}', encoding="utf-8")
+        config = self.spec()
+        _, heldout = training_cases(config)
+        adapter_sha256 = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                          for path in candidate.iterdir()}
+        (self.output / "pilot_report.json").write_text(json.dumps({
+            "schema": "labyrinth.hf-lora-pilot.v2",
+            "source": _source_state(),
+            "config": {**asdict(config), "tiers": list(config.tiers)},
+            "base_weights_sha256": _weights_digest([self.model / "model.safetensors"]),
+            "model_metadata_sha256": _metadata_digest(self.model),
+            "candidate_adapter_sha256": adapter_sha256,
+            "candidate_lora_tensor_value_sha256": "pretend-lora-digest",
+            "heldout_case_ids": [case.id for case in heldout],
+            "heldout_public_prompt_sha256": _prompt_commitment(heldout),
+            "evaluations": {"candidate": {"trials": []}},
+        }), encoding="utf-8")
+        return candidate, config_file
+
+    def test_reload_refuses_adapter_config_swap_during_peft_load(self):
+        candidate, config_file = self._write_reload_adapter_fixture()
+
+        class ReplacingPeft:
+            @staticmethod
+            def from_pretrained(*args, **kwargs):
+                config_file.write_text('{"lora_alpha":64}', encoding="utf-8")
+                return object()
+
+        with patch("labyrinth.hf_pilot._deps", return_value=(None, None, None, (None, ReplacingPeft, None), "cpu")):
+            with patch("labyrinth.hf_pilot._load_base", return_value=(object(), object())):
+                with patch("labyrinth.hf_pilot._lora_value_digest", return_value="pretend-lora-digest"):
+                    with patch("labyrinth.hf_pilot._score_model", side_effect=AssertionError("tampered adapter must not be evaluated")):
+                        with self.assertRaisesRegex(RuntimeError, "adapter.*changed"):
+                            reload_evaluate(self.output, self.output / "verify.json")
+        self.assertFalse((self.output / "verify.json").exists())
+
+    def test_reload_refuses_new_adapter_file_during_evaluation(self):
+        candidate, config_file = self._write_reload_adapter_fixture()
+
+        class UnchangedPeft:
+            @staticmethod
+            def from_pretrained(*args, **kwargs):
+                return object()
+
+        def changed_during_score(*args, **kwargs):
+            (candidate / "unexpected.safetensors").write_bytes(b"injected")
+            return {"trials": []}
+
+        with patch("labyrinth.hf_pilot._deps", return_value=(None, None, None, (None, UnchangedPeft, None), "cpu")):
+            with patch("labyrinth.hf_pilot._load_base", return_value=(object(), object())):
+                with patch("labyrinth.hf_pilot._lora_value_digest", return_value="pretend-lora-digest"):
+                    with patch("labyrinth.hf_pilot._score_model", side_effect=changed_during_score):
+                        with self.assertRaisesRegex(RuntimeError, "adapter.*changed"):
+                            reload_evaluate(self.output, self.output / "verify.json")
+        self.assertFalse((self.output / "verify.json").exists())
+
+    def test_reload_refuses_nested_adapter_directory_symlink_before_dependencies(self):
+        candidate, _ = self._write_reload_adapter_fixture()
+        outside = Path(self.temp.name) / "outside_directory"
+        outside.mkdir()
+        try:
+            (candidate / "nested_link").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        with patch("labyrinth.hf_pilot._deps", side_effect=AssertionError("heavy deps must not load")):
+            with self.assertRaisesRegex(RuntimeError, "symlink"):
+                reload_evaluate(self.output, self.output / "verify.json")
+        self.assertFalse((self.output / "verify.json").exists())
+
     def test_unknown_report_fails_before_dependency_loading(self):
         self.output.mkdir()
         (self.output / "pilot_report.json").write_text(json.dumps({"schema": "invalid"}))
