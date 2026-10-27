@@ -91,6 +91,28 @@ This path never downloads weights, installs packages, runs arbitrary model text,
 
 For an entirely offline **mechanism smoke test only**, `scripts/make_tiny_hf_fixture.py --output-dir NEW_MODEL_DIR` can create a very small randomly initialized causal-LM model and tokenizer using optional installed Torch/Transformers/Tokenizers. Its weights have no pretrained reasoning ability; a successful LoRA update on this fixture proves plumbing, not improvement to an existing capable model. Keep model and run outputs out of Git.
 
+### Minotaur's guardian gate and adversarial development benchmark
+
+`labyrinth.graduation_gate` holds the *qualification rule*, not the private
+exam. A separately trusted evaluator must sign a complete, pinned receipt;
+Minotaur cannot grade its own certification. `objective_kind="training_effect"`
+(the default) now requires statistically supported paired semantic gains over
+the frozen pretrained, zero-update and corrupted-label controls, across every
+held-out slice. The exact one-sided paired comparison applies Bonferroni
+correction across all arms, slices and allowed attempts, in addition to
+predeclared accuracy, format and gain thresholds. `"skill_mastery"` is an
+explicit alternative for absolute competence when the pretrained model might
+already know the skill; it **does not** establish a causal training improvement.
+The choice and significance level are fingerprint-bound to persistent gate state.
+
+`labyrinth.guardian_benchmark.generate_guardian_cases` creates public
+development cases with three register-program structure profiles, correct and
+convincing incorrect trainee answers in matched styles, plus injected claims
+that a judge should mark answers correct. `evaluate_guardian` reports false
+approvals, false rejections, abstentions, coverage and structural slice metrics;
+it never grants qualification. Its public answers must **not** be used for a
+blind final exam. See the [outside-source research mapping and evidence limits](docs/MINOTAUR_GUARDIAN_EXTERNAL_RESEARCH_2026-10-27.md).
+
 The next gate is executing this optional path in an isolated environment with independently measured resource use, immutable model/tokenizer identity and a matched repeated-seed experiment. Do not infer from the code or changed adapter bytes that a pretrained language model became better at reasoning.
 
 See the [research landscape and staged local-training gate](docs/REASONING_TRAINING_LANDSCAPE_2026-10-26.md), its [evidence log and independent review](docs/RESEARCH_LOG_2026-10-26.md), the [HF pilot hostile review](docs/HF_PILOT_HOSTILE_REVIEW_2026-10-26.md), the [experimental qualification protocol](docs/EXPERIMENT_PROTOCOL.md) for learning/transfer controls, and the [independent challenge record](docs/INDEPENDENT_CHALLENGES_2026-10-26.md) for reproduced prototype failures.

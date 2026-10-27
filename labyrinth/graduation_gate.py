@@ -50,6 +50,8 @@ class GraduationPolicy:
     min_format_rate: float = 0.90
     min_gain_over_controls: float = 0.10
     max_attempts: int = 3
+    objective_kind: str = "training_effect"  # alternatively skill_mastery
+    significance_alpha: float = 0.05  # family-wise one-sided paired-test limit
 
     def __post_init__(self) -> None:
         if not _ID.fullmatch(self.objective_id):
@@ -76,6 +78,12 @@ class GraduationPolicy:
             value = getattr(self, name)
             if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
                 raise ValueError(f"{name} must be finite and in [0, 1]")
+        if self.objective_kind not in ("training_effect", "skill_mastery"):
+            raise ValueError("objective_kind must distinguish mastery from training effect")
+        if (type(self.significance_alpha) not in (float, int)
+                or not math.isfinite(self.significance_alpha)
+                or not 0 < self.significance_alpha <= 0.05):
+            raise ValueError("significance_alpha must be finite and in (0, 0.05]")
 
 
 @dataclass(frozen=True)
@@ -138,6 +146,19 @@ _TRIAL_KEYS = frozenset({
     "zero_update_response_sha256", "corrupted_response_sha256",
 })
 _ARMS = frozenset({"candidate", "baseline", "zero_update", "corrupted"})
+
+
+def _one_sided_exact_paired_p(wins: int, losses: int) -> float:
+    """Exact one-sided McNemar/binomial tail for discordant paired cases.
+
+    The null is no greater correctness probability for candidate than control.
+    It assumes the individual held-out problems, not their paraphrases or
+    correlated variants, are exchangeable independent evaluation units.
+    """
+    discordant = wins + losses
+    if discordant == 0:
+        return 1.0
+    return sum(math.comb(discordant, k) for k in range(wins, discordant + 1)) / (1 << discordant)
 
 
 def decide_graduation(
@@ -271,6 +292,7 @@ def decide_graduation(
             "zero_update_format", "corrupted_format", "candidate_semantic_correct",
             "baseline_semantic_correct", "zero_update_semantic_correct",
             "corrupted_semantic_correct")}
+        paired = {arm: [0, 0] for arm in ("baseline", "zero_update", "corrupted")}
         for trial in trials:
             if not _exact_keys(trial, _TRIAL_KEYS):
                 return GateDecision("BLOCKED", ("malformed paired trial",), state)
@@ -289,6 +311,11 @@ def decide_graduation(
                 if type(trial[name]) is not bool:
                     return GateDecision("BLOCKED", ("nonboolean scoring evidence",), state)
                 tally[name] += int(trial[name])
+            for arm, (wins, losses) in paired.items():
+                candidate = trial["candidate_semantic_correct"]
+                control = trial[f"{arm}_semantic_correct"]
+                paired[arm] = [wins + int(candidate and not control),
+                               losses + int(control and not candidate)]
             for name in ("candidate_response_sha256", "baseline_response_sha256",
                          "zero_update_response_sha256", "corrupted_response_sha256"):
                 if type(trial[name]) is not str or not _SHA256.fullmatch(trial[name]):
@@ -324,9 +351,19 @@ def decide_graduation(
             satisfied = False
         if format_rate < policy.min_format_rate:
             satisfied = False
-        # No improvement claim from a tie, even if policy permits zero margin.
-        if gain <= 0 or gain < policy.min_gain_over_controls:
-            satisfied = False
+        if policy.objective_kind == "training_effect":
+            # A nonzero sample gain alone is weak evidence. Check *paired*
+            # discordant wins against all three controls in each slice.
+            # Bonferroni controls the family-wise false-positive risk across
+            # arms, slices, and all budgeted attempts, even when arms overlap.
+            # This only applies if individual cases are genuinely independent
+            # within their slices, an evaluator-side custody responsibility.
+            comparisons = 3 * len(policy.required_slices) * policy.max_attempts
+            if gain <= 0 or gain < policy.min_gain_over_controls:
+                satisfied = False
+            for wins, losses in paired.values():
+                if _one_sided_exact_paired_p(wins, losses) * comparisons >= policy.significance_alpha:
+                    satisfied = False
 
     advanced = replace(state, next_attempt=state.next_attempt + 1,
                        policy_fingerprint=binding,

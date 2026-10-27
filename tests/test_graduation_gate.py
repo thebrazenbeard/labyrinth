@@ -7,7 +7,7 @@ import json
 import unittest
 
 from labyrinth.graduation_gate import (
-    GateState, GraduationPolicy, SCHEMA, decide_graduation,
+    GateState, GraduationPolicy, SCHEMA, _one_sided_exact_paired_p, decide_graduation,
 )
 
 
@@ -89,13 +89,20 @@ def independently_signed(receipt):
     return raw, signature
 
 
-def decision(receipt, state=GateState(), *, key=KEY, signature=None):
+def decision(receipt, state=GateState(), *, key=KEY, signature=None, policy=POLICY):
     raw, generated = independently_signed(receipt)
-    return decide_graduation(POLICY, state, raw, generated if signature is None else signature,
+    return decide_graduation(policy, state, raw, generated if signature is None else signature,
                              independent_evaluator_key=key)
 
 
 class MinotaurGraduationTests(unittest.TestCase):
+    def test_exact_paired_tail_has_known_small_sample_values(self):
+        self.assertEqual(_one_sided_exact_paired_p(0, 0), 1.0)
+        self.assertEqual(_one_sided_exact_paired_p(2, 0), 0.25)
+        self.assertEqual(_one_sided_exact_paired_p(1, 1), 0.75)
+        self.assertEqual(_one_sided_exact_paired_p(0, 2), 1.0)
+        self.assertEqual(_one_sided_exact_paired_p(7, 0), 1 / 128)
+
     def test_valid_separately_attested_capability_graduates_without_deployment(self):
         result = decision(evaluated_receipt())
         self.assertEqual(result.disposition, "GRADUATED")
@@ -168,6 +175,64 @@ class MinotaurGraduationTests(unittest.TestCase):
                     trial[f"{arm}_format"] = False
                     trial[f"{arm}_correct"] = False
         self.assertEqual(decision(format_only).disposition, "STAY")
+
+    def test_small_paired_gain_is_not_statistically_sufficient(self):
+        # A 12/16 versus 10/16 advantage has only two discordant victories
+        # per slice (one-sided exact paired p=.25), not reliable learning.
+        evidence = evaluated_receipt()
+        for trials in evidence["slices"].values():
+            for index, trial in enumerate(trials):
+                candidate = index < 12
+                control = index < 10
+                for name, value in (("candidate", candidate),
+                                    ("baseline", control),
+                                    ("zero_update", control),
+                                    ("corrupted", control)):
+                    trial[f"{name}_correct"] = value
+                    trial[f"{name}_semantic_correct"] = value
+        self.assertEqual(decision(evidence).disposition, "STAY")
+
+    def test_repeated_final_attempts_do_not_inflate_false_graduation_budget(self):
+        # Twelve correct vs five (seven discordant victories) would meet
+        # alpha=.05 after six comparisons, but not after accounting for the
+        # full two-attempt qualification campaign's twelve comparisons.
+        evidence = evaluated_receipt()
+        for trials in evidence["slices"].values():
+            for index, trial in enumerate(trials):
+                for arm, correct in (("candidate", index < 12),
+                                     ("baseline", index < 5),
+                                     ("zero_update", index < 5),
+                                     ("corrupted", index < 5)):
+                    trial[f"{arm}_correct"] = correct
+                    trial[f"{arm}_semantic_correct"] = correct
+        self.assertEqual(decision(evidence).disposition, "STAY")
+
+    def test_mastery_and_learning_effect_are_distinct_claims(self):
+        # If the frozen pretrained model already knows the skill, a candidate
+        # can demonstrate mastery but cannot honestly claim an improvement.
+        evidence = evaluated_receipt(controls_correct=True)
+        mastery_policy = replace(POLICY, objective_kind="skill_mastery")
+        self.assertEqual(decision(evidence, policy=mastery_policy).disposition,
+                         "GRADUATED")
+        self.assertEqual(decision(evidence).disposition, "STAY")
+        # A qualification receipt must never silently transfer between claims.
+        graduated = decision(evidence, policy=mastery_policy)
+        self.assertEqual(decide_graduation(POLICY, graduated.state, None, None,
+                         independent_evaluator_key=None).disposition, "BLOCKED")
+
+    def test_statistical_alpha_and_objective_kind_are_frozen_policy(self):
+        for kwargs in ({"objective_kind": "flattering_the_evaluator"},
+                       {"significance_alpha": 0},
+                       {"significance_alpha": 1},
+                       {"significance_alpha": 0.5},
+                       {"significance_alpha": float("nan")}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                replace(POLICY, **kwargs)
+        qualified = decision(evaluated_receipt())
+        self.assertEqual(qualified.disposition, "GRADUATED")
+        changed = replace(POLICY, significance_alpha=0.01)
+        self.assertEqual(decide_graduation(changed, qualified.state, None, None,
+                         independent_evaluator_key=None).disposition, "BLOCKED")
 
     def test_arm_checkpoints_and_equal_optimizer_budget_required(self):
         for path, value in (
