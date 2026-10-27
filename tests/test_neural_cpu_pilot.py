@@ -10,8 +10,62 @@ import unittest
 
 from labyrinth.neural_cpu_pilot import (
     file_digest, read_training, supervised_target, training_prefix,
+    render_supervised_tokens, zero_trainable_gradients,
 )
 from labyrinth.program_maze import generate_program_challenges
+
+
+class _CharTokenizer:
+    eos_token = "</s>"
+    chat_template = "fake-template-v1"
+
+    def __call__(self, text, *, add_special_tokens):
+        if add_special_tokens:
+            raise AssertionError("the SFT path must not duplicate BOS/EOS")
+        from types import SimpleNamespace
+        return SimpleNamespace(input_ids=[ord(char) for char in text])
+
+    def apply_chat_template(self, messages, *, tokenize, add_generation_prompt):
+        if tokenize:
+            raise AssertionError("need explicit, auditable loss mask boundary")
+        result = "".join(f"<[{msg['role']}]>{msg['content']}</>" for msg in messages)
+        if add_generation_prompt:
+            result += "<[assistant]>"
+        # Prefix formatting must exactly match the full assistant-start token.
+        if len(messages) == 2:
+            user, assistant = messages
+            return f"<[user]>{user['content']}</><[assistant]>{assistant['content']}</>"
+        return result
+
+
+class _NoTemplate(_CharTokenizer):
+    chat_template = None
+
+
+class _BrokenBoundary(_CharTokenizer):
+    def apply_chat_template(self, messages, *, tokenize, add_generation_prompt):
+        if len(messages) == 2:
+            return "NOT_THE_SAME_PREFIX" + messages[1]["content"]
+        return super().apply_chat_template(messages, tokenize=tokenize,
+                                           add_generation_prompt=add_generation_prompt)
+
+
+class _PairTokenizer(_CharTokenizer):
+    def __call__(self, text, *, add_special_tokens):
+        if add_special_tokens:
+            raise AssertionError("unexpected implicit special tokens")
+        from types import SimpleNamespace
+        return SimpleNamespace(input_ids=[sum(ord(ch) for ch in text[i:i + 2])
+                                          for i in range(0, len(text), 2)])
+
+
+class _QuadTokenizer(_CharTokenizer):
+    def __call__(self, text, *, add_special_tokens):
+        if add_special_tokens:
+            raise AssertionError("unexpected implicit special tokens")
+        from types import SimpleNamespace
+        return SimpleNamespace(input_ids=[sum(ord(ch) for ch in text[i:i + 4])
+                                          for i in range(0, len(text), 4)])
 
 
 class NeuralCpuPilotTests(unittest.TestCase):
@@ -29,6 +83,89 @@ class NeuralCpuPilotTests(unittest.TestCase):
         self.write(self.sample)
         self.assertEqual(read_training(self.path), self.sample)
         self.assertEqual(file_digest(self.path), hashlib.sha256(self.path.read_bytes()).hexdigest())
+
+    def test_chat_sft_masks_entire_user_and_assistant_header(self):
+        tok = _CharTokenizer()
+        ids, prefix_length, metadata = render_supervised_tokens(
+            tok, self.sample[0], policy="answer", arm="trained", step=0, mode="chat")
+        transcript = "".join(map(chr, ids))
+        self.assertEqual(transcript[:prefix_length],
+                         "<[user]>Compute 2+2</><[assistant]>")
+        self.assertEqual(transcript[prefix_length:], "ANSWER: 4</>")
+        self.assertEqual(metadata["prompt_mode"], "chat")
+        self.assertEqual(len(metadata["chat_template_sha256"]), 64)
+        self.assertNotIn("ANSWER: 4", transcript[:prefix_length])
+        self.assertGreater(len(ids) - prefix_length, len("ANSWER: 4"))
+
+    def test_chat_corrupted_target_does_not_change_prompt_tokens(self):
+        tok = _CharTokenizer()
+        real, real_prefix, _ = render_supervised_tokens(
+            tok, self.sample[0], policy="answer", arm="trained", step=2, mode="chat")
+        bad, bad_prefix, _ = render_supervised_tokens(
+            tok, self.sample[0], policy="answer", arm="corrupted", step=2, mode="chat")
+        self.assertEqual(real_prefix, bad_prefix)
+        self.assertEqual(real[:real_prefix], bad[:bad_prefix])
+        self.assertNotEqual(real[real_prefix:], bad[bad_prefix:])
+
+    def test_chat_trace_rewrites_user_instruction_before_assistant_states(self):
+        ch = generate_program_challenges(1702, 1, "train")[0]
+        sample = {"case_id": ch.id, "split": ch.split,
+                  "prompt": ch.prompt, "answer": ch.answer}
+        user_header = training_prefix(sample, policy="trace")
+        assistant = supervised_target(sample, policy="trace", arm="trained", step=0)
+        self.assertIn("STATE N: A=<integer>, B=<integer>", user_header)
+        self.assertNotIn("Respond with exactly one line:", user_header)
+        self.assertIn("STATE 1:", assistant)
+        self.assertIn("ANSWER: " + ch.answer, assistant)
+        self.assertNotIn("STATE 1:", user_header)
+        ids, prefix_length, metadata = render_supervised_tokens(
+            _QuadTokenizer(), sample, policy="trace", arm="trained", step=0, mode="chat")
+        self.assertGreater(len(ids), prefix_length)
+        self.assertEqual(metadata["prompt_mode"], "chat")
+
+    def test_raw_sft_remains_byte_identical_to_legacy(self):
+        tok = _CharTokenizer()
+        ids, prefix_length, metadata = render_supervised_tokens(
+            tok, self.sample[0], policy="answer", arm="trained", step=0, mode="raw")
+        self.assertEqual("".join(map(chr, ids)), "Compute 2+2\nANSWER: 4</s>")
+        self.assertEqual(prefix_length, len("Compute 2+2\n"))
+        self.assertEqual(metadata["prompt_mode"], "raw")
+
+    def test_chat_template_missing_or_nonprefix_rejected(self):
+        for tok in (_NoTemplate(), _BrokenBoundary()):
+            with self.subTest(tokenizer=type(tok).__name__), self.assertRaises(ValueError):
+                render_supervised_tokens(tok, self.sample[0], policy="answer",
+                                         arm="trained", step=0, mode="chat")
+
+    def test_chat_loss_prefix_is_exact_inference_token_prefix_under_bpe_merges(self):
+        tok = _PairTokenizer()
+        ids, prefix_length, _ = render_supervised_tokens(
+            tok, self.sample[0], policy="answer", arm="trained", step=0, mode="chat")
+        rendered = tok.apply_chat_template(
+            [{"role": "user", "content": self.sample[0]["prompt"]}],
+            tokenize=False, add_generation_prompt=True)
+        expected = tok(rendered, add_special_tokens=False).input_ids
+        self.assertEqual(ids[:prefix_length], expected)
+        self.assertGreater(len(ids), prefix_length)
+
+    def test_compute_matched_sham_suppresses_gradients_not_backward_work(self):
+        class _Grad:
+            def __init__(self, value):
+                self.value = value
+
+            def zero_(self):
+                self.value = 0
+
+        class _Param:
+            def __init__(self, gradient):
+                self.grad = gradient
+
+        live = _Grad(5)
+        params = [_Param(live), _Param(None), _Param(_Grad(-2))]
+        zero_trainable_gradients(params)
+        self.assertEqual(params[0].grad.value, 0)
+        self.assertIsNone(params[1].grad)
+        self.assertEqual(params[2].grad.value, 0)
 
     def test_reject_eval_gold_and_duplicate_cases(self):
         for bad in (
