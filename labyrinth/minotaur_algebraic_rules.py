@@ -19,6 +19,14 @@ OPS = 3
 TRAIN_MAX = 8
 
 
+class ClosureBudgetExhausted(RuntimeError):
+    """The optimizer requested another gradient closure past a hard cap."""
+
+    def __init__(self, closure_evaluations: int):
+        super().__init__("L-BFGS closure budget exhausted")
+        self.closure_evaluations=closure_evaluations
+
+
 def incomplete_training_atoms(seed: int, per_operation: int = 12) -> list[tuple[int,int,int,int]]:
     """Select only non-wrapping small operands (never all 28,227 atoms)."""
     if type(seed) is not int or not 0 <= seed < 2**31:
@@ -72,10 +80,14 @@ def corrupt_labels_within_op(
     return output
 
 
-def build_algebraic_head(torch: Any, *, seed: int = 20261028) -> Any:
-    """Create a 12-parameter, float64 neural operation head."""
+def build_algebraic_head(
+    torch: Any, *, seed: int = 20261028, basis: str = "bilinear",
+) -> Any:
+    """Create a 12-parameter, float64 neural head with an explicit basis."""
     if type(seed) is not int or not 0 <= seed < 2**31:
         raise ValueError("invalid neural seed")
+    if type(basis) is not str or basis not in ("bilinear", "no_xy"):
+        raise ValueError("unknown algebraic feature basis")
     nn=torch.nn
     generator=torch.Generator(device="cpu")
     generator.manual_seed(seed)
@@ -83,6 +95,7 @@ def build_algebraic_head(torch: Any, *, seed: int = 20261028) -> Any:
     class AlgebraicRuleHead(nn.Module):
         def __init__(self):
             super().__init__()
+            self.basis=basis
             initial=torch.randn((OPS,4),generator=generator,dtype=torch.float64)*0.01
             self.coefficients=nn.Parameter(initial)
 
@@ -93,7 +106,8 @@ def build_algebraic_head(torch: Any, *, seed: int = 20261028) -> Any:
                 raise ValueError("unknown operation index")
             x=x.to(dtype=torch.float64)
             y=y.to(dtype=torch.float64)
-            features=torch.stack((torch.ones_like(x),x/8.0,y/8.0,x*y/64.0),dim=-1)
+            cross=x*y if self.basis=="bilinear" else x*x
+            features=torch.stack((torch.ones_like(x),x/8.0,y/8.0,cross/64.0),dim=-1)
             return (features*self.coefficients[op]).sum(dim=-1)*64.0
 
         def predict(self,op,x,y):
@@ -158,7 +172,7 @@ def train_rule_head_lbfgs(
     head: Any, examples: list[tuple[int,int,int,int]], torch: Any,
     *, max_iter: int = 200, max_eval: int | None = None,
     learning_rate: float = 1.0,
-    require_fit: bool = True,
+    require_fit: bool = True, closure_budget: int | None = None,
 ) -> dict[str,Any]:
     """Opt-in float64 L-BFGS coefficient study; never a graduation gate.
 
@@ -173,6 +187,9 @@ def train_rule_head_lbfgs(
         raise ValueError("bounded L-BFGS iteration budget required")
     if max_eval is not None and (type(max_eval) is not int or not 1 <= max_eval <= 1000):
         raise ValueError("bounded L-BFGS function-evaluation budget required")
+    if closure_budget is not None and (type(closure_budget) is not int
+                                       or not 1 <= closure_budget <= 1000):
+        raise ValueError("bounded hard closure budget required")
     if type(learning_rate) is not float or not 0.0 < learning_rate <= 1.0:
         raise ValueError("bounded positive L-BFGS learning rate required")
     if type(require_fit) is not bool:
@@ -183,10 +200,14 @@ def train_rule_head_lbfgs(
             sum(p.numel() for p in head.parameters()) != OPS*4):
         raise ValueError("L-BFGS research requires 12 CPU float64 coefficients")
     ops,x,y,labels=_checked_supervision_tensors(head,examples,torch)
+    selected_basis=getattr(head,"basis","bilinear")
+    if selected_basis not in ("bilinear","no_xy"):
+        raise ValueError("unsupported neural feature basis")
     with torch.no_grad():
         initial=head.coefficients.detach().clone()
         initial_loss=float(((head.raw(ops,x,y)/64.0-labels)**2).mean().item())
-        design=torch.stack((torch.ones_like(x),x/8.0,y/8.0,x*y/64.0),dim=-1)
+        cross=x*y if selected_basis=="bilinear" else x*x
+        design=torch.stack((torch.ones_like(x),x/8.0,y/8.0,cross/64.0),dim=-1)
         ranks=[int(torch.linalg.matrix_rank(design[ops==op]).item()) for op in range(OPS)]
     optimizer=torch.optim.LBFGS(
         head.parameters(),lr=learning_rate,max_iter=max_iter,history_size=100,
@@ -198,6 +219,12 @@ def train_rule_head_lbfgs(
 
     def closure():
         nonlocal calls
+        # PyTorch's max_eval is a soft bound during strong-Wolfe line search.
+        # A hard cap must reject *before* the next forward/backward attempt;
+        # the outer exception handler restores parameters after an abort.
+        if closure_budget is not None and calls >= closure_budget:
+            raise ClosureBudgetExhausted(calls)
+        calls+=1
         optimizer.zero_grad(set_to_none=True)
         prediction=head.raw(ops,x,y)/64.0
         loss=(prediction-labels).square().mean()
@@ -207,7 +234,6 @@ def train_rule_head_lbfgs(
         if head.coefficients.grad is None or not bool(torch.isfinite(head.coefficients.grad).all()):
             raise RuntimeError("nonfinite L-BFGS gradient")
         # Never clip L-BFGS gradients: Wolfe requires the actual derivative.
-        calls+=1
         return loss
 
     head.train()
@@ -225,6 +251,7 @@ def train_rule_head_lbfgs(
         result={"optimizer":"LBFGS_strong_wolfe",
                 "max_iter":max_iter,
                 "max_eval":int(optimizer.param_groups[0]["max_eval"]),
+                "closure_budget":closure_budget,
                 "learning_rate":learning_rate,
                 "optimizer_iterations":iterations,"closure_evaluations":calls,
                 "initial_loss":initial_loss,"final_loss":final_loss,
@@ -240,6 +267,7 @@ def train_rule_head_lbfgs(
         # research head available for accidental inference.
         with torch.no_grad():
             head.coefficients.copy_(initial)
+            head.coefficients.grad=None
         raise
     finally:
         head.eval()

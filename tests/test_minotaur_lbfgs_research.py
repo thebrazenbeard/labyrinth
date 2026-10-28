@@ -15,6 +15,44 @@ class MinotaurLbfgsResearchTests(unittest.TestCase):
     def setUpClass(cls):
         torch.set_num_threads(min(torch.get_num_threads(), 2))
 
+    def test_equal_parameter_basis_variants_are_real_neural_heads(self):
+        from labyrinth.minotaur_algebraic_rules import build_algebraic_head
+        arms = {basis: build_algebraic_head(torch, seed=19, basis=basis)
+                for basis in ("bilinear", "no_xy")}
+        for head in arms.values():
+            self.assertEqual(sum(p.numel() for p in head.parameters()), 12)
+            with torch.no_grad():
+                head.coefficients.zero_()
+                head.coefficients[:, 3] = 1.0
+        inputs = (torch.tensor(2), torch.tensor(3), torch.tensor(5))
+        self.assertEqual(float(arms["bilinear"].raw(*inputs)), 15.0)
+        self.assertEqual(float(arms["no_xy"].raw(*inputs)), 9.0)
+        with self.assertRaises(ValueError):
+            build_algebraic_head(torch, basis="unrecognized")
+
+    def test_explicit_closure_budget_is_hard_and_rolls_back(self):
+        from labyrinth.minotaur_algebraic_rules import (
+            build_algebraic_head, incomplete_training_atoms,
+            train_rule_head_lbfgs,
+        )
+        examples = incomplete_training_atoms(47, 12)
+        head = build_algebraic_head(torch, seed=19)
+        original = head.coefficients.detach().clone()
+        with self.assertRaisesRegex(RuntimeError, "closure budget exhausted"):
+            train_rule_head_lbfgs(head, examples, torch, max_iter=200,
+                                  closure_budget=1, require_fit=False)
+        self.assertTrue(torch.equal(head.coefficients.detach(), original))
+        self.assertIsNone(head.coefficients.grad)
+        self.assertFalse(head.training)
+        with self.assertRaises(ValueError):
+            train_rule_head_lbfgs(build_algebraic_head(torch), examples, torch,
+                                  closure_budget=0)
+        success = build_algebraic_head(torch, seed=19)
+        stats = train_rule_head_lbfgs(success, examples, torch, max_iter=200,
+                                      closure_budget=500)
+        self.assertLessEqual(stats["closure_evaluations"], 500)
+        self.assertEqual(stats["closure_budget"], 500)
+
     def test_predeclared_dataset_seed_sweep(self):
         from labyrinth.minotaur_algebraic_rules import (
             MOD, all_atom_accuracy, build_algebraic_head,
