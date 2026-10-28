@@ -16,6 +16,22 @@ class EvidenceTests(unittest.TestCase):
         self.assertTrue(audit["no_promotion"])
         self.assertEqual(len(audit["report_sha256"]),64)
 
+    def test_cross_platform_evidence_and_source_hash(self):
+        from labyrinth.minotaur_v7_evidence import canonical_sha256, EXPECTED_REPORT_CANONICAL_SHA, EXPECTED_SOURCE_CANONICAL_SHA
+        raw=REPORT.read_bytes()
+        self.assertEqual(canonical_sha256(raw.replace(b"\r\n",b"\n")),EXPECTED_REPORT_CANONICAL_SHA)
+        self.assertEqual(canonical_sha256(raw.replace(b"\r\n",b"\n").replace(b"\n",b"\r\n")),EXPECTED_REPORT_CANONICAL_SHA)
+        for name,digest in EXPECTED_SOURCE_CANONICAL_SHA.items():
+            body=(ROOT/"labyrinth"/name).read_bytes()
+            self.assertEqual(canonical_sha256(body),digest)
+            self.assertEqual(canonical_sha256(body.replace(b"\r\n",b"\n")),digest)
+
+    def test_line_endings_do_not_change_frozen_public_evidence(self):
+        with TemporaryDirectory() as d:
+            p=Path(d)/"MINOTAUR_V7_NUMERIC_2026-10-28.json"
+            p.write_bytes(REPORT.read_bytes().replace(b"\r\n", b"\n"))
+            self.assertEqual(audit_v7_report(p,ROOT)["target_53_correct"],[0,0])
+
     def test_missing_controls_are_refused(self):
         with TemporaryDirectory() as d:
             data=json.loads(REPORT.read_text(encoding="utf-8"))
