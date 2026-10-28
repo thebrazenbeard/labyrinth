@@ -39,6 +39,9 @@ class PublicCheckpointTests(unittest.TestCase):
                     stream.write("\n# changed after import\n")
                 with self.assertRaisesRegex(ValueError, "source.*changed.*import"):
                     public._verified_source_manifest()
+                refused = public.evaluate_checkpoint_public(self.artifact, self.challenge)
+                self.assertEqual(refused["disposition"], "REFUSED")
+                self.assertEqual(refused["reason"], "invalid_artifact_or_challenge_input")
 
     @classmethod
     def setUpClass(cls):

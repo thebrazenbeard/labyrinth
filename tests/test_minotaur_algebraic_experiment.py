@@ -27,6 +27,10 @@ class AlgebraicExperimentTests(unittest.TestCase):
                     stream.write("\n# changed after import\n")
                 with self.assertRaisesRegex(ValueError, "source.*changed.*import"):
                     experiment._verified_source_manifest()
+                output = Path(temp) / "must-not-create"
+                with self.assertRaisesRegex(ValueError, "source.*changed.*import"):
+                    experiment.run_experiment(output, torch, seed=47, steps=1)
+                self.assertFalse(output.exists())
 
     def test_heldout_programs_compose_rules_without_teacher_states(self):
         from labyrinth.minotaur_algebraic_experiment import evaluate_programs
