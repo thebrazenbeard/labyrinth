@@ -1,0 +1,677 @@
+{
+  "caveats": [
+    "Every possible atomic arithmetic operand pair in the 3-op modulo-97 grammar was supervised.",
+    "Success on unseen multi-step programs is *compositional* generalization within this closed finite domain, not general arithmetic extrapolation.",
+    "The untrained-atom control measures inability to extrapolate to unseen pairs.",
+    "No model release, independent private exam, or graduation authority."
+  ],
+  "checkpoint": {
+    "fresh_reload_metrics_identical": true,
+    "parameter_sha256": "dac5b33643797cbe666108760fd0c1a3bf17460250c472ea6c689161246e368c",
+    "safetensors_sha256": "b4f0c2b7c40a70f510a1b71a0b37c5913de22510f3092a1982fc32ec0996fd46",
+    "size_bytes": 10952172
+  },
+  "config": {
+    "batch_size": 1024,
+    "data_seed": 7707,
+    "dev_cases": 128,
+    "lr": 0.25,
+    "seed": 20261028,
+    "train_cases": 256,
+    "transfer_cases": 128
+  },
+  "frozen": {
+    "dev": {
+      "audit": {
+        "audited_cases": 128,
+        "failures": [],
+        "total_cases": 128
+      },
+      "confidence_claim": "No IID confidence claim is made.",
+      "disposition": "SCORED",
+      "graduation_authority": "none",
+      "limitations": [
+        "Symbolic gold-state provenance is a diagnostic control, not learning.",
+        "Public arithmetic replay is not a blind or IID evaluation."
+      ],
+      "metrics": {
+        "abstentions": 0,
+        "cases": 128,
+        "coverage": 1.0,
+        "erroneous_step_localization_accuracy": 0.28125,
+        "erroneous_step_localization_correct": 18,
+        "exact_first_error": 18,
+        "exact_first_error_accuracy": 0.140625,
+        "false_approval_rate": 0.0,
+        "false_approvals": 0,
+        "false_rejection_rate": 1.0,
+        "false_rejections": 64,
+        "per_step_state_accuracy": 0.036290322580645164,
+        "selective_exact_first_error_accuracy": 0.140625,
+        "state_correct": 18,
+        "state_coverage": 1.0,
+        "state_steps": 496
+      },
+      "negative_controls": {
+        "always_approve": {
+          "abstentions": 0,
+          "cases": 128,
+          "coverage": 1.0,
+          "erroneous_step_localization_accuracy": 0.0,
+          "erroneous_step_localization_correct": 0,
+          "exact_first_error": 64,
+          "exact_first_error_accuracy": 0.5,
+          "false_approval_rate": 1.0,
+          "false_approvals": 64,
+          "false_rejection_rate": 0.0,
+          "false_rejections": 0,
+          "selective_exact_first_error_accuracy": 0.5
+        },
+        "always_reject": {
+          "abstentions": 0,
+          "cases": 128,
+          "coverage": 1.0,
+          "erroneous_step_localization_accuracy": 0.25,
+          "erroneous_step_localization_correct": 16,
+          "exact_first_error": 16,
+          "exact_first_error_accuracy": 0.125,
+          "false_approval_rate": 0.0,
+          "false_approvals": 0,
+          "false_rejection_rate": 1.0,
+          "false_rejections": 64,
+          "selective_exact_first_error_accuracy": 0.125
+        },
+        "copied_observed_state": {
+          "per_step_state_accuracy": 0.717741935483871,
+          "state_correct": 356,
+          "state_steps": 496
+        }
+      },
+      "oracle": "strict_public_printed_program_replay",
+      "overlaps": {
+        "group_ids": [],
+        "group_structures": {
+          "ADD A C;ADD B C;ADD A C;ADD A R;SUB A R": "ADD A C;ADD B C;ADD A C;ADD A R;SUB A R",
+          "ADD A C;ADD B C;MUL B C": "ADD A C;ADD B C;MUL B C",
+          "ADD A C;MUL A R;MUL A R;MUL B R;MUL B R;MUL B R": "ADD A C;MUL A R;MUL A R;MUL B R;MUL B R;MUL B R",
+          "ADD A C;MUL A R;SUB B R;SUB A R": "ADD A C;MUL A R;SUB B R;SUB A R",
+          "ADD A C;SUB A C": "ADD A C;SUB A C",
+          "ADD A R;MUL A C;SUB A C;SUB B C;ADD B C;ADD B R": "ADD A R;MUL A C;SUB A C;SUB B C;ADD B C;ADD B R",
+          "ADD A R;MUL B R;ADD A R;ADD B C;SUB B R;MUL B R": "ADD A R;MUL B R;ADD A R;ADD B C;SUB B R;MUL B R",
+          "ADD A R;MUL B R;SUB A R;MUL B C;MUL A C;SUB B C": "ADD A R;MUL B R;SUB A R;MUL B C;MUL A C;SUB B C",
+          "ADD A R;SUB A C;ADD A C;MUL B R;MUL B C": "ADD A R;SUB A C;ADD A C;MUL B R;MUL B C",
+          "ADD A R;SUB B C;ADD B R;MUL A C;SUB A R;MUL A C": "ADD A R;SUB B C;ADD B R;MUL A C;SUB A R;MUL A C",
+          "ADD A R;SUB B C;SUB B R": "ADD A R;SUB B C;SUB B R",
+          "ADD B C;ADD A R": "ADD B C;ADD A R",
+          "ADD B C;MUL A C;MUL B C;SUB B C;ADD B R": "ADD B C;MUL A C;MUL B C;SUB B C;ADD B R",
+          "ADD B C;MUL A R;ADD A C;MUL A C;SUB A R": "ADD B C;MUL A R;ADD A C;MUL A C;SUB A R",
+          "ADD B C;MUL B C": "ADD B C;MUL B C",
+          "ADD B R;ADD A R;SUB B R;SUB A R;MUL A R;MUL B R": "ADD B R;ADD A R;SUB B R;SUB A R;MUL A R;MUL B R",
+          "MUL A C;ADD A C;ADD A R;MUL B C": "MUL A C;ADD A C;ADD A R;MUL B C",
+          "MUL A C;MUL A C": "MUL A C;MUL A C",
+          "MUL A C;SUB A R": "MUL A C;SUB A R",
+          "MUL A C;SUB B C": "MUL A C;SUB B C",
+          "MUL A C;SUB B C;MUL A R;SUB B R": "MUL A C;SUB B C;MUL A R;SUB B R",
+          "MUL A R;MUL A R;SUB B R": "MUL A R;MUL A R;SUB B R",
+          "MUL A R;MUL B C;MUL A R;ADD B R": "MUL A R;MUL B C;MUL A R;ADD B R",
+          "MUL B C;ADD B C;SUB A R;MUL A R;MUL B R": "MUL B C;ADD B C;SUB A R;MUL A R;MUL B R",
+          "MUL B C;ADD B R": "MUL B C;ADD B R",
+          "MUL B C;ADD B R;MUL B C;SUB A R": "MUL B C;ADD B R;MUL B C;SUB A R",
+          "MUL B C;MUL A R;MUL B C;ADD A R;SUB A R;MUL A R": "MUL B C;MUL A R;MUL B C;ADD A R;SUB A R;MUL A R",
+          "MUL B C;MUL A R;SUB A C;ADD B R;ADD A C": "MUL B C;MUL A R;SUB A C;ADD B R;ADD A C",
+          "MUL B C;MUL B R;MUL A C;MUL A C;MUL A R;SUB A R": "MUL B C;MUL B R;MUL A C;MUL A C;MUL A R;SUB A R",
+          "MUL B C;SUB A C": "MUL B C;SUB A C",
+          "MUL B C;SUB A C;MUL A C;MUL B R;MUL B C": "MUL B C;SUB A C;MUL A C;MUL B R;MUL B C",
+          "MUL B C;SUB A R;ADD B R;ADD A C;SUB B R;ADD A C": "MUL B C;SUB A R;ADD B R;ADD A C;SUB B R;ADD A C",
+          "MUL B C;SUB B R;SUB A R": "MUL B C;SUB B R;SUB A R",
+          "MUL B R;ADD B C": "MUL B R;ADD B C",
+          "MUL B R;MUL A C;ADD B R": "MUL B R;MUL A C;ADD B R",
+          "MUL B R;MUL A C;SUB A C;MUL B R": "MUL B R;MUL A C;SUB A C;MUL B R",
+          "MUL B R;MUL A R;MUL B C": "MUL B R;MUL A R;MUL B C",
+          "MUL B R;MUL A R;MUL B C;ADD B R;ADD A C;SUB B C": "MUL B R;MUL A R;MUL B C;ADD B R;ADD A C;SUB B C",
+          "MUL B R;MUL B R;ADD A C": "MUL B R;MUL B R;ADD A C",
+          "SUB A C": "SUB A C",
+          "SUB A C;ADD A C;SUB B C;ADD A C;SUB B R;ADD A R": "SUB A C;ADD A C;SUB B C;ADD A C;SUB B R;ADD A R",
+          "SUB A C;ADD B C": "SUB A C;ADD B C",
+          "SUB A C;MUL A C;MUL A R": "SUB A C;MUL A C;MUL A R",
+          "SUB A C;MUL A R;MUL B C;SUB A R": "SUB A C;MUL A R;MUL B C;SUB A R",
+          "SUB A C;MUL B C": "SUB A C;MUL B C",
+          "SUB A C;SUB A C;SUB A R;MUL A R;MUL B R;MUL B C": "SUB A C;SUB A C;SUB A R;MUL A R;MUL B R;MUL B C",
+          "SUB A C;SUB B R;MUL A R": "SUB A C;SUB B R;MUL A R",
+          "SUB A C;SUB B R;SUB A C;MUL B R;SUB B C": "SUB A C;SUB B R;SUB A C;MUL B R;SUB B C",
+          "SUB A R;MUL B R;ADD A C;ADD B C;MUL B C": "SUB A R;MUL B R;ADD A C;ADD B C;MUL B C",
+          "SUB B C": "SUB B C",
+          "SUB B C;ADD A C;SUB B C;MUL A C;MUL B R": "SUB B C;ADD A C;SUB B C;MUL A C;MUL B R",
+          "SUB B C;ADD B R;MUL A C;SUB B R;SUB B R;SUB B R": "SUB B C;ADD B R;MUL A C;SUB B R;SUB B R;SUB B R",
+          "SUB B C;MUL B C;ADD A C": "SUB B C;MUL B C;ADD A C",
+          "SUB B C;MUL B R;MUL A C;SUB A C;ADD A C": "SUB B C;MUL B R;MUL A C;SUB A C;ADD A C",
+          "SUB B C;SUB A R;MUL B R;MUL A R": "SUB B C;SUB A R;MUL B R;MUL A R",
+          "SUB B C;SUB B C": "SUB B C;SUB B C",
+          "SUB B C;SUB B C;ADD A R": "SUB B C;SUB B C;ADD A R",
+          "SUB B R;ADD A C;SUB A R;SUB A R": "SUB B R;ADD A C;SUB A R;SUB A R",
+          "SUB B R;MUL A C;ADD B R": "SUB B R;MUL A C;ADD B R",
+          "SUB B R;MUL A R;ADD B R;ADD A R": "SUB B R;MUL A R;ADD B R;ADD A R",
+          "SUB B R;MUL B C": "SUB B R;MUL B C",
+          "SUB B R;SUB A C;ADD A C": "SUB B R;SUB A C;ADD A C",
+          "SUB B R;SUB B C;ADD B R;ADD A R": "SUB B R;SUB B C;ADD B R;ADD A R",
+          "SUB B R;SUB B C;SUB B C;SUB B C": "SUB B R;SUB B C;SUB B C;SUB B C"
+        },
+        "structural": []
+      },
+      "provenance": {
+        "diagnostic_only": false,
+        "learning_evidence": "not_established",
+        "sources": [
+          "model_inference"
+        ]
+      },
+      "qualification": "NOT_ESTABLISHED",
+      "schema": "labyrinth.minotaur-transition-eval.v1"
+    },
+    "structure_disjoint_transfer": {
+      "audit": {
+        "audited_cases": 128,
+        "failures": [],
+        "total_cases": 128
+      },
+      "confidence_claim": "No IID confidence claim is made.",
+      "disposition": "SCORED",
+      "graduation_authority": "none",
+      "limitations": [
+        "Symbolic gold-state provenance is a diagnostic control, not learning.",
+        "Public arithmetic replay is not a blind or IID evaluation."
+      ],
+      "metrics": {
+        "abstentions": 0,
+        "cases": 128,
+        "coverage": 1.0,
+        "erroneous_step_localization_accuracy": 0.265625,
+        "erroneous_step_localization_correct": 17,
+        "exact_first_error": 18,
+        "exact_first_error_accuracy": 0.140625,
+        "false_approval_rate": 0.0,
+        "false_approvals": 0,
+        "false_rejection_rate": 0.984375,
+        "false_rejections": 63,
+        "per_step_state_accuracy": 0.05363984674329502,
+        "selective_exact_first_error_accuracy": 0.140625,
+        "state_correct": 28,
+        "state_coverage": 1.0,
+        "state_steps": 522
+      },
+      "negative_controls": {
+        "always_approve": {
+          "abstentions": 0,
+          "cases": 128,
+          "coverage": 1.0,
+          "erroneous_step_localization_accuracy": 0.0,
+          "erroneous_step_localization_correct": 0,
+          "exact_first_error": 64,
+          "exact_first_error_accuracy": 0.5,
+          "false_approval_rate": 1.0,
+          "false_approvals": 64,
+          "false_rejection_rate": 0.0,
+          "false_rejections": 0,
+          "selective_exact_first_error_accuracy": 0.5
+        },
+        "always_reject": {
+          "abstentions": 0,
+          "cases": 128,
+          "coverage": 1.0,
+          "erroneous_step_localization_accuracy": 0.234375,
+          "erroneous_step_localization_correct": 15,
+          "exact_first_error": 15,
+          "exact_first_error_accuracy": 0.1171875,
+          "false_approval_rate": 0.0,
+          "false_approvals": 0,
+          "false_rejection_rate": 1.0,
+          "false_rejections": 64,
+          "selective_exact_first_error_accuracy": 0.1171875
+        },
+        "copied_observed_state": {
+          "per_step_state_accuracy": 0.7528735632183908,
+          "state_correct": 393,
+          "state_steps": 522
+        }
+      },
+      "oracle": "strict_public_printed_program_replay",
+      "overlaps": {
+        "group_ids": [],
+        "group_structures": {
+          "ADD A C;MUL A C;ADD B C": "ADD A C;MUL A C;ADD B C",
+          "ADD A C;MUL B R;MUL B C;SUB A R": "ADD A C;MUL B R;MUL B C;SUB A R",
+          "ADD A C;SUB B C": "ADD A C;SUB B C",
+          "ADD A C;SUB B R;ADD A R": "ADD A C;SUB B R;ADD A R",
+          "ADD A C;SUB B R;SUB A C;ADD B R": "ADD A C;SUB B R;SUB A C;ADD B R",
+          "ADD A C;SUB B R;SUB A R;SUB B R": "ADD A C;SUB B R;SUB A R;SUB B R",
+          "ADD A R;ADD B R;ADD B C;MUL A R;ADD B C": "ADD A R;ADD B R;ADD B C;MUL A R;ADD B C",
+          "ADD A R;MUL B R": "ADD A R;MUL B R",
+          "ADD A R;MUL B R;SUB A C": "ADD A R;MUL B R;SUB A C",
+          "ADD A R;MUL B R;SUB B C;ADD A R": "ADD A R;MUL B R;SUB B C;ADD A R",
+          "ADD A R;SUB A C;SUB B R;ADD B C;SUB B C;SUB B R": "ADD A R;SUB A C;SUB B R;ADD B C;SUB B C;SUB B R",
+          "ADD A R;SUB B R;MUL A R": "ADD A R;SUB B R;MUL A R",
+          "ADD B C;ADD A C;SUB B C;SUB A R": "ADD B C;ADD A C;SUB B C;SUB A R",
+          "ADD B C;ADD B C;SUB B R": "ADD B C;ADD B C;SUB B R",
+          "ADD B C;MUL B R": "ADD B C;MUL B R",
+          "ADD B C;SUB A R;MUL A R;SUB A R;SUB A C;MUL B C": "ADD B C;SUB A R;MUL A R;SUB A R;SUB A C;MUL B C",
+          "ADD B R;ADD A C;ADD B R;SUB A R;ADD A R": "ADD B R;ADD A C;ADD B R;SUB A R;ADD A R",
+          "ADD B R;ADD B R": "ADD B R;ADD B R",
+          "ADD B R;ADD B R;MUL B C;ADD A C": "ADD B R;ADD B R;MUL B C;ADD A C",
+          "ADD B R;MUL A C": "ADD B R;MUL A C",
+          "ADD B R;MUL A R;SUB A R;SUB B R;SUB A R;ADD B R": "ADD B R;MUL A R;SUB A R;SUB B R;SUB A R;ADD B R",
+          "ADD B R;SUB A R;ADD B R": "ADD B R;SUB A R;ADD B R",
+          "ADD B R;SUB B C;SUB A C;ADD A R;SUB B C": "ADD B R;SUB B C;SUB A C;ADD A R;SUB B C",
+          "ADD B R;SUB B R;ADD B R;MUL A C;ADD B R": "ADD B R;SUB B R;ADD B R;MUL A C;ADD B R",
+          "ADD B R;SUB B R;SUB A C": "ADD B R;SUB B R;SUB A C",
+          "MUL A C;ADD A R": "MUL A C;ADD A R",
+          "MUL A C;MUL A C;MUL B C": "MUL A C;MUL A C;MUL B C",
+          "MUL A C;MUL A R;ADD A C": "MUL A C;MUL A R;ADD A C",
+          "MUL A C;MUL B C;MUL A R;ADD A C": "MUL A C;MUL B C;MUL A R;ADD A C",
+          "MUL A C;SUB B R;MUL B R;MUL A C;MUL A C;MUL B R": "MUL A C;SUB B R;MUL B R;MUL A C;MUL A C;MUL B R",
+          "MUL A R;MUL A R;ADD A R;MUL A R": "MUL A R;MUL A R;ADD A R;MUL A R",
+          "MUL A R;MUL A R;MUL B C;SUB B C;SUB A R;SUB A C": "MUL A R;MUL A R;MUL B C;SUB B C;SUB A R;SUB A C",
+          "MUL A R;MUL A R;SUB A R;SUB A C": "MUL A R;MUL A R;SUB A R;SUB A C",
+          "MUL A R;MUL B R;MUL B R;ADD A R;MUL A R": "MUL A R;MUL B R;MUL B R;ADD A R;MUL A R",
+          "MUL A R;SUB B C;SUB B R;ADD A C": "MUL A R;SUB B C;SUB B R;ADD A C",
+          "MUL A R;SUB B R;ADD A R": "MUL A R;SUB B R;ADD A R",
+          "MUL A R;SUB B R;MUL B R;ADD A R;MUL A R": "MUL A R;SUB B R;MUL B R;ADD A R;MUL A R",
+          "MUL B C;ADD B C;SUB A R;ADD B C;ADD B R;MUL B R": "MUL B C;ADD B C;SUB A R;ADD B C;ADD B R;MUL B R",
+          "MUL B C;MUL B C": "MUL B C;MUL B C",
+          "MUL B C;MUL B C;ADD B C;ADD A R;SUB B R;SUB B C": "MUL B C;MUL B C;ADD B C;ADD A R;SUB B R;SUB B C",
+          "MUL B C;MUL B C;ADD B R;ADD B C;SUB B C": "MUL B C;MUL B C;ADD B R;ADD B C;SUB B C",
+          "MUL B C;MUL B C;SUB B C;ADD B R;SUB B C": "MUL B C;MUL B C;SUB B C;ADD B R;SUB B C",
+          "MUL B R;ADD A C;MUL B C;MUL B C;MUL B R": "MUL B R;ADD A C;MUL B C;MUL B C;MUL B R",
+          "MUL B R;MUL A C;SUB B R": "MUL B R;MUL A C;SUB B R",
+          "MUL B R;MUL B C;MUL B C;ADD A R;SUB B R;ADD B R": "MUL B R;MUL B C;MUL B C;ADD A R;SUB B R;ADD B R",
+          "MUL B R;SUB A C;ADD A C;ADD B R": "MUL B R;SUB A C;ADD A C;ADD B R",
+          "MUL B R;SUB B C;MUL B R;MUL A C;MUL A C": "MUL B R;SUB B C;MUL B R;MUL A C;MUL A C",
+          "SUB A C;ADD A R;ADD A R;SUB B C;SUB A C;MUL A R": "SUB A C;ADD A R;ADD A R;SUB B C;SUB A C;MUL A R",
+          "SUB A C;MUL A R;SUB B C": "SUB A C;MUL A R;SUB B C",
+          "SUB A C;SUB B R;MUL A C": "SUB A C;SUB B R;MUL A C",
+          "SUB A C;SUB B R;SUB A R;SUB A C": "SUB A C;SUB B R;SUB A R;SUB A C",
+          "SUB A R;ADD A R;ADD B C;SUB A C;ADD A R;MUL A C": "SUB A R;ADD A R;ADD B C;SUB A C;ADD A R;MUL A C",
+          "SUB A R;ADD B C": "SUB A R;ADD B C",
+          "SUB A R;MUL A C": "SUB A R;MUL A C",
+          "SUB A R;MUL A C;ADD A C;MUL B C;ADD A R;MUL A R": "SUB A R;MUL A C;ADD A C;MUL B C;ADD A R;MUL A R",
+          "SUB A R;SUB B C;MUL B R;SUB B C": "SUB A R;SUB B C;MUL B R;SUB B C",
+          "SUB B C;ADD A C;MUL A R;SUB B C;SUB A R": "SUB B C;ADD A C;MUL A R;SUB B C;SUB A R",
+          "SUB B C;ADD B R;ADD A R;ADD B R;SUB B C;MUL B C": "SUB B C;ADD B R;ADD A R;ADD B R;SUB B C;MUL B C",
+          "SUB B C;MUL B C;SUB A R;SUB B R;ADD B R": "SUB B C;MUL B C;SUB A R;SUB B R;ADD B R",
+          "SUB B C;SUB A R": "SUB B C;SUB A R",
+          "SUB B R;ADD A C;MUL A R;SUB B C;ADD A C": "SUB B R;ADD A C;MUL A R;SUB B C;ADD A C",
+          "SUB B R;ADD B C;SUB B C;MUL B R;MUL B C;SUB B C": "SUB B R;ADD B C;SUB B C;MUL B R;MUL B C;SUB B C",
+          "SUB B R;MUL A C;SUB A R": "SUB B R;MUL A C;SUB A R",
+          "SUB B R;MUL B C;ADD A R;MUL B R": "SUB B R;MUL B C;ADD A R;MUL B R"
+        },
+        "structural": []
+      },
+      "provenance": {
+        "diagnostic_only": false,
+        "learning_evidence": "not_established",
+        "sources": [
+          "model_inference"
+        ]
+      },
+      "qualification": "NOT_ESTABLISHED",
+      "schema": "labyrinth.minotaur-transition-eval.v1"
+    }
+  },
+  "promotion_recommendation": "DO_NOT_PROMOTE",
+  "qualification": "NOT_ESTABLISHED",
+  "runtime": {
+    "device": "cpu",
+    "torch": "2.14.1+cpu"
+  },
+  "schema": "labyrinth.minotaur-v4-exhaustive-atom-composition.v1",
+  "source": {
+    "clean": true,
+    "git_head_at_run": "2c0b41a7049fd97316d243dcdd1830b2e9f20b4a",
+    "training_module_sha256": "62ffa619bf0b2acdf1cfc68b0f0cf270c98460989cd80810df46b9b7c2b50245"
+  },
+  "splits": {
+    "dev": {
+      "cases": 128,
+      "commitment": "5e9435d07cfebcb0c6aeff64308702e13301fdc86e819502e62a20ecd99ca9a7",
+      "unique_structures": 64
+    },
+    "structure_disjoint_transfer": {
+      "cases": 128,
+      "commitment": "b3cbff0ef1af1a6b73587810d6b42326b9f936168b7659741e20b36d0d669b70",
+      "unique_structures": 64
+    },
+    "train": {
+      "cases": 256,
+      "commitment": "6981e75a0848601d04a957c428ee4afae4b2df2d8254f26da62d87d99201d0eb",
+      "unique_structures": 128
+    }
+  },
+  "trained": {
+    "dev": {
+      "audit": {
+        "audited_cases": 128,
+        "failures": [],
+        "total_cases": 128
+      },
+      "confidence_claim": "No IID confidence claim is made.",
+      "disposition": "SCORED",
+      "graduation_authority": "none",
+      "limitations": [
+        "Symbolic gold-state provenance is a diagnostic control, not learning.",
+        "Public arithmetic replay is not a blind or IID evaluation."
+      ],
+      "metrics": {
+        "abstentions": 0,
+        "cases": 128,
+        "coverage": 1.0,
+        "erroneous_step_localization_accuracy": 1.0,
+        "erroneous_step_localization_correct": 64,
+        "exact_first_error": 128,
+        "exact_first_error_accuracy": 1.0,
+        "false_approval_rate": 0.0,
+        "false_approvals": 0,
+        "false_rejection_rate": 0.0,
+        "false_rejections": 0,
+        "per_step_state_accuracy": 1.0,
+        "selective_exact_first_error_accuracy": 1.0,
+        "state_correct": 496,
+        "state_coverage": 1.0,
+        "state_steps": 496
+      },
+      "negative_controls": {
+        "always_approve": {
+          "abstentions": 0,
+          "cases": 128,
+          "coverage": 1.0,
+          "erroneous_step_localization_accuracy": 0.0,
+          "erroneous_step_localization_correct": 0,
+          "exact_first_error": 64,
+          "exact_first_error_accuracy": 0.5,
+          "false_approval_rate": 1.0,
+          "false_approvals": 64,
+          "false_rejection_rate": 0.0,
+          "false_rejections": 0,
+          "selective_exact_first_error_accuracy": 0.5
+        },
+        "always_reject": {
+          "abstentions": 0,
+          "cases": 128,
+          "coverage": 1.0,
+          "erroneous_step_localization_accuracy": 0.25,
+          "erroneous_step_localization_correct": 16,
+          "exact_first_error": 16,
+          "exact_first_error_accuracy": 0.125,
+          "false_approval_rate": 0.0,
+          "false_approvals": 0,
+          "false_rejection_rate": 1.0,
+          "false_rejections": 64,
+          "selective_exact_first_error_accuracy": 0.125
+        },
+        "copied_observed_state": {
+          "per_step_state_accuracy": 0.717741935483871,
+          "state_correct": 356,
+          "state_steps": 496
+        }
+      },
+      "oracle": "strict_public_printed_program_replay",
+      "overlaps": {
+        "group_ids": [],
+        "group_structures": {
+          "ADD A C;ADD B C;ADD A C;ADD A R;SUB A R": "ADD A C;ADD B C;ADD A C;ADD A R;SUB A R",
+          "ADD A C;ADD B C;MUL B C": "ADD A C;ADD B C;MUL B C",
+          "ADD A C;MUL A R;MUL A R;MUL B R;MUL B R;MUL B R": "ADD A C;MUL A R;MUL A R;MUL B R;MUL B R;MUL B R",
+          "ADD A C;MUL A R;SUB B R;SUB A R": "ADD A C;MUL A R;SUB B R;SUB A R",
+          "ADD A C;SUB A C": "ADD A C;SUB A C",
+          "ADD A R;MUL A C;SUB A C;SUB B C;ADD B C;ADD B R": "ADD A R;MUL A C;SUB A C;SUB B C;ADD B C;ADD B R",
+          "ADD A R;MUL B R;ADD A R;ADD B C;SUB B R;MUL B R": "ADD A R;MUL B R;ADD A R;ADD B C;SUB B R;MUL B R",
+          "ADD A R;MUL B R;SUB A R;MUL B C;MUL A C;SUB B C": "ADD A R;MUL B R;SUB A R;MUL B C;MUL A C;SUB B C",
+          "ADD A R;SUB A C;ADD A C;MUL B R;MUL B C": "ADD A R;SUB A C;ADD A C;MUL B R;MUL B C",
+          "ADD A R;SUB B C;ADD B R;MUL A C;SUB A R;MUL A C": "ADD A R;SUB B C;ADD B R;MUL A C;SUB A R;MUL A C",
+          "ADD A R;SUB B C;SUB B R": "ADD A R;SUB B C;SUB B R",
+          "ADD B C;ADD A R": "ADD B C;ADD A R",
+          "ADD B C;MUL A C;MUL B C;SUB B C;ADD B R": "ADD B C;MUL A C;MUL B C;SUB B C;ADD B R",
+          "ADD B C;MUL A R;ADD A C;MUL A C;SUB A R": "ADD B C;MUL A R;ADD A C;MUL A C;SUB A R",
+          "ADD B C;MUL B C": "ADD B C;MUL B C",
+          "ADD B R;ADD A R;SUB B R;SUB A R;MUL A R;MUL B R": "ADD B R;ADD A R;SUB B R;SUB A R;MUL A R;MUL B R",
+          "MUL A C;ADD A C;ADD A R;MUL B C": "MUL A C;ADD A C;ADD A R;MUL B C",
+          "MUL A C;MUL A C": "MUL A C;MUL A C",
+          "MUL A C;SUB A R": "MUL A C;SUB A R",
+          "MUL A C;SUB B C": "MUL A C;SUB B C",
+          "MUL A C;SUB B C;MUL A R;SUB B R": "MUL A C;SUB B C;MUL A R;SUB B R",
+          "MUL A R;MUL A R;SUB B R": "MUL A R;MUL A R;SUB B R",
+          "MUL A R;MUL B C;MUL A R;ADD B R": "MUL A R;MUL B C;MUL A R;ADD B R",
+          "MUL B C;ADD B C;SUB A R;MUL A R;MUL B R": "MUL B C;ADD B C;SUB A R;MUL A R;MUL B R",
+          "MUL B C;ADD B R": "MUL B C;ADD B R",
+          "MUL B C;ADD B R;MUL B C;SUB A R": "MUL B C;ADD B R;MUL B C;SUB A R",
+          "MUL B C;MUL A R;MUL B C;ADD A R;SUB A R;MUL A R": "MUL B C;MUL A R;MUL B C;ADD A R;SUB A R;MUL A R",
+          "MUL B C;MUL A R;SUB A C;ADD B R;ADD A C": "MUL B C;MUL A R;SUB A C;ADD B R;ADD A C",
+          "MUL B C;MUL B R;MUL A C;MUL A C;MUL A R;SUB A R": "MUL B C;MUL B R;MUL A C;MUL A C;MUL A R;SUB A R",
+          "MUL B C;SUB A C": "MUL B C;SUB A C",
+          "MUL B C;SUB A C;MUL A C;MUL B R;MUL B C": "MUL B C;SUB A C;MUL A C;MUL B R;MUL B C",
+          "MUL B C;SUB A R;ADD B R;ADD A C;SUB B R;ADD A C": "MUL B C;SUB A R;ADD B R;ADD A C;SUB B R;ADD A C",
+          "MUL B C;SUB B R;SUB A R": "MUL B C;SUB B R;SUB A R",
+          "MUL B R;ADD B C": "MUL B R;ADD B C",
+          "MUL B R;MUL A C;ADD B R": "MUL B R;MUL A C;ADD B R",
+          "MUL B R;MUL A C;SUB A C;MUL B R": "MUL B R;MUL A C;SUB A C;MUL B R",
+          "MUL B R;MUL A R;MUL B C": "MUL B R;MUL A R;MUL B C",
+          "MUL B R;MUL A R;MUL B C;ADD B R;ADD A C;SUB B C": "MUL B R;MUL A R;MUL B C;ADD B R;ADD A C;SUB B C",
+          "MUL B R;MUL B R;ADD A C": "MUL B R;MUL B R;ADD A C",
+          "SUB A C": "SUB A C",
+          "SUB A C;ADD A C;SUB B C;ADD A C;SUB B R;ADD A R": "SUB A C;ADD A C;SUB B C;ADD A C;SUB B R;ADD A R",
+          "SUB A C;ADD B C": "SUB A C;ADD B C",
+          "SUB A C;MUL A C;MUL A R": "SUB A C;MUL A C;MUL A R",
+          "SUB A C;MUL A R;MUL B C;SUB A R": "SUB A C;MUL A R;MUL B C;SUB A R",
+          "SUB A C;MUL B C": "SUB A C;MUL B C",
+          "SUB A C;SUB A C;SUB A R;MUL A R;MUL B R;MUL B C": "SUB A C;SUB A C;SUB A R;MUL A R;MUL B R;MUL B C",
+          "SUB A C;SUB B R;MUL A R": "SUB A C;SUB B R;MUL A R",
+          "SUB A C;SUB B R;SUB A C;MUL B R;SUB B C": "SUB A C;SUB B R;SUB A C;MUL B R;SUB B C",
+          "SUB A R;MUL B R;ADD A C;ADD B C;MUL B C": "SUB A R;MUL B R;ADD A C;ADD B C;MUL B C",
+          "SUB B C": "SUB B C",
+          "SUB B C;ADD A C;SUB B C;MUL A C;MUL B R": "SUB B C;ADD A C;SUB B C;MUL A C;MUL B R",
+          "SUB B C;ADD B R;MUL A C;SUB B R;SUB B R;SUB B R": "SUB B C;ADD B R;MUL A C;SUB B R;SUB B R;SUB B R",
+          "SUB B C;MUL B C;ADD A C": "SUB B C;MUL B C;ADD A C",
+          "SUB B C;MUL B R;MUL A C;SUB A C;ADD A C": "SUB B C;MUL B R;MUL A C;SUB A C;ADD A C",
+          "SUB B C;SUB A R;MUL B R;MUL A R": "SUB B C;SUB A R;MUL B R;MUL A R",
+          "SUB B C;SUB B C": "SUB B C;SUB B C",
+          "SUB B C;SUB B C;ADD A R": "SUB B C;SUB B C;ADD A R",
+          "SUB B R;ADD A C;SUB A R;SUB A R": "SUB B R;ADD A C;SUB A R;SUB A R",
+          "SUB B R;MUL A C;ADD B R": "SUB B R;MUL A C;ADD B R",
+          "SUB B R;MUL A R;ADD B R;ADD A R": "SUB B R;MUL A R;ADD B R;ADD A R",
+          "SUB B R;MUL B C": "SUB B R;MUL B C",
+          "SUB B R;SUB A C;ADD A C": "SUB B R;SUB A C;ADD A C",
+          "SUB B R;SUB B C;ADD B R;ADD A R": "SUB B R;SUB B C;ADD B R;ADD A R",
+          "SUB B R;SUB B C;SUB B C;SUB B C": "SUB B R;SUB B C;SUB B C;SUB B C"
+        },
+        "structural": []
+      },
+      "provenance": {
+        "diagnostic_only": false,
+        "learning_evidence": "not_established",
+        "sources": [
+          "model_inference"
+        ]
+      },
+      "qualification": "NOT_ESTABLISHED",
+      "schema": "labyrinth.minotaur-transition-eval.v1"
+    },
+    "structure_disjoint_transfer": {
+      "audit": {
+        "audited_cases": 128,
+        "failures": [],
+        "total_cases": 128
+      },
+      "confidence_claim": "No IID confidence claim is made.",
+      "disposition": "SCORED",
+      "graduation_authority": "none",
+      "limitations": [
+        "Symbolic gold-state provenance is a diagnostic control, not learning.",
+        "Public arithmetic replay is not a blind or IID evaluation."
+      ],
+      "metrics": {
+        "abstentions": 0,
+        "cases": 128,
+        "coverage": 1.0,
+        "erroneous_step_localization_accuracy": 1.0,
+        "erroneous_step_localization_correct": 64,
+        "exact_first_error": 128,
+        "exact_first_error_accuracy": 1.0,
+        "false_approval_rate": 0.0,
+        "false_approvals": 0,
+        "false_rejection_rate": 0.0,
+        "false_rejections": 0,
+        "per_step_state_accuracy": 1.0,
+        "selective_exact_first_error_accuracy": 1.0,
+        "state_correct": 522,
+        "state_coverage": 1.0,
+        "state_steps": 522
+      },
+      "negative_controls": {
+        "always_approve": {
+          "abstentions": 0,
+          "cases": 128,
+          "coverage": 1.0,
+          "erroneous_step_localization_accuracy": 0.0,
+          "erroneous_step_localization_correct": 0,
+          "exact_first_error": 64,
+          "exact_first_error_accuracy": 0.5,
+          "false_approval_rate": 1.0,
+          "false_approvals": 64,
+          "false_rejection_rate": 0.0,
+          "false_rejections": 0,
+          "selective_exact_first_error_accuracy": 0.5
+        },
+        "always_reject": {
+          "abstentions": 0,
+          "cases": 128,
+          "coverage": 1.0,
+          "erroneous_step_localization_accuracy": 0.234375,
+          "erroneous_step_localization_correct": 15,
+          "exact_first_error": 15,
+          "exact_first_error_accuracy": 0.1171875,
+          "false_approval_rate": 0.0,
+          "false_approvals": 0,
+          "false_rejection_rate": 1.0,
+          "false_rejections": 64,
+          "selective_exact_first_error_accuracy": 0.1171875
+        },
+        "copied_observed_state": {
+          "per_step_state_accuracy": 0.7528735632183908,
+          "state_correct": 393,
+          "state_steps": 522
+        }
+      },
+      "oracle": "strict_public_printed_program_replay",
+      "overlaps": {
+        "group_ids": [],
+        "group_structures": {
+          "ADD A C;MUL A C;ADD B C": "ADD A C;MUL A C;ADD B C",
+          "ADD A C;MUL B R;MUL B C;SUB A R": "ADD A C;MUL B R;MUL B C;SUB A R",
+          "ADD A C;SUB B C": "ADD A C;SUB B C",
+          "ADD A C;SUB B R;ADD A R": "ADD A C;SUB B R;ADD A R",
+          "ADD A C;SUB B R;SUB A C;ADD B R": "ADD A C;SUB B R;SUB A C;ADD B R",
+          "ADD A C;SUB B R;SUB A R;SUB B R": "ADD A C;SUB B R;SUB A R;SUB B R",
+          "ADD A R;ADD B R;ADD B C;MUL A R;ADD B C": "ADD A R;ADD B R;ADD B C;MUL A R;ADD B C",
+          "ADD A R;MUL B R": "ADD A R;MUL B R",
+          "ADD A R;MUL B R;SUB A C": "ADD A R;MUL B R;SUB A C",
+          "ADD A R;MUL B R;SUB B C;ADD A R": "ADD A R;MUL B R;SUB B C;ADD A R",
+          "ADD A R;SUB A C;SUB B R;ADD B C;SUB B C;SUB B R": "ADD A R;SUB A C;SUB B R;ADD B C;SUB B C;SUB B R",
+          "ADD A R;SUB B R;MUL A R": "ADD A R;SUB B R;MUL A R",
+          "ADD B C;ADD A C;SUB B C;SUB A R": "ADD B C;ADD A C;SUB B C;SUB A R",
+          "ADD B C;ADD B C;SUB B R": "ADD B C;ADD B C;SUB B R",
+          "ADD B C;MUL B R": "ADD B C;MUL B R",
+          "ADD B C;SUB A R;MUL A R;SUB A R;SUB A C;MUL B C": "ADD B C;SUB A R;MUL A R;SUB A R;SUB A C;MUL B C",
+          "ADD B R;ADD A C;ADD B R;SUB A R;ADD A R": "ADD B R;ADD A C;ADD B R;SUB A R;ADD A R",
+          "ADD B R;ADD B R": "ADD B R;ADD B R",
+          "ADD B R;ADD B R;MUL B C;ADD A C": "ADD B R;ADD B R;MUL B C;ADD A C",
+          "ADD B R;MUL A C": "ADD B R;MUL A C",
+          "ADD B R;MUL A R;SUB A R;SUB B R;SUB A R;ADD B R": "ADD B R;MUL A R;SUB A R;SUB B R;SUB A R;ADD B R",
+          "ADD B R;SUB A R;ADD B R": "ADD B R;SUB A R;ADD B R",
+          "ADD B R;SUB B C;SUB A C;ADD A R;SUB B C": "ADD B R;SUB B C;SUB A C;ADD A R;SUB B C",
+          "ADD B R;SUB B R;ADD B R;MUL A C;ADD B R": "ADD B R;SUB B R;ADD B R;MUL A C;ADD B R",
+          "ADD B R;SUB B R;SUB A C": "ADD B R;SUB B R;SUB A C",
+          "MUL A C;ADD A R": "MUL A C;ADD A R",
+          "MUL A C;MUL A C;MUL B C": "MUL A C;MUL A C;MUL B C",
+          "MUL A C;MUL A R;ADD A C": "MUL A C;MUL A R;ADD A C",
+          "MUL A C;MUL B C;MUL A R;ADD A C": "MUL A C;MUL B C;MUL A R;ADD A C",
+          "MUL A C;SUB B R;MUL B R;MUL A C;MUL A C;MUL B R": "MUL A C;SUB B R;MUL B R;MUL A C;MUL A C;MUL B R",
+          "MUL A R;MUL A R;ADD A R;MUL A R": "MUL A R;MUL A R;ADD A R;MUL A R",
+          "MUL A R;MUL A R;MUL B C;SUB B C;SUB A R;SUB A C": "MUL A R;MUL A R;MUL B C;SUB B C;SUB A R;SUB A C",
+          "MUL A R;MUL A R;SUB A R;SUB A C": "MUL A R;MUL A R;SUB A R;SUB A C",
+          "MUL A R;MUL B R;MUL B R;ADD A R;MUL A R": "MUL A R;MUL B R;MUL B R;ADD A R;MUL A R",
+          "MUL A R;SUB B C;SUB B R;ADD A C": "MUL A R;SUB B C;SUB B R;ADD A C",
+          "MUL A R;SUB B R;ADD A R": "MUL A R;SUB B R;ADD A R",
+          "MUL A R;SUB B R;MUL B R;ADD A R;MUL A R": "MUL A R;SUB B R;MUL B R;ADD A R;MUL A R",
+          "MUL B C;ADD B C;SUB A R;ADD B C;ADD B R;MUL B R": "MUL B C;ADD B C;SUB A R;ADD B C;ADD B R;MUL B R",
+          "MUL B C;MUL B C": "MUL B C;MUL B C",
+          "MUL B C;MUL B C;ADD B C;ADD A R;SUB B R;SUB B C": "MUL B C;MUL B C;ADD B C;ADD A R;SUB B R;SUB B C",
+          "MUL B C;MUL B C;ADD B R;ADD B C;SUB B C": "MUL B C;MUL B C;ADD B R;ADD B C;SUB B C",
+          "MUL B C;MUL B C;SUB B C;ADD B R;SUB B C": "MUL B C;MUL B C;SUB B C;ADD B R;SUB B C",
+          "MUL B R;ADD A C;MUL B C;MUL B C;MUL B R": "MUL B R;ADD A C;MUL B C;MUL B C;MUL B R",
+          "MUL B R;MUL A C;SUB B R": "MUL B R;MUL A C;SUB B R",
+          "MUL B R;MUL B C;MUL B C;ADD A R;SUB B R;ADD B R": "MUL B R;MUL B C;MUL B C;ADD A R;SUB B R;ADD B R",
+          "MUL B R;SUB A C;ADD A C;ADD B R": "MUL B R;SUB A C;ADD A C;ADD B R",
+          "MUL B R;SUB B C;MUL B R;MUL A C;MUL A C": "MUL B R;SUB B C;MUL B R;MUL A C;MUL A C",
+          "SUB A C;ADD A R;ADD A R;SUB B C;SUB A C;MUL A R": "SUB A C;ADD A R;ADD A R;SUB B C;SUB A C;MUL A R",
+          "SUB A C;MUL A R;SUB B C": "SUB A C;MUL A R;SUB B C",
+          "SUB A C;SUB B R;MUL A C": "SUB A C;SUB B R;MUL A C",
+          "SUB A C;SUB B R;SUB A R;SUB A C": "SUB A C;SUB B R;SUB A R;SUB A C",
+          "SUB A R;ADD A R;ADD B C;SUB A C;ADD A R;MUL A C": "SUB A R;ADD A R;ADD B C;SUB A C;ADD A R;MUL A C",
+          "SUB A R;ADD B C": "SUB A R;ADD B C",
+          "SUB A R;MUL A C": "SUB A R;MUL A C",
+          "SUB A R;MUL A C;ADD A C;MUL B C;ADD A R;MUL A R": "SUB A R;MUL A C;ADD A C;MUL B C;ADD A R;MUL A R",
+          "SUB A R;SUB B C;MUL B R;SUB B C": "SUB A R;SUB B C;MUL B R;SUB B C",
+          "SUB B C;ADD A C;MUL A R;SUB B C;SUB A R": "SUB B C;ADD A C;MUL A R;SUB B C;SUB A R",
+          "SUB B C;ADD B R;ADD A R;ADD B R;SUB B C;MUL B C": "SUB B C;ADD B R;ADD A R;ADD B R;SUB B C;MUL B C",
+          "SUB B C;MUL B C;SUB A R;SUB B R;ADD B R": "SUB B C;MUL B C;SUB A R;SUB B R;ADD B R",
+          "SUB B C;SUB A R": "SUB B C;SUB A R",
+          "SUB B R;ADD A C;MUL A R;SUB B C;ADD A C": "SUB B R;ADD A C;MUL A R;SUB B C;ADD A C",
+          "SUB B R;ADD B C;SUB B C;MUL B R;MUL B C;SUB B C": "SUB B R;ADD B C;SUB B C;MUL B R;MUL B C;SUB B C",
+          "SUB B R;MUL A C;SUB A R": "SUB B R;MUL A C;SUB A R",
+          "SUB B R;MUL B C;ADD A R;MUL B R": "SUB B R;MUL B C;ADD A R;MUL B R"
+        },
+        "structural": []
+      },
+      "provenance": {
+        "diagnostic_only": false,
+        "learning_evidence": "not_established",
+        "sources": [
+          "model_inference"
+        ]
+      },
+      "qualification": "NOT_ESTABLISHED",
+      "schema": "labyrinth.minotaur-transition-eval.v1"
+    }
+  },
+  "training": {
+    "after_full_coverage": {
+      "accuracy": 1.0,
+      "correct": 28227,
+      "total": 28227
+    },
+    "coverage_note": "100% of finite atomic operation-value pairs shown during training",
+    "initial_weights_sha256": "5b9ea0b4ebdfa7be8d437973fe843d34850ec58bd3657177e85921191a5be48c",
+    "prior_to_full_coverage": {
+      "seen_atomic": {
+        "accuracy": 1.0,
+        "correct": 25405,
+        "total": 25405
+      },
+      "unseen_atomic": {
+        "accuracy": 0.013111268170177937,
+        "correct": 37,
+        "total": 2822
+      }
+    },
+    "source": "exhaustive_ground_truth_atomic_supervision",
+    "stage1": {
+      "mean_batch_loss": 4.574710845947266,
+      "seconds": 0.35011919995304197,
+      "updates": 25
+    },
+    "stage2": {
+      "mean_batch_loss": 4.574710845947266,
+      "seconds": 0.03152670001145452,
+      "updates": 3
+    },
+    "trained_weights_sha256": "dac5b33643797cbe666108760fd0c1a3bf17460250c472ea6c689161246e368c"
+  }
+}

@@ -7,6 +7,7 @@ on:
       - "labyrinth/minotaur_guarded.py"
       - "labyrinth/minotaur_scratch.py"
       - "models/minotaur_scratch_v1/**"
+      - "models/minotaur_transition_v4_development/**"
       - "tests/test_minotaur_neural_ci.py"
       - "labyrinth/minotaur_*.py"
       - "tests/test_minotaur_*.py"
@@ -16,6 +17,7 @@ on:
       - "labyrinth/minotaur_guarded.py"
       - "labyrinth/minotaur_scratch.py"
       - "models/minotaur_scratch_v1/**"
+      - "models/minotaur_transition_v4_development/**"
       - "tests/test_minotaur_neural_ci.py"
       - "labyrinth/minotaur_*.py"
       - "tests/test_minotaur_*.py"
@@ -55,3 +57,9 @@ jobs:
           MKL_NUM_THREADS: "2"
         run: |
           timeout 90s python -m unittest tests.test_minotaur_scratch_v2 tests.test_minotaur_v3_ablation tests.test_minotaur_combinatorial_curriculum tests.test_minotaur_combinatorial_training -q
+      - name: Execute actual learned V4 neural model and guarded reload tests
+        env:
+          OMP_NUM_THREADS: "2"
+          MKL_NUM_THREADS: "2"
+        run: |
+          timeout 90s python -m unittest tests.test_minotaur_transition_v4 tests.test_minotaur_transition_curriculum tests.test_minotaur_transition_eval tests.test_minotaur_transition_study tests.test_minotaur_atomic_training tests.test_minotaur_transition_cli -q

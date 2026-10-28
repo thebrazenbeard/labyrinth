@@ -42,3 +42,14 @@ bounded multi-seed V3 ablation tests, the independent combinatorial
 curriculum tests and the combinatorial neural-training smoke tests with PyTorch present. These tests establish executable
 behavior and exact negative/diagnostic results, **not** semantic mastery.
 They run when Minotaur modules/tests change; they do not sign release receipts.
+
+The same optional-dependency job now exercises a **distinct V4 experimental
+saved Safetensors checkpoint** under
+\`models/minotaur_transition_v4_development\`, verifies the exact pinned SHA-256,
+reconstructs the learned finite-domain neural transition model, and checks a
+bounded unseen-program trace. V4 tests verify gradient flow, intermediate
+transition masks, causal test cases, independent transition evaluation and
+source-level controls. The exhaustive atomic table experiment deliberately
+covers ALL modulo-97 arithmetic operand pairs; neither CI success nor
+closed-domain compositional accuracy demonstrates extrapolation to unseen
+atomic arithmetic, external domains, or genuine private examiner custody.
