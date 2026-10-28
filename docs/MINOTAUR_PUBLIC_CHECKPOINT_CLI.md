@@ -44,8 +44,8 @@ claims before the neural bridge scores them. Exact training-atom overlap is
 rejected. To evaluate the complete 28,227-case domain, use independently
 audited batches and an exact-coverage manifest; this CLI does not invent one.
 
-The command verifies the training report checksum, checkpoint digest, source
-commit and training-source manifest, fresh reconstruction of the training
+The command verifies the training report checksum, checkpoint digest, recorded
+Git commit when one exists, and training-source manifest, fresh reconstruction of the training
 sample digest, and the known 12-coefficient float64 model state. Its derived
 report records source-file hashes observed at import and evaluation for the
 checkpoint CLI, public bridge, and V5 evaluator. The local guard rejects
@@ -57,16 +57,18 @@ and stable, reviewed checkout for meaningful source provenance. Optional
 `--expected-checkpoint-sha256` cross-check caller-supplied expected values;
 the CLI cannot authenticate where those values came from.
 
-The existing experiment reload contract requires the artifact's Git commit
-to equal the **current** checkout's HEAD. Consequently, an older checkpoint
-from before this CLI was added is refused on a newer commit even when its
-training-file digests are identical. Re-run the bounded training experiment
-under the exact CLI-bearing source commit; no implicit cross-commit adoption
-is performed.
+The experiment reload contract requires the artifact's reported Git commit
+to match the **current** checkout's HEAD when the artifact was produced from
+a checkout. Wheels without adjacent Git metadata record `source_commit=null`
+and `source_provenance_kind=local_source_hashes_only`, and replay can compare
+the relevant packaged source-file digests without fabricating commit identity.
+This is local consistency only, never an authenticated source claim. Different
+checkout/packaged provenance cannot silently substitute for one another.
 
 A successful result is `PUBLIC_DIAGNOSTIC`, never qualification. Both success
 and refusal retain `qualification=NOT_ESTABLISHED`,
 `graduation_authority=none`, `minotaur_graduated=false`, and `deployed=false`.
-The numeric training/reload PID comparison is reported only as a diagnostic;
-PID reuse across process namespaces is possible, and this command does not
-claim independently trusted process or private-evaluator attestation.
+Numeric training/reload PID inequality and an interpreter-start random-token
+comparison are reported only as diagnostics; PID reuse across namespaces is
+possible and the token can be forged. Neither proves independently trusted
+process execution or private-evaluator attestation.

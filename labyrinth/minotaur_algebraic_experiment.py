@@ -12,6 +12,8 @@ import json
 import os
 from pathlib import Path
 import random
+import re
+import secrets
 import subprocess
 from typing import Any
 
@@ -42,16 +44,40 @@ def _source_manifest() -> dict[str, str]:
     return {name:_sha(folder/name) for name in names}
 
 
-def _source() -> str:
+def _source() -> str | None:
+    """Best-effort Git HEAD of this *exact checkout*, never an ancestor repo.
+
+    An installed wheel normally has no Git metadata. Its source-file manifest
+    remains checkable, but must not be mislabeled as a Git commit or a trusted
+    attestation.
+    """
     root=Path(__file__).resolve().parents[1]
-    return subprocess.check_output(["git","-C",str(root),"rev-parse","HEAD"],
-                                   text=True).strip()
+    if not (root / ".git").exists():
+        return None
+    try:
+        process=subprocess.run(
+            ["git","-C",str(root),"rev-parse","--verify","HEAD"],
+            capture_output=True,text=True,check=False,timeout=5,
+        )
+    except (OSError,subprocess.TimeoutExpired):
+        return None
+    commit=process.stdout.strip()
+    return commit if process.returncode==0 and re.fullmatch(r"[0-9a-f]{40}",commit) else None
+
+
+def _provenance_kind(source_commit: str | None) -> str:
+    return "self_reported_git_head" if source_commit is not None else "local_source_hashes_only"
 
 
 # Snapshot after this module's imports. The guard catches ordinary source edits
 # after importing functions into a long-lived process. It is not a defense
 # against hostile concurrent filesystem changes or pre-existing stale imports.
 _IMPORTED_SOURCE_MANIFEST = _source_manifest()
+# Distinguishes Python interpreter startups even when separate PID namespaces
+# reuse the same numeric PID. This is an unauthenticated process diagnostic:
+# a forged report or hostile runtime can fabricate the token.
+_PROCESS_START_TOKEN = secrets.token_hex(32)
+_PROCESS_TOKEN_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def _verified_source_manifest() -> dict[str, str]:
@@ -155,6 +181,7 @@ def run_experiment(
         raise ValueError("output parent must exist")
     if type(training_per_op) is not int or not 5 <= training_per_op <= 24:
         raise ValueError("invalid partial dataset size")
+    source_commit=_source()
     examples=incomplete_training_atoms(seed,training_per_op)
     corruption_seed=(seed+12) % (2**31)
     randomized=corrupt_labels_within_op(examples,corruption_seed)
@@ -207,9 +234,11 @@ def run_experiment(
                for key,value in candidate.state_dict().items()},str(ckpt))
     report={
         "schema":SCHEMA,
-        "source_commit":_source(),
+        "source_commit":source_commit,
+        "source_provenance_kind":_provenance_kind(source_commit),
         "source_manifest":_verified_source_manifest(),
         "train_process_id":os.getpid(),
+        "train_process_start_token":_PROCESS_START_TOKEN,
         "donor":"scratch algebraically biased neural rule head, no pretrained model",
         "model_architecture":"learned_coefficients[3,4] over [1,x/8,y/8,xy/64]",
         "modulus":MOD,"seed":seed,"corruption_seed":corruption_seed,
@@ -268,7 +297,12 @@ def reload_experiment(output_dir: Path, torch: Any) -> dict[str, Any]:
     report=json.loads(report_file.read_text(encoding="utf8"))
     if not isinstance(report,dict) or report.get("schema")!=SCHEMA:
         raise ValueError("invalid report schema")
-    if report.get("source_commit")!=_source() or report.get("source_manifest")!=verified_source:
+    current_commit=_source()
+    reported_kind=report.get("source_provenance_kind")
+    if (report.get("source_commit")!=current_commit
+            or report.get("source_manifest")!=verified_source
+            or (reported_kind is not None and reported_kind!=_provenance_kind(current_commit))
+            or (current_commit is None and reported_kind is None)):
         raise ValueError("source bytes changed since training")
     if (report.get("minotaur_graduated") is not False
             or report.get("deployed") is not False
@@ -278,6 +312,11 @@ def reload_experiment(output_dir: Path, torch: Any) -> dict[str, Any]:
             or report["corruption_seed"] != (report["seed"]+12) % (2**31)
             or type(report.get("train_examples_by_operation")) is not int):
         raise ValueError("report qualification and training fields invalid")
+    train_start_token=report.get("train_process_start_token")
+    if (train_start_token is not None
+            and (type(train_start_token) is not str
+                 or _PROCESS_TOKEN_PATTERN.fullmatch(train_start_token) is None)):
+        raise ValueError("invalid training process start token")
     if _sha(checkpoint)!=report.get("checkpoint_sha256"):
         raise ValueError("checkpoint changed after training")
     from safetensors.torch import load_file
@@ -300,6 +339,11 @@ def reload_experiment(output_dir: Path, torch: Any) -> dict[str, Any]:
     return {"schema":"labyrinth.minotaur-algebraic-reload.v1",
             "matches_original":matches,
             "process_id_differs":os.getpid()!=report["train_process_id"],
+            "process_start_token_differs":(
+                train_start_token is not None
+                and not secrets.compare_digest(train_start_token,_PROCESS_START_TOKEN)
+            ),
+            "process_identity_attestation":"NOT_ESTABLISHED",
             "atom_score":atom,"composition":composition,
             "qualification":"NOT_ESTABLISHED","minotaur_graduated":False}
 
@@ -319,7 +363,8 @@ def main(argv: list[str] | None = None) -> int:
                               "minotaur_graduated":False}))
         else:
             result=reload_experiment(Path(args.output_dir),torch)
-            if result["matches_original"] is not True or result["process_id_differs"] is not True:
+            if (result["matches_original"] is not True
+                    or result["process_start_token_differs"] is not True):
                 raise RuntimeError("checkpoint reload failed fresh-process qualification")
             print(json.dumps(result,sort_keys=True))
     except (ValueError,RuntimeError,FileExistsError,OSError) as error:
