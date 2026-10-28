@@ -1,10 +1,40 @@
 """Compact Minotaur neural rules must transfer from missing atomic examples."""
 from __future__ import annotations
+from collections import Counter
 import unittest
 try:
     import torch
 except ImportError:
     torch = None
+
+
+class CorruptedLabelControlTests(unittest.TestCase):
+    def test_valid_seeds_yield_derangeable_partial_samples(self):
+        from labyrinth.minotaur_algebraic_rules import (
+            incomplete_training_atoms, corrupt_labels_within_op,
+        )
+        # These seeds previously selected a majority duplicate label, making
+        # a same-multiset, no-fixed-point corruption mathematically impossible.
+        for seed, per_op in ((3, 5), (521, 12)):
+            with self.subTest(seed=seed, per_op=per_op):
+                atoms = incomplete_training_atoms(seed, per_op)
+                corrupt = corrupt_labels_within_op(atoms, seed + 12)
+                self.assertEqual(len(atoms), 3 * per_op)
+                self.assertEqual(corrupt, corrupt_labels_within_op(atoms, seed + 12))
+                self.assertTrue(all(a[:3] == b[:3] and a[3] != b[3]
+                                    for a, b in zip(atoms, corrupt)))
+                for op in range(3):
+                    original = Counter(row[3] for row in atoms if row[0] == op)
+                    shuffled = Counter(row[3] for row in corrupt if row[0] == op)
+                    self.assertEqual(original, shuffled)
+
+    def test_impossible_caller_supplied_multiset_fails_closed(self):
+        from labyrinth.minotaur_algebraic_rules import corrupt_labels_within_op
+        impossible = [(0, 0, 0, 0), (0, 0, 1, 0), (0, 0, 2, 0),
+                      (0, 1, 2, 3), (0, 2, 2, 4)]
+        with self.assertRaisesRegex(ValueError, "cannot derange operation labels"):
+            corrupt_labels_within_op(impossible, 59)
+
 
 @unittest.skipUnless(torch is not None, "torch optional")
 class AlgebraicNeuralTests(unittest.TestCase):
