@@ -148,12 +148,18 @@ def _make_program(rng: random.Random, program_index: int) -> tuple[tuple[str, st
 
 def _faulty_states(clean: tuple[tuple[int, int, int], ...],
                    program: tuple[tuple[str, str, str], ...], family: str,
-                   program_index: int) -> tuple[tuple[tuple[int, int, int], ...], int]:
+                   program_index: int, initial: tuple[int, int]
+                   ) -> tuple[tuple[tuple[int, int, int], ...], int]:
     if family == "final_target_mutation":
         step = len(clean)
     elif family == "no_change":
-        candidates = [i for i, instruction in enumerate(program)
-                      if instruction[0] in ("ADD", "SUB")]
+        # A no-change fault is only an error where the *correct* instruction
+        # would actually change state. ADD/SUB are not enough: ADD A B is a
+        # no-op when B is zero. Include the true initial state for step one.
+        candidates = [i for i, (_, a, b) in enumerate(clean)
+                      if (a, b) != (initial if i == 0 else clean[i - 1][1:])]
+        if not candidates:
+            raise ValueError("no observable transition for no-change fault")
         step = candidates[program_index % len(candidates)] + 1
     else:
         step = 1 + (program_index * 5 + 1) % len(clean)
@@ -176,7 +182,7 @@ def _faulty_states(clean: tuple[tuple[int, int, int], ...],
         delta = 2 + (program_index * 13) % 31
         a, b = ((a + delta) % _MODULUS, b) if target == "A" else (a, (b + delta) % _MODULUS)
     elif family == "no_change":
-        a, b = ((clean[step - 2][1], clean[step - 2][2]) if step > 1 else (0, 0))
+        a, b = clean[step - 2][1:] if step > 1 else initial
     else:
         raise ValueError("unknown fault family")
     changed[step - 1] = (number, a, b)
@@ -208,19 +214,26 @@ def _make_split(config: CurriculumConfig, split: str, forbidden: set[str]) -> Co
         program_index += 1
         if canonical in seen or canonical in forbidden:
             continue
-        seen.add(canonical)
         initial = (rng.randrange(1, _MODULUS), rng.randrange(1, _MODULUS))
         question = _question(initial, program)
         generated = _execute(program, initial)
         clean = interpret_question_mod97(question)
         if generated != clean:
             raise RuntimeError("generator/parser differential check failed")
+        family = _FAULTS[(len(cases) // 2) % len(_FAULTS)]
+        if family == "no_change" and all(
+                (a, b) == (initial if i == 0 else clean[i - 1][1:])
+                for i, (_, a, b) in enumerate(clean)):
+            # Entirely idle programs cannot support a no-change *error*.
+            # Retry deterministically rather than inventing a bad label.
+            continue
+        faulty, first_error = _faulty_states(
+            clean, program, family, program_index - 1, initial)
+        seen.add(canonical)
         clean_steps = _format_states(clean)
         clean_id = _case_id(split, question, clean_steps, "none")
         cases.append(CombinatorialCase(clean_id, split, question, clean_steps, None,
                                        canonical, "none"))
-        family = _FAULTS[((len(cases) // 2) - 1) % len(_FAULTS)]
-        faulty, first_error = _faulty_states(clean, program, family, program_index - 1)
         faulty_steps = _format_states(faulty)
         faulty_id = _case_id(split, question, faulty_steps, family)
         cases.append(CombinatorialCase(faulty_id, split, question, faulty_steps, first_error,

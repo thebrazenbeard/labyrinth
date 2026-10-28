@@ -18,6 +18,16 @@ _INSTRUCTION = re.compile(r"([1-9][0-9]*)\. (ADD|SUB|MUL) ([AB]) ([AB]|[0-9]{1,2
 _STEP = re.compile(r"(?:Step |)([1-9][0-9]*): A=([0-9]{1,2}), B=([0-9]{1,2})")
 _PREDICTION = re.compile(r"ERROR_STEP:([1-9][0-9]*)", re.ASCII)
 _INVALID = object()
+_LEGACY_PREAMBLE = ("Execute this register program in order. ADD, SUB, and MUL "
+    "update the named target register using its current value and the operand. "
+    "An operand is either a literal integer or the current value of the named "
+    "register. After each instruction, replace the updated value with its "
+    "nonnegative remainder modulo 97. Other registers do not change.",)
+_SHORT_FIXTURE_PREAMBLE = ("Execute operations.",)
+_COMBINATORIAL_PREAMBLE = (
+    "Execute this register program in order. Each instruction updates its target using the current operand.",
+    "After every instruction take the nonnegative remainder modulo 97.",
+)
 
 
 @dataclass(frozen=True)
@@ -58,15 +68,18 @@ def _parse_and_replay(question: str, steps: tuple[str, ...]) -> tuple[int, str]:
     if len(lines) < 2 or any(not line for line in lines):
         raise ValueError("malformed_program_text")
     initial_at = [i for i, line in enumerate(lines) if _INITIAL.fullmatch(line)]
-    if initial_at != [1]:
+    if len(initial_at) != 1 or tuple(lines[:initial_at[0]]) not in (
+            _LEGACY_PREAMBLE, _COMBINATORIAL_PREAMBLE, _SHORT_FIXTURE_PREAMBLE):
         raise ValueError("missing_or_ambiguous_initial_state")
-    start = _INITIAL.fullmatch(lines[1])
+    initial_index = initial_at[0]
+    start = _INITIAL.fullmatch(lines[initial_index])
     assert start is not None
     instructions = []
-    for index, line in enumerate(lines[2:], 1):
+    program_lines = lines[initial_index + 1:]
+    for index, line in enumerate(program_lines, 1):
         match = _INSTRUCTION.fullmatch(line)
         if match is None:
-            if index == len(lines[2:]) and line.startswith("What is the final value of A?"):
+            if index == len(program_lines) and line.startswith("What is the final value of A?"):
                 break
             raise ValueError("unrecognized_program_line")
         if int(match[1]) != len(instructions) + 1:

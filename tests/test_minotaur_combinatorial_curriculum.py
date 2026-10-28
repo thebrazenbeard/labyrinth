@@ -99,6 +99,15 @@ class CombinatorialCurriculumTests(unittest.TestCase):
             self.assertTrue(any(item[2].isdigit() for item in flattened))
             self.assertGreater(len({len(program) for program in programs}), 1)
 
+    def test_larger_training_curriculum_never_emits_a_non_error_fault(self):
+        large = build_combinatorial_splits(CurriculumConfig(
+            seed=20261027, train_cases=128, dev_cases=64, transfer_cases=64))
+        for name, group in large.items():
+            self.assertEqual(sum(c.first_error_step is not None for c in group.cases),
+                             len(group.cases) // 2)
+            for case in group.cases:
+                validate_curriculum_case(case)
+
     def test_rejects_unbounded_or_unbalanced_configuration(self):
         for kwargs in ({"train_cases": 9}, {"dev_cases": 11}, {"transfer_cases": 8},
                        {"seed": True}):
