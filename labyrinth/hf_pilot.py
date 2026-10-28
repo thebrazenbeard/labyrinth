@@ -29,7 +29,7 @@ from .maze import Challenge, generate_maze
 from .runner import _source_state, load_json
 
 
-SCHEMA = "labyrinth.hf-lora-pilot.v2"
+SCHEMA = "labyrinth.hf-lora-pilot.v3"
 EVAL_SCHEMA = "labyrinth.hf-lora-reload-eval.v2"
 EVAL_SEED_XOR = 0x5C18A7
 # No quantization/CPU offload in v1: bound pre-existing weights to a small size.
@@ -362,7 +362,14 @@ def _summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
-                 labels: list[str], config: PilotConfig) -> dict[str, Any]:
+                 labels: list[str], config: PilotConfig, *,
+                 zero_learning_rate_sham: bool = False) -> dict[str, Any]:
+    """Execute actual forward/backward/AdamW steps, including a zero-LR sham.
+
+    The sham pays the same gradient and token-exposure budget as the candidate,
+    but must leave LoRA values unchanged. Merely evaluating an untrained
+    adapter is not a compute-matched control.
+    """
     prepared = [_encode_pair(tokenizer, case.prompt, answer, config.max_tokens)
                 for case, answer in zip(train, labels)]
     # The candidate and corrupted-label arms must start their update loops with
@@ -373,7 +380,7 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
         torch.cuda.manual_seed_all(config.seed)
     model.train()
     optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
-                                  lr=config.learning_rate)
+                                  lr=0.0 if zero_learning_rate_sham else config.learning_rate)
     token_total = 0
     losses: list[float] = []
     for step in range(config.steps):
@@ -394,6 +401,7 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
         losses.append(value)
         token_total += len(inputs)
     return {"steps": config.steps, "example_visits": config.steps,
+            "optimizer_learning_rate": 0.0 if zero_learning_rate_sham else config.learning_rate,
             "visited_case_ids": [train[step % len(train)].id for step in range(config.steps)],
             "input_tokens_seen": token_total, "losses": losses}
 
@@ -443,8 +451,10 @@ def _load_base(model_path: Path, device: str, *, torch: Any,
 def run_pilot(config: PilotConfig) -> dict[str, Any]:
     """Run fixed-budget LoRA-SFT and controls, save a new adapter and report.
 
-    The baseline and zero-update sham share the same base checkpoint. A
-    corrupted-label arm starts from a restored identical LoRA initialization.
+    The baseline and zero-learning-rate optimizer sham share the same base
+    checkpoint. The sham executes full forward/backward optimizer steps on the
+    identical training cases with no parameter change. A corrupted-label arm
+    starts from a restored identical LoRA initialization.
     A separate process must run `reload_evaluate` to qualify persistence.
     """
     model_path, output_dir, weights = validate_config(config)
@@ -478,9 +488,23 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     initial_digest = _parameter_digest(model, torch)
     initial_state = {name: parameter.detach().clone()
                      for name, parameter in model.named_parameters() if parameter.requires_grad}
+    # Same inputs and gradient/optimizer calls as the candidate, but zero LR.
+    # AdamW with lr=0 changes no parameter values; prove that rather than
+    # inferring it from configuration. Each subsequent arm gets a fresh
+    # optimizer and resets its RNG seed in _train_steps.
+    sham_training = _train_steps(model, tokenizer, torch, train,
+                                 [c.answer for c in train], config,
+                                 zero_learning_rate_sham=True)
+    sham_digest = _parameter_digest(model, torch)
+    if sham_digest != initial_digest:
+        raise RuntimeError("zero-learning-rate sham changed LoRA parameters")
     sham = _score_model(model, tokenizer, torch, heldout, device=device,
                         max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
     correct_training = _train_steps(model, tokenizer, torch, train, [c.answer for c in train], config)
+    if (sham_training["steps"] != correct_training["steps"]
+            or sham_training["visited_case_ids"] != correct_training["visited_case_ids"]
+            or sham_training["input_tokens_seen"] != correct_training["input_tokens_seen"]):
+        raise RuntimeError("sham and candidate optimizer exposure diverged")
     trained_digest = _parameter_digest(model, torch)
     if trained_digest == initial_digest:
         raise RuntimeError("no trainable LoRA parameter changed; refusing learning claim")
@@ -535,22 +559,26 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
         "heldout_case_ids": [c.id for c in heldout],
         "heldout_public_prompt_sha256": _prompt_commitment(heldout),
         "initial_lora_parameter_sha256": initial_digest,
+        "sham_lora_parameter_sha256": sham_digest,
         "candidate_lora_parameter_sha256": trained_digest,
         "candidate_lora_tensor_value_sha256": trained_saved_digest,
         "corrupted_lora_parameter_sha256": corrupted_digest,
         "control_data": {"corrupted_label_collisions": sum(a.answer == b for a, b in zip(train, corrupted_answers)),
-                         "sham_updates": 0, "sham_train_case_visits": 0,
-                         "sham_evaluation_before_updates": True,
-                         "sham_is_compute_matched": False},
+                         "sham_optimizer_steps": config.steps, "sham_parameter_updates": 0,
+                         "sham_train_case_visits": config.steps,
+                         "sham_evaluation_after_optimizer_steps": True,
+                         "sham_is_compute_matched": True,
+                         "sham_is_token_exposure_matched": True},
         "cuda_preflight": cuda_headroom,
-        "training": {"candidate": correct_training, "corrupted": corrupted_training},
+        "training": {"sham": sham_training, "candidate": correct_training,
+                     "corrupted": corrupted_training},
         "evaluations": {"baseline": baseline, "sham": sham, "candidate": candidate, "corrupted": corrupted},
         "training_probe": {"candidate": candidate_train_probe,
                            "corrupted": corrupted_train_probe},
         "fresh_process_reload": "NOT RUN: execute `python -m labyrinth.hf_pilot eval` separately",
         "limitations": ["Finite public templates are not evidence of general reasoning transfer.",
                         "One-seed and small-N pilot; do not generalize accuracy deltas.",
-                        "The zero-update sham is NOT matched for optimizer steps or exposure.",
+                        "The zero-learning-rate sham matches candidate optimizer steps and exact input-token exposure; it does not update parameters.",
                         "Only the adapter was persisted; base weights remain unchanged.",
                         "Same-process scores do not qualify independent checkpoint reload."],
     }

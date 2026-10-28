@@ -50,8 +50,13 @@ class RealPretrainedVerdictTests(unittest.TestCase):
     def setUp(self):
         self.train = {
             "initial_lora_parameter_sha256": "a" * 64,
+            "sham_lora_parameter_sha256": "a" * 64,
             "candidate_lora_parameter_sha256": "b" * 64,
             "candidate_lora_tensor_value_sha256": "b" * 64,
+            "control_data": {"sham_is_compute_matched": True,
+                             "sham_is_token_exposure_matched": True},
+            "training": {"sham": {"steps": 32, "input_tokens_seen": 420},
+                         "candidate": {"steps": 32, "input_tokens_seen": 420}},
             "evaluations": {
                 name: {"correct": count, "total": 8}
                 for name, count in {
@@ -91,6 +96,26 @@ class RealPretrainedVerdictTests(unittest.TestCase):
         self.train["candidate_lora_parameter_sha256"] = "a" * 64
         with self.assertRaisesRegex(ValueError, "did not change"):
             verdict(self.train, self.reload, self.audit)
+
+    def test_refuses_forged_compute_matched_sham(self):
+        for tamper in ("digest", "steps", "tokens", "claim"):
+            with self.subTest(tamper=tamper):
+                original = self.train
+                self.train = {**original,
+                              "control_data": dict(original["control_data"]),
+                              "training": {arm: dict(record)
+                                           for arm, record in original["training"].items()}}
+                if tamper == "digest":
+                    self.train["sham_lora_parameter_sha256"] = "c" * 64
+                elif tamper == "steps":
+                    self.train["training"]["sham"]["steps"] = 31
+                elif tamper == "tokens":
+                    self.train["training"]["sham"]["input_tokens_seen"] = 419
+                else:
+                    self.train["control_data"]["sham_is_compute_matched"] = False
+                with self.assertRaisesRegex(ValueError, "sham"):
+                    verdict(self.train, self.reload, self.audit)
+                self.train = original
 
 
 if __name__ == "__main__":

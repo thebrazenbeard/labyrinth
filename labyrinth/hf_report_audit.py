@@ -90,12 +90,16 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
         ) if isinstance(digests, dict) else False
         if not _digest_map(digests) or not has_required_file:
             fail(f"{field}: missing or malformed file digest receipt")
-    for field in ("initial_lora_parameter_sha256", "candidate_lora_parameter_sha256",
+    for field in ("initial_lora_parameter_sha256", "sham_lora_parameter_sha256",
+                  "candidate_lora_parameter_sha256",
                   "candidate_lora_tensor_value_sha256", "corrupted_lora_parameter_sha256"):
         if not _digest(report.get(field)):
             fail(f"{field}: missing or malformed tensor digest receipt")
     initial = report.get("initial_lora_parameter_sha256")
+    sham_digest = report.get("sham_lora_parameter_sha256")
     candidate = report.get("candidate_lora_parameter_sha256")
+    if _digest(initial) and _digest(sham_digest) and initial != sham_digest:
+        fail("zero-learning-rate sham LoRA value digest changed")
     if _digest(initial) and _digest(candidate) and initial == candidate:
         fail("candidate LoRA value digest indicates no update")
     if (_digest(candidate) and _digest(report.get("candidate_lora_tensor_value_sha256"))
@@ -156,17 +160,19 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
     if not isinstance(controls, dict) or (
         controls.get("corrupted_label_collisions") != sum(c.answer == label for c, label in zip(train, corrupted_labels))
         or type(controls.get("corrupted_label_collisions")) is not int
-        or controls.get("sham_updates") != 0 or type(controls.get("sham_updates")) is not int
-        or controls.get("sham_train_case_visits") != 0 or type(controls.get("sham_train_case_visits")) is not int
-        or controls.get("sham_evaluation_before_updates") is not True
-        or controls.get("sham_is_compute_matched") is not False
+        or controls.get("sham_optimizer_steps") != steps or type(controls.get("sham_optimizer_steps")) is not int
+        or controls.get("sham_parameter_updates") != 0 or type(controls.get("sham_parameter_updates")) is not int
+        or controls.get("sham_train_case_visits") != steps or type(controls.get("sham_train_case_visits")) is not int
+        or controls.get("sham_evaluation_after_optimizer_steps") is not True
+        or controls.get("sham_is_compute_matched") is not True
+        or controls.get("sham_is_token_exposure_matched") is not True
     ):
-        fail("control metadata inconsistent with declared unmatched-sham/corrupted protocol")
+        fail("control metadata inconsistent with matched zero-LR sham/corrupted protocol")
     training = report.get("training")
-    if not isinstance(training, dict) or set(training) != {"candidate", "corrupted"}:
+    if not isinstance(training, dict) or set(training) != {"sham", "candidate", "corrupted"}:
         fail("training arms missing or mislabeled")
     else:
-        for arm in ("candidate", "corrupted"):
+        for arm in ("sham", "candidate", "corrupted"):
             record = training[arm]
             expected_visits = [train[i % len(train)].id for i in range(steps)]
             if not isinstance(record, dict) or record.get("visited_case_ids") != expected_visits:
@@ -174,12 +180,17 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
                 continue
             if (record.get("steps") != steps or type(record.get("steps")) is not int
                     or record.get("example_visits") != steps or type(record.get("example_visits")) is not int
+                    or type(record.get("optimizer_learning_rate")) is not float
+                    or record["optimizer_learning_rate"] != (0.0 if arm == "sham" else config["learning_rate"])
                     or not _integer(record.get("input_tokens_seen"), 1, 100000)
                     or not isinstance(record.get("losses"), list)
                     or len(record["losses"]) != steps
                     or any(type(v) not in (float, int) or v < 0 or v > 1e12 or not math.isfinite(v)
                            for v in record["losses"])):
                 fail(f"{arm}: invalid declared training steps/tokens/losses")
+        if (all(isinstance(training.get(arm), dict) for arm in ("sham", "candidate"))
+                and training["sham"].get("input_tokens_seen") != training["candidate"].get("input_tokens_seen")):
+            fail("zero-learning-rate sham and candidate token exposure mismatch")
     evaluations = report.get("evaluations")
     if not isinstance(evaluations, dict) or set(evaluations) != set(ARMS):
         fail("expected baseline/sham/candidate/corrupted evaluations")

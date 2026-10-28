@@ -17,6 +17,16 @@ def verdict(train: dict[str, Any], reload: dict[str, Any], audit: dict[str, Any]
         raise ValueError("reloaded candidate tensor digest did not match training")
     if train.get("initial_lora_parameter_sha256") == train.get("candidate_lora_parameter_sha256"):
         raise ValueError("training did not change any LoRA parameters")
+    controls = train.get("control_data", {})
+    training = train.get("training", {})
+    if (train.get("initial_lora_parameter_sha256") != train.get("sham_lora_parameter_sha256")
+            or not isinstance(controls, dict) or controls.get("sham_is_compute_matched") is not True
+            or controls.get("sham_is_token_exposure_matched") is not True
+            or not isinstance(training, dict)
+            or not all(isinstance(training.get(arm), dict) for arm in ("sham", "candidate"))
+            or training["sham"].get("steps") != training["candidate"].get("steps")
+            or training["sham"].get("input_tokens_seen") != training["candidate"].get("input_tokens_seen")):
+        raise ValueError("zero-LR sham compute and token exposure not established")
     scores = train.get("evaluations", {})
     if set(scores) != {"baseline", "sham", "corrupted", "candidate"}:
         raise ValueError("four controlled evaluation arms are required")
@@ -45,7 +55,7 @@ def verdict(train: dict[str, Any], reload: dict[str, Any], audit: dict[str, Any]
         "graduation_eligible": False,
         "limitations": [
             "Public finite generator with shared task families is not a blind independent test.",
-            "The unchanged adapter sham is not compute matched to 32 optimizer steps.",
+            "The zero-LR sham matches candidate optimizer steps and token exposure, not parameter updates.",
             "Single seed, small sample size, same-owner report and runner; no independent examiner attestation.",
             "Semantic wins, if any, require a new sealed cross-task examination before promotion.",
         ],

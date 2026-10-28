@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from labyrinth.hf_pilot import SCHEMA
 from labyrinth.minotaur_model import MODEL_SCHEMA, inference, package_model
 
 
@@ -31,7 +32,7 @@ class MinotaurArtifactTests(unittest.TestCase):
         self.package = root / "minotaur"
         adapter_hashes = {p.name: _sha(p) for p in self.adapter.iterdir()}
         self.train = {
-            "schema": "labyrinth.hf-lora-pilot.v2",
+            "schema": SCHEMA,
             "source": {"commit": "f" * 40, "source_tree_sha256": "e" * 64},
             "config": {"seed": 3, "steps": 2, "train_count": 2, "eval_count": 2,
                        "tiers": [1], "max_tokens": 256, "max_new_tokens": 16,

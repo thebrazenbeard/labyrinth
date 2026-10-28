@@ -166,7 +166,8 @@ def package_model(run_dir: str | Path, reload_report: str | Path, output_dir: st
         "false passes and false rejects before any neural advisory use.\n\n"
         "Exact development results and lineage are in `minotaur_manifest.json`. "
         "No reasoning improvement was established; do not use this adapter as "
-        "a production evaluator. The zero-update sham is not compute matched.\n",
+        "a production evaluator. The zero-learning-rate sham matches optimizer "
+        "steps and training-token exposure, but no independent examiner.\n",
         encoding="utf-8")
     return manifest
 

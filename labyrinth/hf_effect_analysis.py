@@ -151,8 +151,9 @@ def summarize_hf_effects(arms: dict[str, list[dict[str, Any]]], *,
                 for arm in CONTROLS
             },
         }
-    # Even a spectacular value here is exploratory: compute-matched sham,
-    # blinded OOD holdouts, independent model run and provenance are absent.
+    # Even a spectacular value here is exploratory: zero-LR optimizer sham
+    # now matches compute and exposure, but blinded OOD holdouts, independent
+    # model execution/attestation, and provenance are still absent.
     all_control_deltas_positive = all(
         comparison["candidate_wins"] > comparison["reference_wins"]
         for comparison in comparisons.values()
@@ -196,7 +197,7 @@ def summarize_hf_effects(arms: dict[str, list[dict[str, Any]]], *,
         "limitations": [
             "Report audit checks internal consistency, not independent model execution.",
             "Response digests and checkpoint hashes are self-reported, not authenticated.",
-            "Zero-update sham is not compute/exposure matched.",
+            "Zero-learning-rate sham matches optimizer steps and training-token exposure, but not parameter updates.",
             "Public finite challenge templates permit training/evaluation contamination.",
             "Strict-answer gains can arise from formatting alone; substantive wrong-answer "
             "recoveries are counted separately but do not by themselves prove reasoning.",

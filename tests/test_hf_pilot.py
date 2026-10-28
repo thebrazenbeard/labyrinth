@@ -8,11 +8,13 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from labyrinth.hf_pilot import (
     PilotConfig,
+    SCHEMA,
     _metadata_digest,
     _weights_digest,
     _device_headroom,
@@ -21,6 +23,7 @@ from labyrinth.hf_pilot import (
     _score_model,
     _trial_record,
     _summarize_trials,
+    _train_steps,
     derange_answers,
     reload_evaluate,
     run_pilot,
@@ -40,6 +43,79 @@ class DummyTokenizer:
 
 
 class HfPilotContractTests(unittest.TestCase):
+    def test_zero_lr_sham_executes_full_gradient_and_optimizer_steps(self):
+        events = []
+
+        class Finite:
+            def __bool__(self):
+                return True
+
+            def all(self):
+                return self
+
+        class Loss:
+            def backward(self):
+                events.append("backward")
+
+            def detach(self):
+                return self
+
+            def cpu(self):
+                return self
+
+            def item(self):
+                return 1.0
+
+        class Parameter:
+            requires_grad = True
+
+        class Model:
+            def parameters(self):
+                return [Parameter()]
+
+            def train(self):
+                events.append("train")
+
+            def __call__(self, *, input_ids, labels):
+                events.append("forward")
+                return SimpleNamespace(loss=Loss())
+
+        class AdamW:
+            def __init__(self, params, *, lr):
+                list(params)
+                events.append(("optimizer_lr", lr))
+
+            def zero_grad(self, *, set_to_none):
+                events.append("zero_grad")
+
+            def step(self):
+                events.append("optimizer_step")
+
+        fake_torch = SimpleNamespace(
+            long="long", manual_seed=lambda seed: events.append(("seed", seed)),
+            tensor=lambda value, **kwargs: value,
+            isfinite=lambda value: Finite(),
+            optim=SimpleNamespace(AdamW=AdamW),
+            nn=SimpleNamespace(utils=SimpleNamespace(
+                clip_grad_norm_=lambda params, max_norm: events.append("clip"))),
+        )
+        cases = [Challenge("train-one", "arithmetic", 1, "train", "1 + 2", "3")]
+        config = self.spec(steps=3)
+        sham = _train_steps(Model(), DummyTokenizer(), fake_torch, cases, ["3"],
+                            config, zero_learning_rate_sham=True)
+        self.assertEqual(sham["steps"], 3)
+        self.assertEqual(sham["optimizer_learning_rate"], 0.0)
+        self.assertEqual(events.count("forward"), 3)
+        self.assertEqual(events.count("backward"), 3)
+        self.assertEqual(events.count("optimizer_step"), 3)
+        self.assertIn(("optimizer_lr", 0.0), events)
+        events.clear()
+        candidate = _train_steps(Model(), DummyTokenizer(), fake_torch, cases, ["3"], config)
+        self.assertEqual(candidate["optimizer_learning_rate"], config.learning_rate)
+        self.assertEqual(sham["visited_case_ids"], candidate["visited_case_ids"])
+        self.assertEqual(sham["input_tokens_seen"], candidate["input_tokens_seen"])
+        self.assertIn(("optimizer_lr", config.learning_rate), events)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -224,7 +300,7 @@ class HfPilotContractTests(unittest.TestCase):
         config = self.spec()
         _, heldout = training_cases(config)
         report = {
-            "schema": "labyrinth.hf-lora-pilot.v2",
+            "schema": SCHEMA,
             "source": _source_state(),
             "config": {**asdict(config), "tiers": list(config.tiers)},
             "base_weights_sha256": _weights_digest([self.model / "model.safetensors"]),
@@ -251,7 +327,7 @@ class HfPilotContractTests(unittest.TestCase):
         config = self.spec()
         _, heldout = training_cases(config)
         (self.output / "pilot_report.json").write_text(json.dumps({
-            "schema": "labyrinth.hf-lora-pilot.v2",
+            "schema": SCHEMA,
             "source": _source_state(),
             "config": {**asdict(config), "tiers": list(config.tiers)},
             "base_weights_sha256": _weights_digest([self.model / "model.safetensors"]),
@@ -287,7 +363,7 @@ class HfPilotContractTests(unittest.TestCase):
         adapter_sha256 = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                           for path in candidate.iterdir()}
         (self.output / "pilot_report.json").write_text(json.dumps({
-            "schema": "labyrinth.hf-lora-pilot.v2",
+            "schema": SCHEMA,
             "source": _source_state(),
             "config": {**asdict(config), "tiers": list(config.tiers)},
             "base_weights_sha256": _weights_digest([self.model / "model.safetensors"]),

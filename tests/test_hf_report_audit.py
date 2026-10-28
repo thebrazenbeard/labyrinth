@@ -34,9 +34,10 @@ def pilot_fixture():
     }
 
 
-    visits = {"steps": 2, "example_visits": 2,
+    visits = {"steps": 2, "example_visits": 2, "optimizer_learning_rate": 0.0002,
               "visited_case_ids": [c.id for c in train],
               "input_tokens_seen": 200, "losses": [2.5, 2.0]}
+    sham_visits = {**visits, "optimizer_learning_rate": 0.0}
     return {
         "schema": SCHEMA, "source": _source_state(),
         "config": {"model_path": "C:/fixture/base", "output_dir": "C:/fixture/run",
@@ -52,6 +53,7 @@ def pilot_fixture():
         "heldout_case_ids": [c.id for c in heldout],
         "heldout_public_prompt_sha256": _prompt_commitment(heldout),
         "initial_lora_parameter_sha256": "a" * 64,
+        "sham_lora_parameter_sha256": "a" * 64,
         "candidate_lora_parameter_sha256": "b" * 64,
         "candidate_lora_tensor_value_sha256": "b" * 64,
         "corrupted_lora_parameter_sha256": "c" * 64,
@@ -59,11 +61,13 @@ def pilot_fixture():
         "model_metadata_sha256": {"config.json": "e" * 64},
         "candidate_adapter_sha256": {"adapter_model.safetensors": "f" * 64},
         "training_process_id": 1234,
-        "control_data": {"corrupted_label_collisions": 0, "sham_updates": 0,
-                         "sham_train_case_visits": 0,
-                         "sham_evaluation_before_updates": True,
-                         "sham_is_compute_matched": False},
-        "training": {"candidate": dict(visits), "corrupted": dict(visits)},
+        "control_data": {"corrupted_label_collisions": 0,
+                         "sham_optimizer_steps": 2, "sham_parameter_updates": 0,
+                         "sham_train_case_visits": 2,
+                         "sham_evaluation_after_optimizer_steps": True,
+                         "sham_is_compute_matched": True,
+                         "sham_is_token_exposure_matched": True},
+        "training": {"sham": sham_visits, "candidate": dict(visits), "corrupted": dict(visits)},
         "evaluations": {arm: {**summary, "trials": [dict(t) for t in trials]}
                         for arm in ("baseline", "sham", "candidate", "corrupted")},
     }
@@ -100,6 +104,23 @@ def with_training_probe(report):
 
 
 class HfReportAuditTests(unittest.TestCase):
+    def test_unmatched_or_weight_mutated_sham_fails_closed(self):
+        for tamper in ("digest", "steps", "tokens", "learning_rate", "claim"):
+            with self.subTest(tamper=tamper):
+                report = pilot_fixture()
+                if tamper == "digest":
+                    report["sham_lora_parameter_sha256"] = "9" * 64
+                elif tamper == "steps":
+                    report["training"]["sham"]["steps"] = 1
+                elif tamper == "tokens":
+                    report["training"]["sham"]["input_tokens_seen"] = 199
+                elif tamper == "learning_rate":
+                    report["training"]["sham"]["optimizer_learning_rate"] = 0.0002
+                else:
+                    report["control_data"]["sham_is_compute_matched"] = False
+                verdict = audit_hf_report(report)
+                self.assertEqual(verdict["status"], "FAIL", verdict)
+
     def test_optional_training_probe_is_audited_as_training_not_holdout(self):
         report = with_training_probe(pilot_fixture())
         outcome = audit_hf_report(report)
