@@ -1,0 +1,110 @@
+# Minotaur — pretrained correctness-critic LoRA pilot
+
+Scope: **optional, offline and advisory-only**. It trains a pretrained causal
+language model to judge whether another model's proposed integer answer is
+mathematically correct. This is distinct from the older maze-answering Minotaur
+adapter. It never makes graduation decisions or replaces Vera's model.
+
+External rationale: [*Let's Verify Step by Step*](https://proceedings.iclr.cc/paper_files/paper/2024/hash/aca97732e30bcf1303bc22ac3924fd16-Abstract-Conference.html)
+studies outcome versus process supervision; [*ProcessBench*](https://aclanthology.org/2025.acl-long.50/)
+shows that recognizing the earliest erroneous step is a nontrivial verifier
+task; and [*Generative Verifiers*](https://proceedings.iclr.cc/paper_files/paper/2025/hash/214308a2d5e3f83ef9ad2739e1cbc46d-Abstract-Conference.html)
+investigates a richer model-based verification direction. This pilot implements
+only **binary outcome correctness supervision**, not those full systems.
+
+## Research question
+
+Can actual pretrained LoRA updates improve Minotaur's balanced true/false
+judgments and reduce false approvals on unseen generated arithmetic/operation
+chains? Do the gains transfer to structurally different register programs?
+
+## Reproducible local execution
+
+Requires an **already-local** Hugging Face causal-LM checkpoint directory
+containing safetensors weights and compatible tokenizer/config files, total
+weights no larger than 1 GiB. No model is downloaded; no package is installed.
+The optional current environment must already have PyTorch, Transformers and
+PEFT. Use a short trusted path under a new research-only output directory.
+
+```bash
+python -m labyrinth.minotaur_critic_pilot train \
+  --model-path /absolute/path/to/pretrained-hf-checkpoint \
+  --output-dir /absolute/path/to/new/minotaur-critic-pilot \
+  --steps 24 --device cpu
+
+# Run only in an entirely NEW Python process after the train process exits.
+python -m labyrinth.minotaur_critic_pilot reload \
+  --run-dir /absolute/path/to/new/minotaur-critic-pilot \
+  --report /absolute/path/to/new/minotaur-critic-reload.json
+```
+
+The default v2 protocol has 48 tier-1 and tier-2 training *tasks*, each
+with paired right/wrong proposed answers. It selects **24 distinct tasks**,
+and for each task accumulates the equally weighted gradients from **both**
+correct and incorrect proposed answers before one AdamW update. Thus each
+optimizer step is class-balanced within a single problem, instead of allowing
+a single-label step to follow the class prior. Each arm records
+`forward_backward_steps = 2 * optimizer_steps`. The loss is masked to a
+single next-token Yes or No verdict. No eval answer or
+reference solution enters the prompt at inference time. The model must contain
+both Yes and No as unambiguous single tokens or the pilot fails closed.
+
+All arms use the same pretrained checkpoint and evaluation prompts:
+
+1. `frozen`: no adapter, no gradient updates.
+2. `candidate`: correct Yes/No supervision and real PEFT updates.
+3. `zero_update`: identical candidate LoRA initialization, same prompts and
+   **two forward/backward passes per optimizer step**, **zeroed gradients and
+   zero weight decay**;
+   adapter digest must remain identical to initialization.
+4. `corrupted`: the same initialization and budget as candidate, with labels
+   inverted to test whether mere exposure and format learning explain changes.
+
+The development slice reserves tier-1 and tier-2 problems from a different
+generator seed and split. The transfer slice reserves tier-4 register programs.
+Both compare all four arms on exactly the same cases. Every result records
+accuracy, balanced accuracy, false approvals, false rejections, per-task-kind
+metrics, and a prediction digest. The candidate adapter and base checkpoint
+digests are recorded. Separate-process reload verifies exact LoRA tensor
+values and identical held-out/transfer predictions. A same-process or
+prediction-mismatching reload now fails with a nonzero exit, and the report
+records Python, platform, Torch, Transformers, PEFT and deterministic-algorithm
+settings; a changed reload runtime is rejected. These are self-reported
+reproducibility metadata, **not independently authenticated evidence**.
+
+## Claims and limits
+
+- **Mechanism verified** only after a run proves real parameter changes and
+  fresh-process adapter persistence. Source tests alone are not enough.
+- **Behavioral change observed** only if the same-case candidate predictions
+  differ from frozen and controls under fixed conditions.
+- **Reasoning improvement supported** only if held-out correctness beats all
+  controls with adequate statistical power and no detectable leakage.
+- **Generalization supported** only with truly independent, structurally novel
+  problems beyond this finite and fully public generator.
+
+This protocol defaults to 24 paired steps on tiny public tasks. The v2
+schedule consumes twice as many labeled examples per optimizer step as v1;
+**cross-version results are not compute-matched**, though all v2 arms retain
+equal budgets. The added balance is a testable hypothesis, not evidence of
+improvement. The protocol cannot support general claims even if observed
+transfer is positive. Before
+graduation, a separate evaluator must maintain privately custodied tests and
+sign evidence under a pinned acceptance policy. The neural critic does not
+possess the credential that can graduate a trainee.
+
+### Environment and live pilot
+
+The scratch Python lacks the optional Torch runtime. On Lappy, the canonical
+base-model directory initially did not contain an eligible checkpoint, but a
+fresh inventory found a preexisting donor `Open-Reasoner-Zero-0.5B` under
+the distinct donor-model directory. A real, bounded two-update CPU run and
+fresh-process reload of the *original v1 schedule* subsequently succeeded.
+**That candidate regressed in
+development accuracy and false approvals**; see [E-018](MINOTAUR_CRITIC_LAPPY_RUN_2026-10-27.md)
+for exact source, weight, model, adapter, control and scoring evidence. This
+does not establish that Minotaur learned a useful verifier skill. Subsequent
+v2 paired-label runs with both two and eight optimizer updates successfully
+adapted/reloaded the pretrained checkpoint, but again produced 100% candidate
+false approvals on these small test sets. See [E-019](MINOTAUR_CRITIC_PAIRED_LAPPY_RUN_2026-10-27.md).
+No model weight or dependency download was needed.

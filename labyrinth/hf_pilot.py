@@ -266,6 +266,32 @@ def _encode_pair(tokenizer: Any, prompt: str, answer: str, max_tokens: int) -> t
     return prefix + suffix, [-100] * len(prefix) + suffix
 
 
+def validate_tokenized_answer_discrimination(
+    tokenizer: Any, train: list[Challenge], corrupted_answers: list[str], max_tokens: int,
+) -> int:
+    """Refuse a control that is textually wrong but token-identical to gold.
+
+    A tokenizer may normalize two distinct numeric strings into the same IDs.
+    In that case LoRA receives identical supervised targets for correct and
+    corrupted labels, and no semantic control is possible. Check the exact
+    labels used by the optimizer, not just the answer strings.
+    """
+    if not train or len(train) != len(corrupted_answers):
+        raise ValueError("mismatched training and corrupted-label sequences")
+    seen_targets: dict[tuple[int, ...], str] = {}
+    for case, corrupted in zip(train, corrupted_answers):
+        if not isinstance(corrupted, str) or case.answer == corrupted:
+            raise ValueError("corrupted label must differ from oracle answer")
+        for answer in (case.answer, corrupted):
+            _tokens, labels = _encode_pair(tokenizer, case.prompt, answer, max_tokens)
+            supervised = tuple(token for token in labels if token != -100)
+            previous = seen_targets.get(supervised)
+            if previous is not None and previous != answer:
+                raise ValueError("distinct numeric answers tokenized to labels that collide")
+            seen_targets[supervised] = answer
+    return len(train)
+
+
 def _score_model(model: Any, tokenizer: Any, torch: Any, cases: list[Challenge],
                  *, device: str, max_tokens: int, max_new_tokens: int) -> dict[str, Any]:
     model.eval()
@@ -410,11 +436,10 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     base, tokenizer = _load_base(model_path, device, torch=torch,
                                  auto_model=auto_model, auto_tokenizer=auto_tokenizer)
     _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
-    # Validate all token budgets before creating an output directory.
-    for case in train:
-        _encode_pair(tokenizer, case.prompt, case.answer, config.max_tokens)
-    for case, answer in zip(train, corrupted_answers):
-        _encode_pair(tokenizer, case.prompt, answer, config.max_tokens)
+    # Validate token budgets and ensure the real tokenizer distinguishes gold
+    # from deranged answers BEFORE evaluating or creating a run directory.
+    validate_tokenized_answer_discrimination(tokenizer, train, corrupted_answers,
+                                              config.max_tokens)
     baseline = _score_model(base, tokenizer, torch, heldout, device=device,
                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
     model = get_peft_model(base, lora_config(r=config.lora_rank, lora_alpha=config.lora_alpha,

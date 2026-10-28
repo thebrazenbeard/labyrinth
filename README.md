@@ -4,6 +4,52 @@ Labyrinth is an offline-first **reasoning challenge, training-lifecycle, and eva
 
 It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path. A bounded CPU smoke run on Lappy demonstrated numerical adapter changes and fresh-process reload with a tiny, **randomly initialized** HF model; it did **not** demonstrate improved reasoning.
 
+## New from-scratch Minotaur neural checkpoint (experimental)
+
+Unlike the existing pretrained LoRA studies, \`labyrinth.minotaur_scratch\`
+constructs **new random neural weights** for a 114,887-parameter Transformer
+first-error verifier. CPU training actually updated **all** of those weights;
+the distinct, versioned 451.5 KiB Safetensors checkpoint lives at
+[\`models/minotaur_scratch_v1\`](models/minotaur_scratch_v1) with a JSON
+training report and independent fresh-process reload.
+
+**Important:** this is an original narrow *neural process verifier*, not a
+large language model pretrained from scratch, not a GGUF, and not an effective
+Labyrinth gatekeeper. Development accuracy was **43/96** and transfer **20/48**;
+false approvals were **39/48** and **22/24** respectively. No graduation,
+deployment, or semantic-generalization claim follows.
+
+Details, hashes, source binding and CLI reload instructions:
+[\`docs/MINOTAUR_SCRATCH_NEURAL_V1_2026-10-27.md\`](docs/MINOTAUR_SCRATCH_NEURAL_V1_2026-10-27.md).
+Core Labyrinth still runs without PyTorch; scratch training and reload require
+optional local CPU PyTorch and \`safetensors\` installed. The checkpoint in
+this draft is **experimental evidence**, not a production model download.
+
+### Guarded Minotaur v1 ? bounded register-trace advice
+
+\`labyrinth.minotaur_guarded\` connects the **actual scratch checkpoint**
+to a second, independent modulo-97 register-program interpreter. A wrong
+neural approval can never overrule the independent checker: disagreement,
+unknown grammar, malformed inputs, and invalid checkpoint identity cause
+**ABSTAIN**, not a pass. This is a deliberately small domain-specific
+neuro-symbolic system, **not general reasoning or neural mastery**.
+
+To try it locally, supply a JSON file with exactly \`question\` (the printed
+register program) and \`steps\` (its observed trace, as an array of strings):
+
+\`\`\`bash
+python -m labyrinth.minotaur_guarded --checkpoint models/minotaur_scratch_v1 --input-json trace.json
+\`\`\`
+
+The checkpoint is never downloaded; only the existing local CPU PyTorch and
+Safetensors libraries are needed. Output includes \`graduation_authority: none\`
+and \`qualification: NOT_ESTABLISHED\`. The independent executable interpreter
+does the authoritative arithmetic checking **within its tiny public grammar**.
+The neural model may contribute agreement but has no final-exam signing key,
+permission to release trainees, or access to production inference routing.
+See \`docs/MINOTAUR_GUARDED_TRACE_EVIDENCE_2026-10-27.md\` for all results
+and limitations.
+
 ## Run it
 
 Requires Python 3.10+; core functionality uses the standard library.
@@ -41,6 +87,8 @@ For each run, the generator produces separate `train` and `eval` splits using a 
 | Shuffled | The same demonstrations with a full, label-multiset-preserving derangement |
 
 Tier 1 uses arithmetic, tier 2 uses multi-operation reasoning, and tier 3 tests evidence priority against contradictory data and a quoted prompt-injection attempt. Tier 4 introduces a bounded two-register program language: training structures have 3–4 instructions, while structural holdouts have 5–6 and different operation compositions. An independent test interpreter checks the generated answers. Tiers are nominal categories, **not empirically calibrated difficulty levels**. The curriculum module separately supports deterministic progression/feedback using only training examples; the standard `experiment` command does not yet train from this adaptive curriculum.
+
+For tier-four *development* transfer tests, `labyrinth.transfer_slices.generate_transfer_slices(seed, count)` exposes three disjoint, replayable slices: fresh numeric cases on the four known 3–4-operation training structures (`fresh_numbers`), four new 3–4-operation structures (`new_composition`), and four new 5–6-operation structures (`longer_program`). The optional `profile` keyword on `generate_program_challenges` permits explicit profile selection while leaving existing three-argument behavior and generated prompts unchanged. `transfer_commitment` gives public-question/structure hashes without answer keys. These are finite, public generator templates; scores should be grouped by structure fingerprint and **cannot** independently establish broad generalization. The new slices are not yet part of the `train-hf` CLI's evaluation: integration must preserve the same frozen prompts, decoding and arm controls before comparing any model scores.
 
 The evaluator accepts only a complete `ANSWER: <integer>` line. Reports distinguish *answer accuracy* from *output-format adherence* and include challenge commitments, seeds, model identity, generation options when available, report schema, source-tree hash, and per-trial prompt/response hashes. Correct answers are never placed in public evaluation prompts or reported as explicit answer keys.
 
@@ -88,6 +136,87 @@ This path never downloads weights, installs packages, runs arbitrary model text,
 **Follow-up on a genuine already-local pretrained checkpoint:** The same exact code revision also loaded `Open-Reasoner-Zero-0.5B` (Qwen2 architecture) fully offline on Lappy's CPU, performed **one genuine LoRA optimizer update**, saved the adapter and reloaded **numerically identical trained tensor values** in a second Python process (both processes exit 0). Accuracy remained **0/2 in every arm**. Baseline and untrained-adapter outputs were both invalid format on each case; the candidate emitted one parseable-but-incorrect answer and one invalid-format answer. This proves a bounded pretrained-model adaptation/checkpoint *mechanism*, not reasoning improvement. Source/model hashes, exact parameters and control results are in [E-017](docs/RESEARCH_LOG_2026-10-26.md). Before any capability claim: precommit a larger blind family, measure format adherence separately, compare equal-budget controls and replicate training seeds.
 
 For an entirely offline **mechanism smoke test only**, `scripts/make_tiny_hf_fixture.py --output-dir NEW_MODEL_DIR` can create a very small randomly initialized causal-LM model and tokenizer using optional installed Torch/Transformers/Tokenizers. Its weights have no pretrained reasoning ability; a successful LoRA update on this fixture proves plumbing, not improvement to an existing capable model. Keep model and run outputs out of Git.
+
+### Minotaur's guardian gate and adversarial development benchmark
+
+`labyrinth.graduation_gate` holds the *qualification rule*, not the private
+exam. A separately trusted evaluator must sign a complete, pinned receipt;
+Minotaur cannot grade its own certification. `objective_kind="training_effect"`
+(the default) now requires statistically supported paired semantic gains over
+the frozen pretrained, zero-update and corrupted-label controls, across every
+held-out slice. The exact one-sided paired comparison applies Bonferroni
+correction across all arms, slices and allowed attempts, in addition to
+predeclared accuracy, format and gain thresholds. `"skill_mastery"` is an
+explicit alternative for competence when the pretrained model might already
+know the skill; it requires a one-sided exact binomial result above the
+predeclared accuracy floor and **does not** establish a causal training
+improvement. Both paths require held-out and transfer slices with at least 16
+cases each and cannot lower their semantic accuracy, format or gain floors to
+zero. The choice and significance level are fingerprint-bound to persistent
+gate state. All significance statements require genuinely independent cases;
+public repeated program patterns cannot supply independent final evidence.
+Production receipts must also carry the signed
+`score_provenance: "independent_private_exam.v1"` attestation. This is a
+fail-closed interface boundary: Minotaur's bounded/public advisory scores have
+no qualifying provenance and cannot be silently recast as graduation evidence.
+It is not a substitute for custody—the external signer must actually own the
+private oracle and credential; software cannot turn a fabricated key or false
+assertion into independent examination.
+
+`labyrinth.graduation_state` adds an **opt-in, local custodian-owned** SQLite
+WAL store for that trusted `GateState`. `initialize_campaign` creates a new,
+exclusive policy-bound campaign; `decide_campaign` serializes signed decisions
+with `BEGIN IMMEDIATE`, authenticates stored state with a separate HMAC key,
+and durably consumes attempts before reporting an exit. A second process
+cannot spend a failed signed receipt again. The caller must keep both keys
+outside trainee control and secure/backup the database directory. This module
+does **not** run checkpoints, generate genuinely private exam cases, attest
+independent structural problem families, or protect against privileged rollback
+of the entire database. It is not installed into production or a credential
+manager, and does not make Minotaur independently qualified.
+
+`labyrinth.guardian_benchmark.generate_guardian_cases` creates public
+development cases with three register-program structure profiles, correct and
+convincing incorrect trainee answers in matched styles, plus injected claims
+that a judge should mark answers correct. Its process counterpart,
+`generate_process_cases`, creates paired valid/faulty execution traces and
+asks the guardian to identify the **first incorrect step**, as in the
+ProcessBench research problem. The associated evaluators report false
+approvals, false rejections, abstentions, coverage and slice metrics; neither
+grants qualification. Public answers must **not** be used for a blind final
+exam. See the [outside-source research mapping and evidence limits](docs/MINOTAUR_GUARDIAN_EXTERNAL_RESEARCH_2026-10-27.md).
+
+For a real pretrained **correctness-critic** rather than a maze-answering
+adapter, `labyrinth.minotaur_critic_pilot` provides a strictly optional,
+offline PEFT/LoRA experiment. It trains Yes/No judgments of another model's
+proposed answers against matched frozen, zero-update, and corrupted-label
+controls, measures false approvals on identical development and structurally
+reserved transfer cases, and requires an unchanged adapter with identical
+predictions after **fresh-process** reload. A same-process or mismatching
+reload fails closed. A **real pretrained CPU pilot** subsequently ran two
+candidate LoRA optimizer updates, verified an unchanged zero-update control,
+and reloaded the adapter in a separate process. However, development accuracy
+fell from **5/8 to 4/8** and transfer remained **2/4**: the mechanism works,
+but reasoning improvement and generalization are NOT ESTABLISHED. See the
+[critic execution protocol](docs/MINOTAUR_CORRECTNESS_CRITIC_PILOT_2026-10-27.md)
+and [live Lappy run evidence E-018](docs/MINOTAUR_CRITIC_LAPPY_RUN_2026-10-27.md).
+A [separate E-021 alternate-objective experiment](docs/MINOTAUR_DIAGNOSIS_AND_PROCESS_PILOTS_2026-10-27.md)
+recorded real pretrained logit-margin, first-error *claim* and binary-loss
+CPU runs. Its experimental implementation lives in a [separate research
+branch](https://github.com/thebrazenbeard/labyrinth/tree/bt2/minotaur-diagnostics-and-windows-20261027),
+**not** in this Minotaur draft or production. These runs also failed to
+demonstrate useful verifier discrimination or safe graduation.
+The follow-up v2 pairs right/wrong answers within every update, but its real
+two- and eight-update runs **still** approved every incorrect development and
+transfer answer. See [E-019](docs/MINOTAUR_CRITIC_PAIRED_LAPPY_RUN_2026-10-27.md).
+
+`labyrinth.processbench_adapter` can score a reviewer on caller-supplied,
+strictly validated **Qwen/ProcessBench** JSONL records, with correct one-based
+first-error translation, class-balanced metrics and false-approval rates.
+It also reports whether judgments on caller-asserted logically equivalent
+reformulations remain consistent **and correct**. It does not fetch or bundle
+the official benchmark, and invented fixture tests are not a real benchmark
+score. See the [external benchmark adapter provenance and protocol](docs/PROCESSBENCH_EXTERNAL_ADAPTER.md).
 
 The next gate is executing this optional path in an isolated environment with independently measured resource use, immutable model/tokenizer identity and a matched repeated-seed experiment. Do not infer from the code or changed adapter bytes that a pretrained language model became better at reasoning.
 

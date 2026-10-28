@@ -1,0 +1,712 @@
+"""Opt-in pretrained Minotaur correctness critic, not an exit authority.
+
+Runs genuinely trainable PEFT LoRA against a *local* safetensors causal LM,
+with paired Yes/No judgments and frozen/zero-update/corrupted-label controls.
+All split generators are public, so pilot metrics are development evidence,
+not private blind verification or established reasoning generalization.
+No model download, package installation, or production route mutation occurs.
+"""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import asdict, dataclass
+import hashlib
+from importlib import metadata
+import json
+import math
+import os
+from pathlib import Path
+import platform
+import random
+import sys
+from typing import Any, Sequence
+
+from .hf_pilot import (
+    PilotConfig, _adapter_manifest, _assert_adapter_unchanged,
+    _assert_checkpoint_unchanged, _checkpoint_manifest, _deps,
+    _device_headroom, _load_base, _lora_value_digest, _parameter_digest,
+    _save_new, _sha_file, validate_config,
+)
+from .maze import generate_maze
+from .runner import _source_state, load_json
+
+
+SCHEMA = "labyrinth.minotaur-critic-pilot.v3"
+RELOAD_SCHEMA = "labyrinth.minotaur-critic-reload.v3"
+_ARMS = ("frozen", "candidate", "zero_update", "corrupted")
+
+
+@dataclass(frozen=True)
+class CriticExample:
+    example_id: str
+    case_id: str
+    case_prompt_sha256: str
+    kind: str
+    prompt: str
+    trainee_answer: int
+    is_correct: bool
+
+
+@dataclass(frozen=True)
+class CriticConfig:
+    model_path: str
+    output_dir: str
+    seed: int = 777
+    train_seed: int = 1357
+    dev_seed: int = 2468
+    transfer_seed: int = 3579
+    train_count_per_tier: int = 24
+    eval_count_per_tier: int = 8
+    steps: int = 24
+    max_tokens: int = 384
+    learning_rate: float = 0.0003
+    lora_rank: int = 4
+    lora_alpha: int = 8
+    device: str = "cpu"
+    loss_kind: str = "causal_token_ce"  # also pairwise_margin_rank, hybrid_margin_bce_rank
+
+    def validate_fields(self) -> None:
+        for name in ("seed", "train_seed", "dev_seed", "transfer_seed"):
+            value = getattr(self, name)
+            if type(value) is not int or not 0 <= value < 2**31:
+                raise ValueError(f"{name} must be a bounded integer")
+        for name, maximum in (("train_count_per_tier", 32), ("eval_count_per_tier", 32),
+                              ("steps", 64), ("max_tokens", 1024),
+                              ("lora_rank", 16), ("lora_alpha", 64)):
+            value = getattr(self, name)
+            minimum = 32 if name == "max_tokens" else 1
+            if type(value) is not int or not minimum <= value <= maximum:
+                raise ValueError(f"{name} must be in [{minimum}, {maximum}]")
+        if (type(self.learning_rate) is not float
+                or not math.isfinite(self.learning_rate)
+                or not 1e-7 <= self.learning_rate <= 0.001):
+            raise ValueError("learning_rate must be a finite supported float")
+        if self.device not in ("cpu", "cuda"):
+            raise ValueError("device must be cpu or cuda")
+        if self.loss_kind not in ("causal_token_ce", "pairwise_margin_rank",
+                                 "hybrid_margin_bce_rank"):
+            raise ValueError("unsupported critic loss objective")
+        if len({self.train_seed, self.dev_seed, self.transfer_seed}) != 3:
+            raise ValueError("training and evaluation seeds must differ")
+        if self.steps > self.train_count_per_tier * 2:
+            raise ValueError("one paired optimizer update per distinct training case maximum")
+
+    def validate(self, *, output_must_be_new: bool = True) -> tuple[Path, Path, list[Path]]:
+        self.validate_fields()
+        # Reuse Labyrinth's established local-safetensors, path, weight-size,
+        # tokenizer-metadata and output-isolation preflight.
+        return validate_config(PilotConfig(
+            model_path=self.model_path, output_dir=self.output_dir,
+            seed=self.seed, tiers=(1,), steps=min(self.steps, 32),
+            max_tokens=self.max_tokens, device=self.device,
+        ), output_must_be_new=output_must_be_new)
+
+
+def critic_examples(seed: int, split: str, count_per_tier: int,
+                    tiers: tuple[int, ...]) -> list[CriticExample]:
+    challenges = generate_maze(seed=seed, tiers=tiers, count=count_per_tier, split=split)
+    examples: list[CriticExample] = []
+    for challenge in challenges:
+        answer = int(challenge.answer)
+        # Always an incorrect integer, including wraparound for register tasks.
+        wrong = ((answer + 1 + int(hashlib.sha256(challenge.id.encode()).hexdigest()[:4], 16) % 95) % 97
+                 if challenge.tier == 4 else answer + 1 + int(hashlib.sha256(challenge.id.encode()).hexdigest()[:4], 16) % 19)
+        for value, truth in ((answer, True), (wrong, False)):
+            identifier = hashlib.sha256(f"{challenge.id}:{truth}".encode()).hexdigest()
+            text = ("You are checking a trainee's proposed answer, not solving as the trainee.\n"
+                    "Read the task and proposed answer. Decide whether the proposed integer\n"
+                    "is substantively correct. Respond Yes or No.\n"
+                    f"Task:\n{challenge.prompt}\n"
+                    f"Trainee answer: ANSWER: {value}\nVerdict:")
+            examples.append(CriticExample(
+                example_id=identifier, case_id=challenge.id,
+                case_prompt_sha256=hashlib.sha256(challenge.prompt.encode()).hexdigest(),
+                kind=challenge.kind, prompt=text, trainee_answer=value,
+                is_correct=truth,
+            ))
+    return examples
+
+
+def validate_dataset_separation(*groups: Sequence[CriticExample]) -> None:
+    ids: set[str] = set()
+    cases: set[str] = set()
+    task_prompts: set[str] = set()
+    for group in groups:
+        own_ids = {ex.example_id for ex in group}
+        own_cases = {ex.case_id for ex in group}
+        own_prompts = {ex.case_prompt_sha256 for ex in group}
+        if (len(own_ids) != len(group) or len(own_cases) * 2 != len(group)
+                or len(own_prompts) != len(own_cases)):
+            raise ValueError("malformed or duplicated paired examples")
+        if ids & own_ids or cases & own_cases or task_prompts & own_prompts:
+            raise ValueError("training and evaluation sets overlap")
+        ids |= own_ids
+        cases |= own_cases
+        task_prompts |= own_prompts
+
+
+def training_schedule(examples: Sequence[CriticExample], *, steps: int,
+                      seed: int) -> list[tuple[CriticExample, CriticExample]]:
+    """One balanced correct/wrong *pair per task* per optimizer update.
+
+    Distinct case IDs prevent an update schedule from consuming the same
+    problem twice, while pairing prevents class-prior learning from an
+    entire optimizer step seeing only a positive or negative example.
+    """
+    if type(steps) is not int or steps < 1 or type(seed) is not int:
+        raise ValueError("training steps must be positive with a valid seed")
+    grouped: dict[str, list[CriticExample]] = {}
+    for ex in examples:
+        grouped.setdefault(ex.case_id, []).append(ex)
+    if steps > len(grouped) or any(
+        len(pair) != 2 or {x.is_correct for x in pair} != {True, False}
+        or len({x.example_id for x in pair}) != 2
+        or len({x.case_prompt_sha256 for x in pair}) != 1
+        or len({x.trainee_answer for x in pair}) != 2
+        for pair in grouped.values()
+    ):
+        raise ValueError("need one unique balanced pair per distinct training task")
+    rng = random.Random(seed)
+    case_ids = sorted(grouped)
+    rng.shuffle(case_ids)
+    result: list[tuple[CriticExample, CriticExample]] = []
+    for case_id in case_ids[:steps]:
+        pair = list(grouped[case_id])
+        rng.shuffle(pair)
+        result.append((pair[0], pair[1]))
+    return result
+
+
+def encode_supervised_verdict(tokenizer: Any, example: CriticExample,
+                              *, max_tokens: int) -> tuple[list[int], list[int]]:
+    prefix = tokenizer.encode(example.prompt, add_special_tokens=True)
+    label = tokenizer.encode(" Yes" if example.is_correct else " No", add_special_tokens=False)
+    if len(label) != 1:
+        raise ValueError("verdict must map to a single next-token ID")
+    if not prefix or len(prefix) + 1 > max_tokens:
+        raise ValueError("example exceeds max token length")
+    return prefix + label, [-100] * len(prefix) + label
+
+
+def prepare_verdict_pair(
+    tokenizer: Any, pair: tuple[CriticExample, CriticExample],
+    *, max_tokens: int, corrupt: bool,
+) -> tuple[tuple[list[int], list[int]], tuple[list[int], list[int]]]:
+    """Supervise both opposite labels on an identical task each step."""
+    if (type(pair) is not tuple or len(pair) != 2
+            or any(type(ex) is not CriticExample for ex in pair)
+            or pair[0].case_id != pair[1].case_id
+            or pair[0].case_prompt_sha256 != pair[1].case_prompt_sha256
+            or pair[0].example_id == pair[1].example_id
+            or pair[0].trainee_answer == pair[1].trainee_answer
+            or {ex.is_correct for ex in pair} != {True, False}
+            or type(corrupt) is not bool):
+        raise ValueError("each update must have correct/wrong examples of one distinct task")
+    prepared: list[tuple[list[int], list[int]]] = []
+    for ex in pair:
+        target = (ex if not corrupt else
+                  CriticExample(**{**asdict(ex), "is_correct": not ex.is_correct}))
+        prepared.append(encode_supervised_verdict(tokenizer, target,
+                                                  max_tokens=max_tokens))
+    return prepared[0], prepared[1]
+
+
+def score_binary(examples: Sequence[CriticExample], predictions: Sequence[bool]) -> dict[str, Any]:
+    if len(examples) != len(predictions) or not examples or any(type(v) is not bool for v in predictions):
+        raise ValueError("complete boolean predictions required")
+    tp = sum(ex.is_correct and p for ex, p in zip(examples, predictions))
+    tn = sum(not ex.is_correct and not p for ex, p in zip(examples, predictions))
+    fp = sum(not ex.is_correct and p for ex, p in zip(examples, predictions))
+    fn = sum(ex.is_correct and not p for ex, p in zip(examples, predictions))
+    positives, negatives = tp + fn, tn + fp
+    return {
+        "total": len(examples), "accuracy": (tp + tn) / len(examples),
+        "balanced_accuracy": ((tp / positives if positives else 0)
+                              + (tn / negatives if negatives else 0)) / 2,
+        "true_positive": tp, "true_negative": tn,
+        "false_positive": fp, "false_negative": fn,
+        "false_approval_rate": fp / negatives if negatives else 0.0,
+        "false_rejection_rate": fn / positives if positives else 0.0,
+    }
+
+
+def score_pairwise_margins(examples: Sequence[CriticExample],
+                           margins: Sequence[float]) -> dict[str, Any]:
+    """Report paired ranking distinct from absolute Yes/No classification.
+
+    The paired items must share a problem but have opposite true labels.
+    Correct > incorrect margin is one discrimination success; ties are failures.
+    This PUBLIC development diagnostic is not graduation evidence.
+    """
+    if (not examples or len(examples) != len(margins)
+            or any(type(ex) is not CriticExample for ex in examples)
+            or any(type(m) not in (int, float) or not math.isfinite(m)
+                   for m in margins)):
+        raise ValueError("complete finite paired verdict margins required")
+    grouped: dict[str, list[tuple[CriticExample, float]]] = {}
+    for example, margin in zip(examples, margins):
+        grouped.setdefault(example.case_id, []).append((example, float(margin)))
+    if any(len(pair) != 2 or {ex.is_correct for ex, _ in pair} != {True, False}
+           or len({ex.case_prompt_sha256 for ex, _ in pair}) != 1
+           or len({ex.example_id for ex, _ in pair}) != 2
+           for pair in grouped.values()):
+        raise ValueError("pairwise margins require one positive and one negative per task")
+    wins = ties = 0
+    for pair in grouped.values():
+        good = next(m for ex, m in pair if ex.is_correct)
+        bad = next(m for ex, m in pair if not ex.is_correct)
+        wins += int(good > bad)
+        ties += int(good == bad)
+    return {"pairs": len(grouped), "wins": wins, "ties": ties,
+            "pairwise_accuracy": wins / len(grouped),
+            "qualification": "NOT_ESTABLISHED"}
+
+
+def hybrid_margin_loss_and_gradients(correct_margin: float,
+                                     incorrect_margin: float) -> tuple[float, float, float]:
+    """Equal-weight absolute binary BCE plus same-case ranking loss.
+
+    A relative ranking loss alone admits an arbitrarily all-No or all-Yes
+    decision bias. Binary margin BCE anchors correct verdicts above zero and
+    incorrect verdicts below zero, while ranking requires the correct answer
+    score to exceed the incorrect answer for the *same task*.
+
+    Returns scalar loss and dL/d(correct Yes-No), dL/d(incorrect Yes-No).
+    These exact analytic derivatives permit two sequential low-memory backward
+    passes without storing both language-model activation graphs together.
+    """
+    if (type(correct_margin) not in (float, int)
+            or type(incorrect_margin) not in (float, int)
+            or not math.isfinite(correct_margin) or not math.isfinite(incorrect_margin)):
+        raise ValueError("finite numeric verdict margins required")
+
+    def softplus(x: float) -> float:
+        return max(x, 0.0) + math.log1p(math.exp(-abs(x)))
+
+    def sigmoid(x: float) -> float:
+        if x >= 0:
+            return 1.0 / (1.0 + math.exp(-x))
+        positive = math.exp(x)
+        return positive / (1.0 + positive)
+
+    good = float(correct_margin)
+    bad = float(incorrect_margin)
+    rank = bad - good
+    # Equal weight between the *average* binary CE over both verdicts and
+    # the single same-case ranking CE. The earlier sum weighted binary loss
+    # twice as heavily as ranking once the verdict pair was normalized.
+    loss = 0.25 * (softplus(-good) + softplus(bad)) + 0.5 * softplus(rank)
+    good_grad = -0.25 * sigmoid(-good) - 0.5 * sigmoid(rank)
+    bad_grad = 0.25 * sigmoid(bad) + 0.5 * sigmoid(rank)
+    return loss, good_grad, bad_grad
+
+
+def verdict_logit_diagnostics(
+    examples: Sequence[CriticExample], logits: Sequence[tuple[float, float]],
+) -> dict[str, Any]:
+    """Auditable, bounded next-token evidence; margins are not probabilities.
+
+    Logits are ordered (Yes, No). Gold labels derive from the generated oracle,
+    never from model predictions. A zero margin predicts No, matching _score.
+    """
+    if (not examples or len(examples) != len(logits)
+            or any(len(pair) != 2 or not all(math.isfinite(x) for x in pair)
+                   for pair in logits)):
+        raise ValueError("complete finite Yes/No logit pairs required")
+    rows = []
+    predictions = []
+    for ex, (yes, no) in zip(examples, logits):
+        margin = float(yes - no)
+        if not math.isfinite(margin):
+            raise ValueError("nonfinite verdict margin")
+        predicted_yes = margin > 0
+        predictions.append(predicted_yes)
+        rows.append({
+            "example_id": ex.example_id, "case_id": ex.case_id,
+            "kind": ex.kind, "gold": "Yes" if ex.is_correct else "No",
+            "yes_logit": float(yes), "no_logit": float(no),
+            "margin_yes_minus_no": margin,
+            "predicted": "Yes" if predicted_yes else "No",
+        })
+    by_gold = {}
+    for gold in ("Yes", "No"):
+        subset = [row for row in rows if row["gold"] == gold]
+        by_gold[gold] = {
+            "count": len(subset),
+            "predicted_yes": sum(row["predicted"] == "Yes" for row in subset),
+            "mean_margin_yes_minus_no": (
+                sum(row["margin_yes_minus_no"] for row in subset) / len(subset)
+                if subset else None),
+            "min_margin_yes_minus_no": min(
+                (row["margin_yes_minus_no"] for row in subset), default=None),
+            "max_margin_yes_minus_no": max(
+                (row["margin_yes_minus_no"] for row in subset), default=None),
+        }
+    return {"examples": rows, "by_gold": by_gold,
+            "metrics": score_binary(examples, predictions)}
+
+
+def _diagnostic_logit_values_match(measured: Any, expected: Any) -> bool:
+    """Permit tiny CPU logit rounding, never decision/label/metric drift."""
+    if type(measured) is not dict or type(expected) is not dict:
+        return False
+    if measured.keys() != expected.keys() or measured.get("metrics") != expected.get("metrics"):
+        return False
+
+    def same(a: Any, b: Any) -> bool:
+        if type(a) is dict and type(b) is dict:
+            return a.keys() == b.keys() and all(same(a[k], b[k]) for k in a)
+        if type(a) is list and type(b) is list:
+            return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
+        if type(a) is float and type(b) is float:
+            return math.isfinite(a) and math.isfinite(b) and abs(a - b) <= 0.00005
+        return type(a) is type(b) and a == b
+
+    return (same(measured.get("examples"), expected.get("examples"))
+            and same(measured.get("by_gold"), expected.get("by_gold")))
+
+
+def _reload_scores_match(measured: Any, expected: Any) -> bool:
+    if measured == expected:
+        return True
+    if type(measured) is not dict or type(expected) is not dict or measured.keys() != expected.keys():
+        return False
+    for slice_name in expected:
+        left, right = measured[slice_name], expected[slice_name]
+        if type(left) is not dict or type(right) is not dict or left.keys() != right.keys():
+            return False
+        if any(left[k] != right[k] for k in right if k != "logit_diagnostics"):
+            return False
+        if not _diagnostic_logit_values_match(left.get("logit_diagnostics"), right.get("logit_diagnostics")):
+            return False
+    return True
+
+
+def verify_reload_contract(*, training_pid: int, reload_pid: int,
+                           measured: dict[str, Any],
+                           expected: dict[str, Any]) -> None:
+    """A same-process load or changed predictions cannot certify persistence."""
+    if type(training_pid) is not int or type(reload_pid) is not int:
+        raise RuntimeError("Minotaur reload process identity is invalid")
+    if training_pid == reload_pid:
+        raise RuntimeError("Minotaur reload must run in a fresh process")
+    if not _reload_scores_match(measured, expected):
+        raise RuntimeError("Minotaur reloaded predictions or metrics differ")
+
+
+def _runtime_manifest(torch: Any, device: str) -> dict[str, Any]:
+    """Reproducibility metadata, not evidence of software authenticity."""
+    return {
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "torch": str(torch.__version__),
+        "transformers": metadata.version("transformers"),
+        "peft": metadata.version("peft"),
+        "device": device,
+        "deterministic_algorithms": bool(torch.are_deterministic_algorithms_enabled()),
+    }
+
+
+def _score(model: Any, tokenizer: Any, torch: Any, examples: list[CriticExample],
+           *, device: str, max_tokens: int) -> dict[str, Any]:
+    yes = tokenizer.encode(" Yes", add_special_tokens=False)
+    no = tokenizer.encode(" No", add_special_tokens=False)
+    if len(yes) != 1 or len(no) != 1 or yes == no:
+        raise ValueError("verdict tokens unavailable or ambiguous")
+    model.eval()
+    pairs: list[tuple[float, float]] = []
+    with torch.no_grad():
+        for example in examples:
+            tokens = tokenizer.encode(example.prompt, add_special_tokens=True)
+            if not tokens or len(tokens) + 1 > max_tokens:
+                raise ValueError("held-out prompt exceeds token budget")
+            ids = torch.tensor([tokens], dtype=torch.long, device=device)
+            logits = model(input_ids=ids, attention_mask=torch.ones_like(ids)).logits[0, -1]
+            if not bool(torch.isfinite(logits[yes[0]])) or not bool(torch.isfinite(logits[no[0]])):
+                raise RuntimeError("nonfinite Minotaur verdict logits")
+            pairs.append((float(logits[yes[0]].item()), float(logits[no[0]].item())))
+    diagnostics = verdict_logit_diagnostics(examples, pairs)
+    preds = [row["predicted"] == "Yes" for row in diagnostics["examples"]]
+    report = score_binary(examples, preds)
+    report["logit_diagnostics"] = diagnostics
+    report["predictions_sha256"] = hashlib.sha256(
+        bytes(int(p) for p in preds)).hexdigest()
+    report["pairwise_rank_diagnostic"] = score_pairwise_margins(
+        examples, [row["margin_yes_minus_no"] for row in diagnostics["examples"]])
+    report["by_kind"] = {
+        kind: score_binary([ex for ex in examples if ex.kind == kind],
+                           [p for ex, p in zip(examples, preds) if ex.kind == kind])
+        for kind in sorted({ex.kind for ex in examples})
+    }
+    return report
+
+
+def _updates(model: Any, tokenizer: Any, torch: Any,
+             pairs: list[tuple[CriticExample, CriticExample]],
+             config: CriticConfig, *, mode: str) -> dict[str, Any]:
+    if mode not in ("candidate", "zero_update", "corrupted"):
+        raise ValueError("unsupported arm")
+    prepared = [prepare_verdict_pair(tokenizer, pair,
+                                     max_tokens=config.max_tokens,
+                                     corrupt=mode == "corrupted") for pair in pairs]
+    yes_tokens = tokenizer.encode(" Yes", add_special_tokens=False)
+    no_tokens = tokenizer.encode(" No", add_special_tokens=False)
+    if len(yes_tokens) != 1 or len(no_tokens) != 1 or yes_tokens == no_tokens:
+        raise ValueError("verdict token IDs unavailable or ambiguous")
+    random.seed(config.seed)
+    torch.manual_seed(config.seed)
+    model.train()
+    optimizer = torch.optim.AdamW(
+        (p for p in model.parameters() if p.requires_grad),
+        lr=config.learning_rate, weight_decay=0.0,
+    )
+    losses: list[float] = []
+    for prepared_pair in prepared:
+        optimizer.zero_grad(set_to_none=True)
+        paired_loss = 0.0
+        # Paired objectives use the same-task correct/wrong margins. Hybrid
+        # additionally anchors each verdict to the Yes-No zero decision
+        # boundary. Sequential autograd avoids holding two model graphs.
+        if config.loss_kind in ("pairwise_margin_rank", "hybrid_margin_bce_rank"):
+            detached: list[tuple[bool, float]] = []
+            with torch.no_grad():
+                for tokens, labels in prepared_pair:
+                    if (labels[:-1] != [-100] * (len(labels) - 1)
+                            or labels[-1] not in (yes_tokens[0], no_tokens[0])):
+                        raise ValueError("pairwise target must be suffix-only Yes/No")
+                    ids = torch.tensor([tokens[:-1]], dtype=torch.long, device=config.device)
+                    logits = model(input_ids=ids, attention_mask=torch.ones_like(ids)).logits[0, -1]
+                    margin = float((logits[yes_tokens[0]] - logits[no_tokens[0]]).item())
+                    if not math.isfinite(margin):
+                        raise RuntimeError("nonfinite pairwise margin")
+                    detached.append((labels[-1] == yes_tokens[0], margin))
+            if {truth for truth, _ in detached} != {True, False}:
+                raise ValueError("pairwise training requires opposite labels")
+            good = next(m for truth, m in detached if truth)
+            bad = next(m for truth, m in detached if not truth)
+            if config.loss_kind == "hybrid_margin_bce_rank":
+                paired_loss, good_grad, bad_grad = hybrid_margin_loss_and_gradients(good, bad)
+            else:
+                difference = good - bad
+                coefficient = (math.exp(-difference) / (1 + math.exp(-difference))
+                               if difference >= 0 else 1 / (1 + math.exp(difference)))
+                paired_loss = (math.log1p(math.exp(-difference)) if difference >= 0
+                               else -difference + math.log1p(math.exp(difference)))
+                good_grad, bad_grad = -coefficient, coefficient
+            for (tokens, labels), (truth, _) in zip(prepared_pair, detached):
+                ids = torch.tensor([tokens[:-1]], dtype=torch.long, device=config.device)
+                logits = model(input_ids=ids, attention_mask=torch.ones_like(ids)).logits[0, -1]
+                margin = logits[yes_tokens[0]] - logits[no_tokens[0]]
+                (margin * (good_grad if truth else bad_grad)).backward()
+        else:
+            # Matched training exposures under the original token-CE path.
+            for tokens, labels in prepared_pair:
+                ids = torch.tensor([tokens], dtype=torch.long, device=config.device)
+                targets = torch.tensor([labels], dtype=torch.long, device=config.device)
+                loss = model(input_ids=ids, attention_mask=torch.ones_like(ids),
+                             labels=targets).loss
+                if not bool(torch.isfinite(loss)):
+                    raise RuntimeError("nonfinite critic loss")
+                (loss / 2).backward()
+                paired_loss += float(loss.detach().cpu().item()) / 2
+        if mode == "zero_update":
+            for parameter in model.parameters():
+                if parameter.grad is not None:
+                    parameter.grad.zero_()
+        else:
+            torch.nn.utils.clip_grad_norm_((p for p in model.parameters()
+                                            if p.requires_grad), 1.0)
+        optimizer.step()
+        if any(not bool(torch.isfinite(parameter).all()) for parameter in model.parameters()
+               if parameter.requires_grad):
+            raise RuntimeError("nonfinite critic adapter value after optimizer step")
+        losses.append(paired_loss)
+    return {"optimizer_steps": len(losses), "forward_backward_steps": 2 * len(losses),
+            "detached_forward_passes": (2 * len(losses)
+                if config.loss_kind in ("pairwise_margin_rank", "hybrid_margin_bce_rank") else 0),
+            "examples_per_optimizer_step": 2,
+            "visited_example_ids": [ex.example_id for pair in pairs for ex in pair],
+            "zeroed_gradients": mode == "zero_update", "losses": losses}
+
+
+def run_critic(config: CriticConfig) -> dict[str, Any]:
+    base_path, output, weights = config.validate()
+    base_manifest = _checkpoint_manifest(base_path, weights)
+    train = critic_examples(config.train_seed, "train", config.train_count_per_tier, (1, 2))
+    dev = critic_examples(config.dev_seed, "critic_dev", config.eval_count_per_tier, (1, 2))
+    transfer = critic_examples(config.transfer_seed, "critic_transfer", config.eval_count_per_tier, (4,))
+    validate_dataset_separation(train, dev, transfer)
+    selected = training_schedule(train, steps=config.steps, seed=config.seed)
+    torch, auto_model, auto_tokenizer, peft, device = _deps(config.device)
+    _device_headroom(torch, device, weights)
+    lora_cls, _, get_peft_model = peft
+    if device == "cpu":
+        torch.set_num_threads(min(torch.get_num_threads(), 4))
+    torch.manual_seed(config.seed)
+    torch.use_deterministic_algorithms(True)
+    base, tokenizer = _load_base(base_path, device, torch=torch,
+                                 auto_model=auto_model, auto_tokenizer=auto_tokenizer)
+    _assert_checkpoint_unchanged(base_path, weights, base_manifest)
+    for ex in train + dev + transfer:
+        encode_supervised_verdict(tokenizer, ex, max_tokens=config.max_tokens)
+    frozen = {name: _score(base, tokenizer, torch, group, device=device,
+                           max_tokens=config.max_tokens)
+              for name, group in (("dev", dev), ("transfer", transfer))}
+    model = get_peft_model(base, lora_cls(
+        r=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=0,
+        bias="none", task_type="CAUSAL_LM", target_modules="all-linear"
+    ))
+    initial = _parameter_digest(model, torch)
+    init_values = {name: p.detach().clone()
+                   for name, p in model.named_parameters() if p.requires_grad}
+
+    def reset() -> None:
+        with torch.no_grad():
+            for name, parameter in model.named_parameters():
+                if name in init_values:
+                    parameter.copy_(init_values[name])
+        if _parameter_digest(model, torch) != initial:
+            raise RuntimeError("control failed identical LoRA initialization")
+
+    results: dict[str, dict[str, Any]] = {"frozen": frozen}
+    training: dict[str, Any] = {}
+    digests = {"initial": initial}
+    output.mkdir(mode=0o700, parents=False, exist_ok=False)
+    for mode in ("candidate", "zero_update", "corrupted"):
+        reset()
+        training[mode] = _updates(model, tokenizer, torch, selected, config, mode=mode)
+        digests[mode] = _parameter_digest(model, torch)
+        if (mode == "candidate" and digests[mode] == initial) or (
+                mode == "zero_update" and digests[mode] != initial):
+            raise RuntimeError("candidate did not adapt or sham changed parameters")
+        if mode == "candidate":
+            tensor_digest = _lora_value_digest(model, torch)
+            if tensor_digest != digests[mode]:
+                raise RuntimeError("adapter tensor manifest mismatch")
+            model.save_pretrained(str(output / "candidate_adapter"), safe_serialization=True)
+        results[mode] = {name: _score(model, tokenizer, torch, group, device=device,
+                                      max_tokens=config.max_tokens)
+                         for name, group in (("dev", dev), ("transfer", transfer))}
+    _assert_checkpoint_unchanged(base_path, weights, base_manifest)
+    adapter_manifest = _adapter_manifest(output / "candidate_adapter")
+    report: dict[str, Any] = {
+        "schema": SCHEMA,
+        "model_role": "pretrained_lm_correctness_critic_advisory_only",
+        "qualification": "NOT_ESTABLISHED",
+        "source": _source_state(),
+        "process_id": os.getpid(),
+        "runtime": _runtime_manifest(torch, device),
+        "config": asdict(config),
+        "base": base_manifest,
+        "adapter_sha256": adapter_manifest,
+        "candidate_lora_value_sha256": tensor_digest,
+        "parameter_digests": digests,
+        "training": training,
+        "train_examples": [ex.example_id for ex in train],
+        "dev_examples": [ex.example_id for ex in dev],
+        "transfer_examples": [ex.example_id for ex in transfer],
+        "evaluations": results,
+        "limitations": [
+            "Development cases and labels are generated from public finite templates.",
+            "One training seed and a small holdout cannot prove generalization.",
+            "No external evaluator, private oracle, or qualification authority.",
+            "A separate process must load adapter and re-run the same cases.",
+        ],
+    }
+    _save_new(output / "critic_report.json", report)
+    return report
+
+
+def reload_critic(run_dir: str, report_path: str) -> dict[str, Any]:
+    root = Path(run_dir).resolve(strict=True)
+    prior = load_json(root / "critic_report.json", strict=True)
+    if prior.get("schema") != SCHEMA:
+        raise ValueError("unsupported Minotaur critic training report")
+    source = prior.get("source")
+    if (not isinstance(source, dict) or
+            source.get("source_tree_sha256") != _source_state()["source_tree_sha256"]):
+        raise ValueError("source tree changed between training and reload")
+    config = CriticConfig(**prior["config"])
+    base_path, output, weights = config.validate(output_must_be_new=False)
+    if output != root:
+        raise ValueError("output path changed after training")
+    if _checkpoint_manifest(base_path, weights) != prior["base"]:
+        raise ValueError("pretrained base changed after training")
+    adapter = root / "candidate_adapter"
+    expected_adapter = prior["adapter_sha256"]
+    if _adapter_manifest(adapter) != expected_adapter:
+        raise ValueError("saved adapter changed")
+    dev = critic_examples(config.dev_seed, "critic_dev", config.eval_count_per_tier, (1, 2))
+    transfer = critic_examples(config.transfer_seed, "critic_transfer", config.eval_count_per_tier, (4,))
+    torch, auto_model, auto_tokenizer, peft, device = _deps(config.device)
+    torch.use_deterministic_algorithms(True)
+    current_runtime = _runtime_manifest(torch, device)
+    if current_runtime != prior.get("runtime"):
+        raise RuntimeError("training/reload runtime versions or settings differ")
+    _, peft_model, _ = peft
+    base, tokenizer = _load_base(base_path, device, torch=torch,
+                                 auto_model=auto_model, auto_tokenizer=auto_tokenizer)
+    model = peft_model.from_pretrained(base, str(adapter), is_trainable=False,
+                                      local_files_only=True)
+    digest = _lora_value_digest(model, torch)
+    if digest != prior["candidate_lora_value_sha256"]:
+        raise ValueError("reloaded LoRA tensor values differ")
+    measurements = {name: _score(model, tokenizer, torch, group, device=device,
+                                 max_tokens=config.max_tokens)
+                    for name, group in (("dev", dev), ("transfer", transfer))}
+    _assert_adapter_unchanged(adapter, expected_adapter)
+    _assert_checkpoint_unchanged(base_path, weights, prior["base"])
+    verify_reload_contract(training_pid=prior["process_id"], reload_pid=os.getpid(),
+                           measured=measurements,
+                           expected=prior["evaluations"]["candidate"])
+    outcome = {
+        "schema": RELOAD_SCHEMA,
+        "training_report_sha256": _sha_file(root / "critic_report.json"),
+        "process_id": os.getpid(),
+        "different_process_id": os.getpid() != prior["process_id"],
+        "reloaded_lora_value_sha256": digest,
+        "same_predictions_and_metrics": _reload_scores_match(measurements, prior["evaluations"]["candidate"]),
+        "evaluations": measurements,
+        "qualification": "NOT_ESTABLISHED",
+    }
+    _save_new(Path(report_path), outcome)
+    return outcome
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Opt-in Minotaur correctness-critic LoRA pilot")
+    sub = parser.add_subparsers(dest="command", required=True)
+    train = sub.add_parser("train")
+    train.add_argument("--model-path", required=True)
+    train.add_argument("--output-dir", required=True)
+    train.add_argument("--steps", type=int, default=24)
+    train.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    train.add_argument("--loss-kind", choices=("causal_token_ce", "pairwise_margin_rank",
+                                              "hybrid_margin_bce_rank"),
+                       default="causal_token_ce")
+    evaluate = sub.add_parser("reload")
+    evaluate.add_argument("--run-dir", required=True)
+    evaluate.add_argument("--report", required=True)
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "train":
+            result = run_critic(CriticConfig(model_path=args.model_path,
+                                             output_dir=args.output_dir,
+                                             steps=args.steps, device=args.device,
+                                             loss_kind=args.loss_kind))
+            print(json.dumps({"schema": result["schema"],
+                              "parameter_digests": result["parameter_digests"],
+                              "evaluations": result["evaluations"]}))
+        else:
+            result = reload_critic(args.run_dir, args.report)
+            print(json.dumps({"schema": result["schema"],
+                              "different_process_id": result["different_process_id"],
+                              "same_predictions_and_metrics": result["same_predictions_and_metrics"]}))
+    except (ValueError, FileNotFoundError, FileExistsError, RuntimeError) as exc:
+        parser.error(str(exc))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

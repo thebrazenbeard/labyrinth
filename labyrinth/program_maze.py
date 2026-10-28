@@ -29,8 +29,25 @@ _HOLDOUT = (
     (("ADD", "B", "A"), ("SUB", "A", "C"), ("MUL", "B", "C"), ("ADD", "A", "B"), ("MUL", "A", "C"), ("SUB", "A", "B")),
 )
 
+# Different compositions at *the same* 3–4 instruction lengths as training.
+# These distinguish composition transfer from the length shift in _HOLDOUT.
+_MATCHED_LENGTH_OOD = (
+    (("SUB", "A", "C"), ("MUL", "B", "A"), ("ADD", "A", "B")),
+    (("MUL", "B", "A"), ("SUB", "A", "C"), ("ADD", "B", "C")),
+    (("SUB", "A", "B"), ("MUL", "A", "C"), ("ADD", "B", "A"), ("SUB", "A", "C")),
+    (("ADD", "A", "C"), ("MUL", "A", "B"), ("SUB", "B", "C"), ("ADD", "B", "A")),
+)
 
-def generate_program_challenges(seed: int, count: int, split: str) -> list[Challenge]:
+_PROFILES = {
+    "train": _TRAIN,
+    "structural_holdout": _HOLDOUT,  # legacy: new composition AND greater length
+    "matched_length_ood": _MATCHED_LENGTH_OOD,
+}
+
+
+def generate_program_challenges(
+    seed: int, count: int, split: str, *, profile: str | None = None
+) -> list[Challenge]:
     """Generate tier-four tasks; every non-train split uses held-out structures.
 
     Numeric literals and all register values are bounded; instructions use
@@ -44,11 +61,21 @@ def generate_program_challenges(seed: int, count: int, split: str) -> list[Chall
     if not isinstance(split, str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", split):
         raise ValueError("split must be a short lowercase identifier")
 
-    profile = "train" if split == "train" else "structural_holdout"
-    patterns = _TRAIN if profile == "train" else _HOLDOUT
+    # Preserve legacy IDs/prompts for all existing three-argument calls. An
+    # explicit structure profile creates a separate, domain-separated sample
+    # population, including for fresh-number development cases on train shapes.
+    explicit_profile = profile is not None
+    if profile is None:
+        profile = "train" if split == "train" else "structural_holdout"
+    if type(profile) is not str or profile not in _PROFILES or (split == "train" and profile != "train"):
+        raise ValueError("invalid profile for the requested split")
+    patterns = _PROFILES[profile]
     challenges = []
     for index in range(count):
-        tag = f"labyrinth-program-v1\x00{seed}\x00{split}\x00{index}".encode()
+        tag = (
+            f"labyrinth-program-v2\x00{seed}\x00{split}\x00{profile}\x00{index}"
+            if explicit_profile else f"labyrinth-program-v1\x00{seed}\x00{split}\x00{index}"
+        ).encode()
         digest = sha256(tag).digest()
         rng = random.Random(int.from_bytes(digest, "big"))
         program = rng.choice(patterns)
