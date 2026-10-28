@@ -25,12 +25,12 @@ class PublicCheckpointFilesystemTests(unittest.TestCase):
     def test_junction_directory_path_refuses_before_read(self):
         with TemporaryDirectory() as folder:
             path = Path(folder) / "junction" / "case.json"
-            original = type(path).is_junction
+            original = getattr(type(path), "is_junction", lambda _path: False)
             def is_junction(instance):
                 if instance.name == "junction":
                     return True
                 return original(instance)
-            with patch.object(type(path), "is_junction", is_junction):
+            with patch.object(type(path), "is_junction", is_junction, create=True):
                 with self.assertRaisesRegex(ValueError, "junction"):
                     _safe_path(path, must_exist=True)
 
