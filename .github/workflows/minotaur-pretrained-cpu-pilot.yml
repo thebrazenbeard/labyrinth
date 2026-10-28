@@ -28,11 +28,6 @@ jobs:
       TOKENIZERS_PARALLELISM: "false"
       OMP_NUM_THREADS: "2"
       OPENBLAS_NUM_THREADS: "2"
-      MODEL_DIR: ${{ runner.temp }}/smollm2-135m-pinned
-      PILOT_RUN: ${{ runner.temp }}/minotaur-real-pretrained-run
-      PILOT_RELOAD: ${{ runner.temp }}/minotaur-reload.json
-      PILOT_AUDIT: ${{ runner.temp }}/minotaur-audit.json
-      PILOT_VERDICT: ${{ runner.temp }}/minotaur-verdict.json
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -41,6 +36,13 @@ jobs:
         with:
           python-version: "3.12"
           architecture: x64
+      - name: Configure per-run paths after the runner starts
+        run: |
+          echo "MODEL_DIR=$RUNNER_TEMP/smollm2-135m-pinned" >> "$GITHUB_ENV"
+          echo "PILOT_RUN=$RUNNER_TEMP/minotaur-real-pretrained-run" >> "$GITHUB_ENV"
+          echo "PILOT_RELOAD=$RUNNER_TEMP/minotaur-reload.json" >> "$GITHUB_ENV"
+          echo "PILOT_AUDIT=$RUNNER_TEMP/minotaur-audit.json" >> "$GITHUB_ENV"
+          echo "PILOT_VERDICT=$RUNNER_TEMP/minotaur-verdict.json" >> "$GITHUB_ENV"
       - name: Install pinned CPU neural dependencies
         env:
           PIP_DISABLE_PIP_VERSION_CHECK: "1"
