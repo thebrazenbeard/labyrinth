@@ -32,6 +32,32 @@ class AlgebraicExperimentTests(unittest.TestCase):
                     experiment.run_experiment(output, torch, seed=47, steps=1)
                 self.assertFalse(output.exists())
 
+    def test_reload_cli_treats_numeric_pid_reuse_as_diagnostic(self):
+        import io
+        import json
+        from contextlib import redirect_stderr, redirect_stdout
+        from labyrinth.minotaur_algebraic_experiment import main
+
+        replay = {"matches_original": True, "process_id_differs": False,
+                  "qualification": "NOT_ESTABLISHED"}
+        with patch("labyrinth.minotaur_algebraic_experiment.reload_experiment",
+                   return_value=replay):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(main(["reload", "--output-dir", "unused"]), 0)
+            self.assertIs(json.loads(output.getvalue())["process_id_differs"], False)
+
+        for failed in (False, None, 1):
+            with self.subTest(matches_original=failed):
+                with patch("labyrinth.minotaur_algebraic_experiment.reload_experiment",
+                           return_value={"matches_original": failed,
+                                         "process_id_differs": True}):
+                    with redirect_stderr(io.StringIO()) as error:
+                        with self.assertRaises(SystemExit) as exit_status:
+                            main(["reload", "--output-dir", "unused"])
+                    self.assertEqual(exit_status.exception.code, 2)
+                    self.assertIn("checkpoint replay mismatch", error.getvalue())
+
     def test_heldout_programs_compose_rules_without_teacher_states(self):
         from labyrinth.minotaur_algebraic_experiment import evaluate_programs
         from labyrinth.minotaur_algebraic_rules import (

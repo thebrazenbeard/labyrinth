@@ -87,7 +87,12 @@ def evaluate_compact_public(
         )
         if result.ndim!=0:
             raise ValueError("expected_scalar_neural_output")
-        return int(result.item())
+        value=result.item()
+        # Never round/truncate floating, boolean, or out-of-field predictions
+        # into apparently exact residues for independent scoring.
+        if type(value) is not int or not 0 <= value < 97:
+            raise ValueError("invalid_neural_output")
+        return value
 
     try:
         head.eval()
