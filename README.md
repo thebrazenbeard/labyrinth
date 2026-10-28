@@ -140,3 +140,13 @@ Important limitations:
 - `labyrinth/cli.py`: `run`, `experiment`, `audit-report`, `train-toy`, `toy-eval`, `train-hf`, and `eval-hf` commands
 
 Labyrinth deliberately does not install itself into Vera, execute model responses, mutate Git repositories, or claim any externally deployed training effect.
+
+### Expanded but bounded semantic research budget
+
+The pretrained LoRA pilot allows up to 128 steps (previously 32) with a
+hard cap of 64 total training examples and at most 1 GiB of local safetensors
+weights. The matched v3 auditor reconstructs the full tier-balanced sequence
+for extended runs; historical v2 reports retain the original 32-step bound.
+This changes only permitted experimental duration, **not** the standard for
+graduation, independent evaluation, or model deployment. A higher optimizer
+step count is not itself evidence of semantic learning.

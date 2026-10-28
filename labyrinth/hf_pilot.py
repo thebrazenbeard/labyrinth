@@ -113,7 +113,7 @@ def validate_config(config: PilotConfig, *, output_must_be_new: bool = True) -> 
     _check_int(config.seed, "seed", 0, 2**31 - 1)
     _check_int(config.train_count, "train_count", 2, 32)
     _check_int(config.eval_count, "eval_count", 2, 32)
-    _check_int(config.steps, "steps", 1, 32)
+    _check_int(config.steps, "steps", 1, 128)
     _check_int(config.max_tokens, "max_tokens", 32, 1024)
     _check_int(config.max_new_tokens, "max_new_tokens", 1, 32)
     _check_int(config.lora_rank, "lora_rank", 1, 16)
