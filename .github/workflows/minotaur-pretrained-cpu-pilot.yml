@@ -2,6 +2,17 @@ name: Minotaur pretrained CPU pilot (evidence only)
 
 on:
   workflow_dispatch:
+  # The experimental workflow is not on main yet. Restrict push execution to
+  # this research branch and only changes that affect the pretrained pilot.
+  push:
+    branches:
+      - bt2/minotaur-creation-20261027
+    paths:
+      - ".github/workflows/minotaur-pretrained-cpu-pilot.yml"
+      - "labyrinth/hf_pilot.py"
+      - "labyrinth/hf_report_audit.py"
+      - "scripts/stage_smol_checkpoint.py"
+      - "scripts/ci_pilot_verdict.py"
   pull_request:
     paths:
       - ".github/workflows/minotaur-pretrained-cpu-pilot.yml"
