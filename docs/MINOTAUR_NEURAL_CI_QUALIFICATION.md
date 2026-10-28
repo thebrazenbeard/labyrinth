@@ -36,3 +36,9 @@ separation and version pins during ordinary dependency-free tests. Its actual
 checkpoint test is skipped when optional packages are absent; the dedicated
 workflow preflight requires those packages and versions before invoking it, so
 that job cannot pass by skipping neural execution.
+
+The optional job also runs the actual random-initialized V2 gradient smoke,
+bounded multi-seed V3 ablation tests, and the independent combinatorial
+curriculum tests with PyTorch present. These tests establish executable
+behavior and exact negative/diagnostic results, **not** semantic mastery.
+They run when Minotaur modules/tests change; they do not sign release receipts.

@@ -1,0 +1,22 @@
+# Minotaur generalization hostile audit and measured response — 2026-10-27
+
+**Scope:** Read-only independent Codex reviewer, starting exact Labyrinth source `d0263dbf6e431f0b8f3140b29ee72c140318265e`; reviewer session `01a17fee-87a0-7c82-a1fc-ec04fe47cb7d`. This document describes an independent **source review**, not an external hidden examination, final model qualification, or live deployment.
+
+## Blocking findings
+
+1. **Historical V2 evidence source identity is not executable.** `docs/evidence/MINOTAUR_V2_TINY_TRAINING_2026-10-27.json` names `f2fe07b` as its `git_head_at_run`; that commit does **not** contain `labyrinth/minotaur_v2_training.py`. That script was first committed at `690d247`. Therefore the V2 training report is historical local evidence, **not** evidence that can be rebuilt verbatim by checking out its reported Git SHA. Do not silently upgrade it to a source-qualified PASS.
+2. **Binary error detection is not first-error localization.** In `minotaur_v2_training.score_predictions`, any nonzero guess for an erroneous trace gets binary credit, even if the claimed step is wrong. Its separately reported `accuracy` is exact step-location accuracy. Both metrics are legitimate for different questions; the binary score must never be presented as first-error mastery.
+3. **Shortcuts and confounding in previous experiments.** V2 generated a clean/error pair for the same question, changed one state without propagating later steps, chose error family/position from index, had only four program structures per split, and reused training structures in development. An audit found 40/64 training corrupted traces and 20/32 dev corrupted traces at step 2. These are not suitable for broad independent generalization.
+4. **Length transfer was confounded by untrained embeddings.** The V2 train split contained 3–4 steps; length transfer 5–6. Step embeddings and absolute positions for the longer records never saw train gradients. Poor transfer does not uniquely establish a model's incapacity for abstract reasoning.
+5. **No independent production custody or calibrated risk.** The published synthetic private examiner cannot qualify a live model; it uses synthetic-only receipts. Thresholds untested on truly held-out independent families are not calibrated deployment criteria. There is no demonstrated genuine private signer with independently governed question custody in this package.
+
+## Actions implemented in this generalization turn
+
+- `labyrinth/minotaur_combinatorial_curriculum.py` creates seeded balanced 1–6 step random program compositions with different fault families and canonical program-sequence-disjoint train/dev/transfer datasets, rather than four fixed templates. Independent replay and strict bounds are tested. A public generator is still **not** a hidden private examiner.
+- `labyrinth/minotaur_independent_eval.py` independently replays printed programs and refuses claimed-label mismatches before computing exact first-error accuracy, false approvals/rejections, coverage, abstention, structure overlap and always-approve/reject controls. It does not infer IID confidence from deterministic public cases.
+- `labyrinth/minotaur_v3_ablation.py` compares four real random-initialized dual-head training arms across two seeds with frozen/random, always-approve, and always-reject controls. Saved evidence at `docs/evidence/MINOTAUR_V3_SCRATCH_ABLATION_2026-10-27.json` was **re-run after code was committed**, and its source identity points to executable commit `943079fa37ba81c6cb64be3e7c6ba6646e4a77bc`. Separate post-run evidence commit `b82fc71` preserves it. Train/dev/composition/longer scores for both seeds reproduced; timing metadata naturally changed.
+- None of the eight V3 scratch ablations demonstrated reliable structural transfer. Every arm remains `DO_NOT_PROMOTE` / `NOT_ESTABLISHED`. Do not choose thresholds post hoc from the tested public transfers.
+
+The original report's source-binding defect is recorded as an explicit gap, **not repaired retroactively**. Future inference/training evidence needs source code committed before execution, frozen case/prediction/logit records, data and model integrity digests, an independent structural holdout, and a separately controlled private examiner.
+
+These are research/code improvements, not a passed neurological/reasoning standard. Source/test/CI/checkpoint execution and semantic generalization are distinct qualification axes.

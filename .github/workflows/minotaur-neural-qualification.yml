@@ -8,6 +8,8 @@ on:
       - "labyrinth/minotaur_scratch.py"
       - "models/minotaur_scratch_v1/**"
       - "tests/test_minotaur_neural_ci.py"
+      - "labyrinth/minotaur_*.py"
+      - "tests/test_minotaur_*.py"
   pull_request:
     paths:
       - ".github/workflows/minotaur-neural-qualification.yml"
@@ -15,6 +17,8 @@ on:
       - "labyrinth/minotaur_scratch.py"
       - "models/minotaur_scratch_v1/**"
       - "tests/test_minotaur_neural_ci.py"
+      - "labyrinth/minotaur_*.py"
+      - "tests/test_minotaur_*.py"
 
 permissions:
   contents: read
@@ -45,3 +49,9 @@ jobs:
           python -c "import platform, safetensors, torch, numpy; assert numpy.__version__ == '1.26.4'; assert platform.system() == 'Linux'; assert platform.machine() == 'x86_64'; assert torch.__version__ == '2.5.1+cpu'; assert safetensors.__version__ == '0.4.5'; assert not torch.cuda.is_available()"
       - name: Reload saved checkpoint and infer one guarded trace
         run: timeout 90s python -m unittest discover -s tests -p "test_minotaur_neural_ci.py" -v
+      - name: Execute scratch V2 model and new curriculum/ablation tests
+        env:
+          OMP_NUM_THREADS: "2"
+          MKL_NUM_THREADS: "2"
+        run: |
+          timeout 90s python -m unittest tests.test_minotaur_scratch_v2 tests.test_minotaur_v3_ablation tests.test_minotaur_combinatorial_curriculum -q
