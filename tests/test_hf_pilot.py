@@ -70,7 +70,7 @@ class HfPilotContractTests(unittest.TestCase):
             validate_config(self.spec())
 
     def test_refuses_invalid_resource_bounds_before_heavy_import(self):
-        for field, value in [("steps", 0), ("steps", 33), ("max_tokens", 10),
+        for field, value in [("steps", 0), ("steps", 129), ("max_tokens", 10),
                              ("train_count", 100), ("seed", True), ("lora_rank", 99),
                              ("learning_rate", float("nan")), ("device", "auto")]:
             with self.subTest(field=field):

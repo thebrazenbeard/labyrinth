@@ -139,7 +139,7 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
         config.get("tiers"), config.get("steps"),
     )
     if (not _integer(seed, 0, 2**31 - 1) or not _integer(ntrain, 2, 32)
-            or not _integer(neval, 2, 32) or not _integer(steps, 1, 32)
+            or not _integer(neval, 2, 32) or not _integer(steps, 1, 128 if matched else 32)
             or not isinstance(tiers, list) or not tiers or len(tiers) > 4
             or len(set(map(str, tiers))) != len(tiers)
             or any(type(t) is not int or t not in (1, 2, 3, 4) for t in tiers)
