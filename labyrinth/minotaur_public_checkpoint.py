@@ -144,6 +144,19 @@ def _source_manifest() -> dict[str, str]:
             for name in names}
 
 
+# A long-lived Python process may retain imported functions after files are
+# edited. Refuse if the local source bytes change after this module import.
+# This is a local drift guard, not attestation of pre-imported Python objects.
+_IMPORTED_SOURCE_MANIFEST = _source_manifest()
+
+
+def _verified_source_manifest() -> dict[str, str]:
+    observed = _source_manifest()
+    if observed != _IMPORTED_SOURCE_MANIFEST:
+        raise ValueError("source bytes changed after module import")
+    return observed
+
+
 def evaluate_checkpoint_public(
     artifact_dir: Path, challenge_json: Path, *,
     expected_source_commit: str | None = None,
@@ -151,6 +164,7 @@ def evaluate_checkpoint_public(
 ) -> dict[str, Any]:
     """Run public evaluation only after source and artifact consistency checks."""
     try:
+        public_source_manifest = _verified_source_manifest()
         import torch
         from safetensors.torch import load
         from .minotaur_algebraic_experiment import reload_experiment
@@ -223,13 +237,15 @@ def evaluate_checkpoint_public(
         evaluated = evaluate_compact_public(head, atomic_cases, program_cases, training, torch)
         if evaluated.get("disposition") != "PUBLIC_DIAGNOSTIC":
             return _refusal("public_evaluator_refused")
+        if _verified_source_manifest() != public_source_manifest:
+            return _refusal("public_source_changed_during_evaluation")
         return {
             "schema": SCHEMA, "disposition": "PUBLIC_DIAGNOSTIC",
             "qualification": "NOT_ESTABLISHED", "graduation_authority": "none",
             "minotaur_graduated": False, "deployed": False,
             "source_commit": report["source_commit"],
             "training_source_manifest": report["source_manifest"],
-            "public_evaluator_source_manifest": _source_manifest(),
+            "public_evaluator_source_manifest": public_source_manifest,
             "training_report_sha256": hashlib.sha256(report_bytes).hexdigest(),
             "checkpoint_sha256": report["checkpoint_sha256"],
             "training_atoms_sha256": digest,

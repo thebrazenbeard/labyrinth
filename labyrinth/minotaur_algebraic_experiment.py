@@ -32,7 +32,7 @@ def _sha(path: Path) -> str:
 
 
 def _source_manifest() -> dict[str, str]:
-    """Bind exact executed implementation bytes, not only branch commit."""
+    """Hash the source files; this is not independent code attestation."""
     folder=Path(__file__).resolve().parent
     names=(
         "minotaur_algebraic_experiment.py",
@@ -46,6 +46,19 @@ def _source() -> str:
     root=Path(__file__).resolve().parents[1]
     return subprocess.check_output(["git","-C",str(root),"rev-parse","HEAD"],
                                    text=True).strip()
+
+
+# Snapshot after this module's imports. The guard catches ordinary source edits
+# after importing functions into a long-lived process. It is not a defense
+# against hostile concurrent filesystem changes or pre-existing stale imports.
+_IMPORTED_SOURCE_MANIFEST = _source_manifest()
+
+
+def _verified_source_manifest() -> dict[str, str]:
+    observed = _source_manifest()
+    if observed != _IMPORTED_SOURCE_MANIFEST:
+        raise ValueError("source bytes changed after module import")
+    return observed
 
 
 def evaluate_programs(
@@ -134,6 +147,7 @@ def run_experiment(
     training_per_op: int = 12, steps: int = 500,
 ) -> dict[str, Any]:
     """Train from deliberately incomplete examples and save a separate adapter."""
+    _verified_source_manifest()
     output_dir=Path(output_dir)
     if output_dir.exists() or output_dir.is_symlink():
         raise FileExistsError("refusing to overwrite algebraic training evidence")
@@ -185,6 +199,7 @@ def run_experiment(
     with torch.no_grad():
         init_data=initial.cpu().contiguous().numpy().tobytes()
         trained_data=candidate.coefficients.cpu().detach().contiguous().numpy().tobytes()
+    _verified_source_manifest()
     output_dir.mkdir(mode=0o700)
     from safetensors.torch import save_file
     ckpt=output_dir/"candidate.safetensors"
@@ -193,7 +208,7 @@ def run_experiment(
     report={
         "schema":SCHEMA,
         "source_commit":_source(),
-        "source_manifest":_source_manifest(),
+        "source_manifest":_verified_source_manifest(),
         "train_process_id":os.getpid(),
         "donor":"scratch algebraically biased neural rule head, no pretrained model",
         "model_architecture":"learned_coefficients[3,4] over [1,x/8,y/8,xy/64]",
@@ -236,6 +251,7 @@ def run_experiment(
 
 def reload_experiment(output_dir: Path, torch: Any) -> dict[str, Any]:
     """Recompute stored candidate metrics from a new loaded model."""
+    verified_source = _verified_source_manifest()
     root=Path(output_dir)
     report_file=root/"report.json"
     checksum=root/"report.sha256"
@@ -252,7 +268,7 @@ def reload_experiment(output_dir: Path, torch: Any) -> dict[str, Any]:
     report=json.loads(report_file.read_text(encoding="utf8"))
     if not isinstance(report,dict) or report.get("schema")!=SCHEMA:
         raise ValueError("invalid report schema")
-    if report.get("source_commit")!=_source() or report.get("source_manifest")!=_source_manifest():
+    if report.get("source_commit")!=_source() or report.get("source_manifest")!=verified_source:
         raise ValueError("source bytes changed since training")
     if (report.get("minotaur_graduated") is not False
             or report.get("deployed") is not False
@@ -280,6 +296,7 @@ def reload_experiment(output_dir: Path, torch: Any) -> dict[str, Any]:
                                                    report["train_examples_by_operation"]),
     )
     matches=atom==report["candidate"] and composition==report["composition"]
+    _verified_source_manifest()
     return {"schema":"labyrinth.minotaur-algebraic-reload.v1",
             "matches_original":matches,
             "process_id_differs":os.getpid()!=report["train_process_id"],

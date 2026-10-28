@@ -2,6 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 try:
     import torch
     import safetensors
@@ -11,6 +12,22 @@ except ImportError:
 
 @unittest.skipUnless(torch is not None and safetensors is not None, "torch+safetensors optional")
 class AlgebraicExperimentTests(unittest.TestCase):
+    def test_stale_imported_training_source_refuses_after_disk_edit(self):
+        import shutil
+        from labyrinth import minotaur_algebraic_experiment as experiment
+        source = Path(experiment.__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as temp:
+            copied = Path(temp) / "labyrinth"
+            copied.mkdir()
+            for name in experiment._source_manifest():
+                shutil.copy2(source / name, copied / name)
+            with patch.object(experiment, "__file__", str(copied / "minotaur_algebraic_experiment.py")):
+                self.assertEqual(experiment._source_manifest(), experiment._IMPORTED_SOURCE_MANIFEST)
+                with (copied / "minotaur_algebraic_rules.py").open("a", encoding="utf8") as stream:
+                    stream.write("\n# changed after import\n")
+                with self.assertRaisesRegex(ValueError, "source.*changed.*import"):
+                    experiment._verified_source_manifest()
+
     def test_heldout_programs_compose_rules_without_teacher_states(self):
         from labyrinth.minotaur_algebraic_experiment import evaluate_programs
         from labyrinth.minotaur_algebraic_rules import (

@@ -47,8 +47,13 @@ audited batches and an exact-coverage manifest; this CLI does not invent one.
 The command verifies the training report checksum, checkpoint digest, source
 commit and training-source manifest, fresh reconstruction of the training
 sample digest, and the known 12-coefficient float64 model state. Its derived
-report binds exact source bytes for the checkpoint CLI, public bridge, and V5
-evaluator. Optional `--expected-source-commit` and
+report records source-file hashes observed at import and evaluation for the
+checkpoint CLI, public bridge, and V5 evaluator. The local guard rejects
+ordinary edits after module import. These file hashes are **not proof of the
+bytecode actually loaded**, particularly if a dependency was already imported
+before the caller imported this module. Execute from a fresh Python process
+and stable, reviewed checkout for meaningful source provenance. Optional
+`--expected-source-commit` and
 `--expected-checkpoint-sha256` cross-check caller-supplied expected values;
 the CLI cannot authenticate where those values came from.
 

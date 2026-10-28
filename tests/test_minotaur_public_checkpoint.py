@@ -25,6 +25,21 @@ except ImportError:
 
 @unittest.skipUnless(torch is not None and safetensors is not None, "torch+safetensors optional")
 class PublicCheckpointTests(unittest.TestCase):
+    def test_stale_imported_public_evaluator_refuses_after_disk_edit(self):
+        from labyrinth import minotaur_public_checkpoint as public
+        source = Path(public.__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as temp:
+            copied = Path(temp) / "labyrinth"
+            copied.mkdir()
+            for name in public._source_manifest():
+                shutil.copy2(source / name, copied / name)
+            with patch.object(public, "__file__", str(copied / "minotaur_public_checkpoint.py")):
+                self.assertEqual(public._source_manifest(), public._IMPORTED_SOURCE_MANIFEST)
+                with (copied / "minotaur_algebraic_eval_v5.py").open("a", encoding="utf8") as stream:
+                    stream.write("\n# changed after import\n")
+                with self.assertRaisesRegex(ValueError, "source.*changed.*import"):
+                    public._verified_source_manifest()
+
     @classmethod
     def setUpClass(cls):
         from labyrinth.minotaur_algebraic_experiment import run_experiment
