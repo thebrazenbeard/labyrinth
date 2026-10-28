@@ -100,6 +100,9 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
             fail(f"{field}: missing or malformed tensor digest receipt")
     if matched and not _digest(report.get("initial_persistent_buffers_sha256")):
         fail("v3 persistent-buffer digest missing or malformed")
+    if "initial_frozen_parameter_sha256" in report and not _digest(
+            report["initial_frozen_parameter_sha256"]):
+        fail("frozen-parameter identity digest malformed")
     initial = report.get("initial_lora_parameter_sha256")
     candidate = report.get("candidate_lora_parameter_sha256")
     if _digest(initial) and _digest(candidate) and initial == candidate:
