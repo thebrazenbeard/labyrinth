@@ -44,6 +44,10 @@ class MinotaurV3AblationTests(unittest.TestCase):
         self.assertEqual(choose_promotion({"candidate": strong}), "STRUCTURAL_SIGNAL_ONLY")
 
     def test_tiny_run_performs_real_gradients_and_reports_controls(self):
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            self.skipTest("optional CPU PyTorch is exercised by dedicated neural CI")
         report = run_ablation(AblationConfig(
             seeds=(11, 12), train_programs=4, eval_programs=4,
             epochs=1, width=16, heads=2, batch_size=8,
