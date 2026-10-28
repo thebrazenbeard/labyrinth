@@ -2,6 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 try:
     import torch
     import safetensors
@@ -11,6 +12,26 @@ except ImportError:
 
 @unittest.skipUnless(torch is not None and safetensors is not None, "torch+safetensors optional")
 class AlgebraicExperimentTests(unittest.TestCase):
+    def test_stale_imported_training_source_refuses_after_disk_edit(self):
+        import shutil
+        from labyrinth import minotaur_algebraic_experiment as experiment
+        source = Path(experiment.__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as temp:
+            copied = Path(temp) / "labyrinth"
+            copied.mkdir()
+            for name in experiment._source_manifest():
+                shutil.copy2(source / name, copied / name)
+            with patch.object(experiment, "__file__", str(copied / "minotaur_algebraic_experiment.py")):
+                self.assertEqual(experiment._source_manifest(), experiment._IMPORTED_SOURCE_MANIFEST)
+                with (copied / "minotaur_algebraic_rules.py").open("a", encoding="utf8") as stream:
+                    stream.write("\n# changed after import\n")
+                with self.assertRaisesRegex(ValueError, "source.*changed.*import"):
+                    experiment._verified_source_manifest()
+                output = Path(temp) / "must-not-create"
+                with self.assertRaisesRegex(ValueError, "source.*changed.*import"):
+                    experiment.run_experiment(output, torch, seed=47, steps=1)
+                self.assertFalse(output.exists())
+
     def test_heldout_programs_compose_rules_without_teacher_states(self):
         from labyrinth.minotaur_algebraic_experiment import evaluate_programs
         from labyrinth.minotaur_algebraic_rules import (
@@ -42,6 +63,16 @@ class AlgebraicExperimentTests(unittest.TestCase):
             self.assertTrue(replay["process_id_differs"] is False)  # same-process unit test
             with self.assertRaises(FileExistsError):
                 run_experiment(Path(temp)/"output",torch,seed=47)
+
+    def test_max_valid_training_seed_records_bounded_corruption_seed(self):
+        from labyrinth.minotaur_algebraic_experiment import run_experiment,reload_experiment
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp)/"max-seed"
+            report=run_experiment(folder,torch,seed=2**31-1,
+                                  training_per_op=24,steps=1)
+            self.assertEqual(report["seed"],2**31-1)
+            self.assertEqual(report["corruption_seed"],11)
+            self.assertTrue(reload_experiment(folder,torch)["matches_original"])
 
     def test_rejects_report_tampering_and_source_drift(self):
         import json
