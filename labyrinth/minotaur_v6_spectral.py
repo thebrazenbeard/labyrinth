@@ -187,6 +187,65 @@ def _evaluate(model: nn.Module, examples: PairExamples) -> dict[str, Any]:
             "cross_entropy": loss_sum / len(examples)}
 
 
+def audit_grouped_predictions(model: nn.Module, examples: PairExamples) -> dict[str, Any]:
+    """Recompute actual labels independently and score canonical reverse pairs.
+
+    Each (a,b)/(b,a) group is a SINGLE sampling unit, never two IID samples.
+    This is a public arithmetic auditor, not a private examination or a
+    source of training labels/gradients.
+    """
+    from .minotaur_v6_mul_eval import recompute_mul_label
+    if len(examples) <= 0 or len(examples) > MODULUS**2:
+        raise ValueError("invalid bounded examples for grouped audit")
+    model.eval()
+    predicted: list[int] = []
+    with torch.no_grad():
+        for start in range(0, len(examples), 1024):
+            logits = model(examples.x[start:start + 1024], examples.y[start:start + 1024])
+            if logits.shape != (min(1024, len(examples) - start), MODULUS):
+                raise ValueError("malformed predictor logits")
+            predicted.extend(int(v) for v in logits.argmax(-1).tolist())
+    group: dict[tuple[int, int], dict[tuple[int, int], tuple[int, int]]] = {}
+    entries = []
+    for x, y, claim, guess in zip(examples.x.tolist(), examples.y.tolist(),
+                                  examples.target.tolist(), predicted):
+        if claim != recompute_mul_label(x, y):
+            raise ValueError("training-source claimed label differs from independent arithmetic")
+        key = (min(x, y), max(x, y))
+        directions = group.setdefault(key, {})
+        if (x, y) in directions:
+            raise ValueError("duplicate directed test input")
+        directions[(x, y)] = (claim, guess)
+        entries.append((x, y, guess))
+    complete_correct = 0
+    reversal_consistent = 0
+    reversals = 0
+    for (x, y), directions in group.items():
+        expected_count = 1 if x == y else 2
+        if len(directions) != expected_count:
+            raise ValueError("incomplete reverse-pair group")
+        if all(label == guess for label, guess in directions.values()):
+            complete_correct += 1
+        if expected_count == 2:
+            reversals += 1
+            if directions[(x, y)][1] == directions[(y, x)][1]:
+                reversal_consistent += 1
+    entries.sort()
+    count = len(group)
+    return {
+        "canonical_groups": count, "directed_rows": len(entries),
+        "correct_complete_groups": complete_correct,
+        "pair_complete_accuracy": complete_correct / count,
+        "directed_row_accuracy": sum(claim == guess for dirs in group.values()
+                                     for claim, guess in dirs.values()) / len(entries),
+        "reversal_consistency_rate": reversal_consistent / reversals if reversals else 1.0,
+        "prediction_sha256": hashlib.sha256(
+            json.dumps(entries, separators=(",", ":")).encode("utf-8")).hexdigest(),
+        "independent_label_replay": "minotaur_v6_mul_eval.recompute_mul_label",
+        "confidence_intervals": "NOT_COMPUTED; paired public examples are not IID",
+    }
+
+
 def _constant_metrics(examples: PairExamples, prediction: int) -> dict[str, Any]:
     accuracy = float((examples.target == prediction).float().mean().item())
     return {"count": len(examples), "accuracy": accuracy,
@@ -244,6 +303,7 @@ def run_experiment(config: SpectralConfig = SpectralConfig()) -> dict[str, Any]:
         raise RuntimeError("training did not update model parameters")
 
     candidate = {name: _evaluate(model, examples) for name, examples in splits.items()}
+    grouped_holdout = audit_grouped_predictions(model, splits["holdout"])
     return {
         "schema": "labyrinth.minotaur.v6-spectral.v1",
         "config": asdict(config),
@@ -273,6 +333,7 @@ def run_experiment(config: SpectralConfig = SpectralConfig()) -> dict[str, Any]:
             "trained_weight_sha256": trained_digest,
         },
         "candidate": candidate,
+        "pair_group_audit": grouped_holdout,
         "controls": {
             "constant": {**constant_results},
             "frozen_random": frozen,

@@ -14,7 +14,14 @@ def make(seed,score,constant=0.02,frozen=0.01):
                     "frozen_random":{"train":{"accuracy":frozen},
                                      "holdout":{"accuracy":frozen}}},
         "training":{"optimizer_steps":1280,"initial_weight_sha256":"a"+str(seed),
-                    "trained_weight_sha256":"b"+str(seed)}
+                    "trained_weight_sha256":"b"+str(seed)},
+        "pair_group_audit":{"canonical_groups":947,"directed_rows":1885,
+                            "correct_complete_groups":round(score*947),
+                            "pair_complete_accuracy":score,
+                            "directed_row_accuracy":score,
+                            "reversal_consistency_rate":1.0,
+                            "prediction_sha256":"f"*64,
+                            "independent_label_replay":"minotaur_v6_mul_eval.recompute_mul_label"}
     }
 
 class TenSeedSpectralTests(unittest.TestCase):
@@ -30,6 +37,8 @@ class TenSeedSpectralTests(unittest.TestCase):
         passing=[make(s,.97) for s in seeds]
         result=summarize_runs(passing)
         self.assertEqual(result["passing_seeds"],10)
+        self.assertAlmostEqual(result["mean_group_accuracy"],.97)
+        self.assertEqual(result["runs"][0]["canonical_groups"],947)
         self.assertTrue(result["criterion_95pct_on_9_of_10_seeds"])
         failing=passing[:-1]+[make(9,.716)]
         result=summarize_runs(failing)

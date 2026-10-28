@@ -41,6 +41,7 @@ def summarize_runs(runs):
         raise ValueError("Exact 10 runs required for V6 research qualification")
     seen = set()
     scores = []
+    group_scores = []
     records = []
     for run in runs:
         if not isinstance(run, dict) or not isinstance(run.get("config"), dict):
@@ -60,6 +61,7 @@ def summarize_runs(runs):
             held = run["split"]["holdout_count"]
             params = run["model"]["parameter_count"]
             reversal = run["split"]["reversals_grouped"]
+            grouped = run["pair_group_audit"]
         except (KeyError, TypeError):
             raise ValueError("Incomplete run evidence") from None
         accuracy = candidate.get("accuracy")
@@ -71,6 +73,23 @@ def summarize_runs(runs):
                 or not isinstance(params, int) or params <= 0 or params >= 150000
                 or not initial or not after or initial == after):
             raise ValueError("Invalid trained holdout evidence")
+        if (not isinstance(grouped, dict)
+                or type(grouped.get("canonical_groups")) is not int
+                or grouped["canonical_groups"] <= 0
+                or grouped.get("directed_rows") != held
+                or type(grouped.get("prediction_sha256")) is not str
+                or len(grouped["prediction_sha256"]) != 64
+                or grouped.get("independent_label_replay")
+                    != "minotaur_v6_mul_eval.recompute_mul_label"
+                or type(grouped.get("correct_complete_groups")) is not int
+                or not 0 <= grouped["correct_complete_groups"] <= grouped["canonical_groups"]
+                or not isinstance(grouped.get("pair_complete_accuracy"), (float, int))
+                or not 0 <= grouped["pair_complete_accuracy"] <= 1
+                or abs(grouped["pair_complete_accuracy"]
+                       - grouped["correct_complete_groups"] / grouped["canonical_groups"])
+                    > 1 / grouped["canonical_groups"]
+                or abs(grouped.get("directed_row_accuracy", -1) - accuracy) > 1e-6):
+            raise ValueError("Missing or inconsistent canonical-pair independent audit")
         for control in (constant, frozen):
             val = control.get("accuracy")
             if (type(val) not in (float, int) or not 0 <= val <= 1
@@ -81,18 +100,30 @@ def summarize_runs(runs):
                         "frozen_accuracy":float(frozen["accuracy"]),
                         "constant_accuracy":float(constant["accuracy"]),
                         "train_accuracy":float(train["accuracy"]),
-                        "optimizer_steps":steps})
+                        "optimizer_steps":steps,
+                        "canonical_groups":grouped["canonical_groups"],
+                        "complete_group_accuracy":float(grouped["pair_complete_accuracy"]),
+                        "prediction_sha256":grouped["prediction_sha256"],
+                        "reversal_consistency_rate":grouped["reversal_consistency_rate"]})
         scores.append(float(accuracy))
+        group_scores.append(float(grouped["pair_complete_accuracy"]))
     records.sort(key=lambda row: row["seed"])
     worst = min(scores)
     passing = sum(x >= .95 for x in scores)
+    grouped_worst = min(group_scores)
+    grouped_passing = sum(x >= .95 for x in group_scores)
     return {"runs": records, "run_count":len(records),
             "mean_seed_accuracy":statistics.mean(scores),
             "median_seed_accuracy":statistics.median(scores),
             "worst_seed_accuracy":worst,
             "best_seed_accuracy":max(scores),
             "passing_seeds":passing,
-            "criterion_95pct_on_9_of_10_seeds":passing >= 9 and worst >= .90,
+            "mean_group_accuracy":statistics.mean(group_scores),
+            "median_group_accuracy":statistics.median(group_scores),
+            "worst_group_accuracy":grouped_worst,
+            "best_group_accuracy":max(group_scores),
+            "passing_group_seeds":grouped_passing,
+            "criterion_95pct_on_9_of_10_seeds":grouped_passing >= 9 and grouped_worst >= .90,
             "promotion_recommendation":"DO_NOT_PROMOTE",
             "qualification":"NOT_ESTABLISHED",
             "grouped_case_confidence":"No IID inference; reversals in each unordered group share supervision."}
@@ -111,7 +142,8 @@ def run_sweep(config=SeedSweepConfig()):
             holdout_fraction=config.holdout_fraction,
             max_optimizer_seconds=config.max_optimizer_seconds))
         runs.append(report)
-        print("FINISHED_SEED",seed,"ACCURACY",report["candidate"]["holdout"]["accuracy"],flush=True)
+        print("FINISHED_SEED",seed,"ROW_ACCURACY",report["candidate"]["holdout"]["accuracy"],
+              "CANONICAL_PAIR_ACCURACY",report["pair_group_audit"]["pair_complete_accuracy"],flush=True)
     aggregate=summarize_runs(runs) if len(runs)==10 else {"status":"diagnostic only; not ten seeds","qualification":"NOT_ESTABLISHED"}
     return {"schema":"labyrinth.minotaur.v6-ten-seed-replication.v1",
             "source":{"commit":commit,"clean":True,
