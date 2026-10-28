@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -85,8 +86,14 @@ def _strict_json(raw: bytes) -> Any:
     def constant(_: str) -> Any:
         raise ValueError("nonfinite_json_number")
 
+    def finite_float(token: str) -> float:
+        value = float(token)
+        if not math.isfinite(value):
+            raise ValueError("nonfinite_json_number")
+        return value
+
     return json.loads(raw.decode("utf-8"), object_pairs_hook=pairs,
-                      parse_constant=constant)
+                      parse_constant=constant, parse_float=finite_float)
 
 
 def _keys(value: Any, mandatory: set[str], optional: set[str] = frozenset()) -> None:
