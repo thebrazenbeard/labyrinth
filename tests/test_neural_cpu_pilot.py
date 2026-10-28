@@ -12,7 +12,9 @@ from labyrinth.neural_cpu_pilot import (
     file_digest, read_training, supervised_target, training_prefix,
     render_supervised_tokens, training_visit_plan, zero_trainable_gradients,
 )
-from labyrinth.program_maze import generate_program_challenges
+from labyrinth.program_maze import (
+    generate_graduated_train_challenges, generate_program_challenges,
+)
 
 
 class _CharTokenizer:
@@ -69,6 +71,78 @@ class _QuadTokenizer(_CharTokenizer):
 
 
 class NeuralCpuPilotTests(unittest.TestCase):
+    def test_graduated_v2_attestation_and_trace_provenance(self):
+        from labyrinth.neural_cpu_pilot import (
+            attest_generated_train_only, training_visit_plan,
+        )
+        from labyrinth.state_traces import verified_state_trace
+
+        cases = generate_graduated_train_challenges(2801, 128)
+        records = [{"case_id": c.id, "split": c.split, "prompt": c.prompt,
+                    "answer": c.answer} for c in cases]
+        self.assertEqual(attest_generated_train_only(
+            records, generator_seed=2801, generator_version="v2"), records)
+        visited, exposure = training_visit_plan(records, 64)
+        self.assertEqual(exposure["available_training_cases"], 128)
+        self.assertEqual(exposure["case_visits"], 64)
+        self.assertEqual(exposure["unique_training_cases"], 64)
+        self.assertEqual(exposure["visited_case_ids"], [c["case_id"] for c in visited])
+        self.assertEqual(visited, records[:64])
+        self.assertTrue(all("-t1-" in c["case_id"] or "-t2-" in c["case_id"]
+                            for c in visited))
+        for record in (records[0], records[33], records[65], records[99]):
+            self.assertTrue(verified_state_trace(record).endswith(
+                "ANSWER: " + record["answer"]))
+        for wrong in (
+            {**records[0], "split": "dev"},
+            {**records[0], "answer": str((int(records[0]["answer"]) + 1) % 97)},
+        ):
+            with self.assertRaises(ValueError):
+                attest_generated_train_only([wrong], generator_seed=2801,
+                                            generator_version="v2")
+        with self.assertRaises(ValueError):
+            attest_generated_train_only(records, generator_seed=2801,
+                                        generator_version="v1")
+        with self.assertRaises(ValueError):
+            attest_generated_train_only(records, generator_seed=2802,
+                                        generator_version="v2")
+        with self.assertRaises(ValueError):
+            attest_generated_train_only(records, generator_seed=2801,
+                                        generator_version="v3")
+
+    def test_graduated_script_generates_nonoverwriting_source_attested_fixture(self):
+        from labyrinth.neural_cpu_pilot import attest_generated_train_only
+
+        repo = Path(__file__).resolve().parents[1]
+        output = Path(self.tmp.name) / "graduated.json"
+        cmd = [sys.executable, str(repo / "scripts" / "generate_neural_train.py"),
+               "--seed", "2801", "--count", "128", "--generator-version", "v2",
+               "--output", str(output)]
+        generated = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(generated.returncode, 0, generated.stderr)
+        metadata = json.loads(generated.stdout)
+        records = read_training(output)
+        self.assertEqual(metadata["generator_version"], "v2")
+        self.assertEqual(metadata["sha256"], file_digest(output))
+        self.assertEqual(len(records), 128)
+        self.assertEqual(attest_generated_train_only(records, generator_seed=2801,
+                                                    generator_version="v2"), records)
+        refused = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertEqual(file_digest(output), metadata["sha256"])
+
+    def test_committed_graduated_128_fixture_matches_reconstruction(self):
+        from labyrinth.neural_cpu_pilot import attest_generated_train_only
+
+        fixture = Path(__file__).resolve().parents[1] / "experiments" / "data" / "train_graduated_seed2801_128.json"
+        self.assertEqual(file_digest(fixture),
+                         "0e740105d92a21d3212f771f858f6a6cd518d5c8860fc04f555cc0fcaa17a643")
+        cases = read_training(fixture)
+        self.assertEqual(len(attest_generated_train_only(
+            cases, generator_seed=2801, generator_version="v2")), 128)
+        self.assertEqual([sum("-t" + str(t) + "-" in c["case_id"] for c in cases)
+                          for t in range(1, 5)], [32, 32, 32, 32])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
