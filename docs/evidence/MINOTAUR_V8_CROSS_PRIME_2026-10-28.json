@@ -1,0 +1,246 @@
+{
+  "config": {
+    "batch_size": 512,
+    "depth": 2,
+    "dev_fraction": 0.1,
+    "epochs": 18,
+    "learning_rate": 0.003,
+    "max_optimizer_seconds": 35.0,
+    "seed": 20261028,
+    "seeds": [
+      20261028,
+      20261029
+    ],
+    "width": 24
+  },
+  "limits": "Public synthetic study; passing software tests do not establish learned arithmetic.",
+  "model": {
+    "architecture": "shared modulus-conditioned coordinate tokens plus symmetric relational decoder",
+    "forward_product_or_modulo": false,
+    "no_residue_or_pair_tables": true,
+    "parameters": 3289
+  },
+  "promotion_recommendation": "DO_NOT_PROMOTE",
+  "protocol": {
+    "development_selection": "public grouped dev only; final 101 not used for selection",
+    "final_evaluation_modulus": 101,
+    "strict_mod97": "input and output residue 53 excluded from training",
+    "train_moduli": [
+      83,
+      89,
+      97
+    ]
+  },
+  "qualification": "NOT_ESTABLISHED",
+  "runs": [
+    {
+      "controls": {
+        "constant": {
+          "final_modulus_101": {
+            "accuracy": 0.019703950732946396
+          },
+          "modulus_83": {
+            "accuracy": 0.023255813866853714
+          },
+          "modulus_89": {
+            "accuracy": 0.022842640057206154
+          },
+          "modulus_97": {
+            "accuracy": 0.015350877307355404
+          },
+          "strict_input_53_mod97": {
+            "accuracy": 0.010362694039940834
+          },
+          "strict_output_53_mod97": {
+            "accuracy": 0.0
+          }
+        },
+        "frozen_random": {
+          "final_modulus_101": {
+            "accuracy": 0.009606901284187825,
+            "correct": 98,
+            "count": 10201
+          },
+          "modulus_83": {
+            "accuracy": 0.011627906976744186,
+            "correct": 8,
+            "count": 688
+          },
+          "modulus_89": {
+            "accuracy": 0.017766497461928935,
+            "correct": 14,
+            "count": 788
+          },
+          "modulus_97": {
+            "accuracy": 0.005482456140350877,
+            "correct": 5,
+            "count": 912
+          },
+          "strict_input_53_mod97": {
+            "accuracy": 0.010362694300518135,
+            "correct": 2,
+            "count": 193
+          },
+          "strict_output_53_mod97": {
+            "accuracy": 0.0,
+            "correct": 0,
+            "count": 94
+          }
+        }
+      },
+      "development": {
+        "modulus_83": {
+          "accuracy": 0.0436046511627907,
+          "correct": 30,
+          "count": 688
+        },
+        "modulus_89": {
+          "accuracy": 0.05583756345177665,
+          "correct": 44,
+          "count": 788
+        },
+        "modulus_97": {
+          "accuracy": 0.01425438596491228,
+          "correct": 13,
+          "count": 912
+        }
+      },
+      "evaluation": {
+        "final_modulus_101": {
+          "accuracy": 0.030683266346436623,
+          "correct": 313,
+          "count": 10201
+        },
+        "strict_input_53_mod97": {
+          "accuracy": 0.02072538860103627,
+          "correct": 4,
+          "count": 193
+        },
+        "strict_output_53_mod97": {
+          "accuracy": 0.02127659574468085,
+          "correct": 2,
+          "count": 94
+        }
+      },
+      "seed": 20261028,
+      "split": {
+        "mod97_input_53_train_rows": 0,
+        "mod97_output_53_train_rows": 0,
+        "train_rows": 21544
+      },
+      "training": {
+        "initial_sha256": "3f292b8d25833342aa9c17b20951e976cf88d8b8628f63d1c2969939371846ad",
+        "optimizer_seconds": 2.2252657000208274,
+        "optimizer_steps": 774,
+        "stopped_at_budget": false,
+        "trained_sha256": "be3c2b3c029bc95f420d1478fafb5a50dd10b8500dfd75394262462e6ca29b17"
+      }
+    },
+    {
+      "controls": {
+        "constant": {
+          "final_modulus_101": {
+            "accuracy": 0.019703950732946396
+          },
+          "modulus_83": {
+            "accuracy": 0.023255813866853714
+          },
+          "modulus_89": {
+            "accuracy": 0.022842640057206154
+          },
+          "modulus_97": {
+            "accuracy": 0.015350877307355404
+          },
+          "strict_input_53_mod97": {
+            "accuracy": 0.010362694039940834
+          },
+          "strict_output_53_mod97": {
+            "accuracy": 0.0
+          }
+        },
+        "frozen_random": {
+          "final_modulus_101": {
+            "accuracy": 0.009802960494069209,
+            "correct": 100,
+            "count": 10201
+          },
+          "modulus_83": {
+            "accuracy": 0.00872093023255814,
+            "correct": 6,
+            "count": 688
+          },
+          "modulus_89": {
+            "accuracy": 0.007614213197969543,
+            "correct": 6,
+            "count": 788
+          },
+          "modulus_97": {
+            "accuracy": 0.010964912280701754,
+            "correct": 10,
+            "count": 912
+          },
+          "strict_input_53_mod97": {
+            "accuracy": 0.010362694300518135,
+            "correct": 2,
+            "count": 193
+          },
+          "strict_output_53_mod97": {
+            "accuracy": 0.0,
+            "correct": 0,
+            "count": 94
+          }
+        }
+      },
+      "development": {
+        "modulus_83": {
+          "accuracy": 0.0377906976744186,
+          "correct": 26,
+          "count": 688
+        },
+        "modulus_89": {
+          "accuracy": 0.027918781725888325,
+          "correct": 22,
+          "count": 788
+        },
+        "modulus_97": {
+          "accuracy": 0.03070175438596491,
+          "correct": 28,
+          "count": 912
+        }
+      },
+      "evaluation": {
+        "final_modulus_101": {
+          "accuracy": 0.02205666111165572,
+          "correct": 225,
+          "count": 10201
+        },
+        "strict_input_53_mod97": {
+          "accuracy": 0.02072538860103627,
+          "correct": 4,
+          "count": 193
+        },
+        "strict_output_53_mod97": {
+          "accuracy": 0.0425531914893617,
+          "correct": 4,
+          "count": 94
+        }
+      },
+      "seed": 20261029,
+      "split": {
+        "mod97_input_53_train_rows": 0,
+        "mod97_output_53_train_rows": 0,
+        "train_rows": 21544
+      },
+      "training": {
+        "initial_sha256": "cdab50e81e4f9a98b7ec0b88af9bf33c3cbe11788cacebe6bcc02bddbb52b349",
+        "optimizer_seconds": 2.0965582999633625,
+        "optimizer_steps": 774,
+        "stopped_at_budget": false,
+        "trained_sha256": "15fdba53623d5b0786514c5254d9e97c0d9c2789ec78e6d590eb2903260a72a1"
+      }
+    }
+  ],
+  "schema": "labyrinth.minotaur.v8-transfer.v1",
+  "source_clean_at_run": true,
+  "source_commit": "876d198c922b10d572148ec6ba9a7cb53c5c3a82"
+}
