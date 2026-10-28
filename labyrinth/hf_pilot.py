@@ -257,6 +257,29 @@ def _parameter_digest(model: Any, torch: Any) -> str:
     return _selected_parameter_digest(model, torch, include=lambda name, p: p.requires_grad)
 
 
+def _frozen_parameter_digest(model: Any, torch: Any) -> str:
+    """Hash all frozen neural parameters rather than only trainable LoRA tensors."""
+    return _selected_parameter_digest(
+        model, torch, include=lambda _name, parameter: not parameter.requires_grad,
+    )
+
+
+def _clip_trainable_gradients(torch: Any, trainable: Any) -> None:
+    """Reject finite-loss/nonfinite-gradient cases before any optimizer step."""
+    torch.nn.utils.clip_grad_norm_(
+        trainable, 1.0, error_if_nonfinite=True,
+    )
+
+
+def _assert_frozen_state(
+    model: Any, torch: Any, frozen_digest: str, buffer_digest: str, phase: str,
+) -> None:
+    if _frozen_parameter_digest(model, torch) != frozen_digest:
+        raise RuntimeError(f"{phase}: frozen neural parameters changed")
+    if _buffer_digest(model, torch) != buffer_digest:
+        raise RuntimeError(f"{phase}: persistent model buffers changed")
+
+
 def _buffer_digest(model: Any, torch: Any) -> str:
     """Value-hash persistent model buffers, including non-trainable state.
 
@@ -394,7 +417,9 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
         if not bool(torch.isfinite(loss)):
             raise RuntimeError("non-finite SFT loss")
         loss.backward()
-        torch.nn.utils.clip_grad_norm_((p for p in model.parameters() if p.requires_grad), 1.0)
+        _clip_trainable_gradients(
+            torch, (p for p in model.parameters() if p.requires_grad)
+        )
         optimizer.step()
         for parameter in model.parameters():
             if parameter.requires_grad and not bool(torch.isfinite(parameter).all()):
@@ -489,6 +514,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
                                              lora_dropout=0, bias="none", task_type="CAUSAL_LM",
                                              target_modules="all-linear"))
     initial_digest = _parameter_digest(model, torch)
+    initial_frozen_digest = _frozen_parameter_digest(model, torch)
     initial_buffer_digest = _buffer_digest(model, torch)
     initial_state = {name: parameter.detach().clone()
                      for name, parameter in model.named_parameters() if parameter.requires_grad}
@@ -501,11 +527,17 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     )
     if _parameter_digest(model, torch) != initial_digest:
         raise RuntimeError("zero-LR placebo changed trainable adapter parameters")
-    if _buffer_digest(model, torch) != initial_buffer_digest:
-        raise RuntimeError("zero-LR placebo changed persistent model buffers")
+    _assert_frozen_state(
+        model, torch, initial_frozen_digest, initial_buffer_digest,
+        "zero-LR placebo",
+    )
     sham = _score_model(model, tokenizer, torch, heldout, device=device,
                         max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
+    _assert_frozen_state(
+        model, torch, initial_frozen_digest, initial_buffer_digest,
+        "zero-LR placebo evaluation",
+    )
     correct_training = _train_steps(model, tokenizer, torch, train, [c.answer for c in train], config)
     trained_digest = _parameter_digest(model, torch)
     if trained_digest == initial_digest:
@@ -513,11 +545,17 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     trained_saved_digest = _lora_value_digest(model, torch)
     if trained_saved_digest != trained_digest:
         raise RuntimeError("trainable parameter selection differs from LoRA tensor selection")
-    if _buffer_digest(model, torch) != initial_buffer_digest:
-        raise RuntimeError("correct-label training changed persistent model buffers")
+    _assert_frozen_state(
+        model, torch, initial_frozen_digest, initial_buffer_digest,
+        "correct-label training",
+    )
     candidate = _score_model(model, tokenizer, torch, heldout, device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
+    _assert_frozen_state(
+        model, torch, initial_frozen_digest, initial_buffer_digest,
+        "correct-label evaluation",
+    )
     # A clean, newly created output directory is used; no existing run changes.
     output_dir.mkdir(mode=0o700, parents=False, exist_ok=False)
     candidate_dir = output_dir / "candidate_adapter"
@@ -532,13 +570,23 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
                 parameter.copy_(initial_state[name])
     if _parameter_digest(model, torch) != initial_digest:
         raise RuntimeError("failed to restore LoRA initialization for corrupted-label control")
+    _assert_frozen_state(
+        model, torch, initial_frozen_digest, initial_buffer_digest,
+        "restoration before corrupted-label training",
+    )
     corrupted_training = _train_steps(model, tokenizer, torch, train, corrupted_answers, config)
     corrupted_digest = _parameter_digest(model, torch)
-    if _buffer_digest(model, torch) != initial_buffer_digest:
-        raise RuntimeError("corrupted-label training changed persistent model buffers")
+    _assert_frozen_state(
+        model, torch, initial_frozen_digest, initial_buffer_digest,
+        "corrupted-label training",
+    )
     corrupted = _score_model(model, tokenizer, torch, heldout, device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
+    _assert_frozen_state(
+        model, torch, initial_frozen_digest, initial_buffer_digest,
+        "corrupted-label evaluation",
+    )
     _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
     candidate_adapter_manifest = _adapter_manifest(candidate_dir)
     result: dict[str, Any] = {
@@ -558,6 +606,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
         "heldout_public_prompt_sha256": _prompt_commitment(heldout),
         "initial_lora_parameter_sha256": initial_digest,
         "initial_persistent_buffers_sha256": initial_buffer_digest,
+        "initial_frozen_parameter_sha256": initial_frozen_digest,
         "candidate_lora_parameter_sha256": trained_digest,
         "candidate_lora_tensor_value_sha256": trained_saved_digest,
         "corrupted_lora_parameter_sha256": corrupted_digest,

@@ -150,3 +150,11 @@ for extended runs; historical v2 reports retain the original 32-step bound.
 This changes only permitted experimental duration, **not** the standard for
 graduation, independent evaluation, or model deployment. A higher optimizer
 step count is not itself evidence of semantic learning.
+
+
+The enhanced guarded training loop now value-hashes all frozen neural
+parameters and persistent buffers across *training and inference*, not just
+trainable LoRA parameters. A finite loss accompanied by a nonfinite gradient
+norm is rejected before optimizer stepping. These checks detect mutations
+at their measurement boundaries; they do not authenticate a hostile runtime
+or prevent all concurrent in-memory modification races.
