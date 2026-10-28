@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from labyrinth.evaluation import score_response
-from labyrinth.hf_pilot import EVAL_SEED_XOR, SCHEMA, _prompt_commitment
+from labyrinth.hf_pilot import EVAL_SEED_XOR, SCHEMA, _prompt_commitment, derange_answers
 from labyrinth.maze import generate_maze
 from labyrinth.runner import _source_state
 from labyrinth.hf_report_audit import audit_hf_report
@@ -32,6 +32,8 @@ def pilot_fixture():
         "accuracy": sum(t["correct"] for t in trials) / len(trials),
         "format_valid": len(trials), "format_rate": 1.0, "trials": trials,
     }
+
+
     visits = {"steps": 2, "example_visits": 2,
               "visited_case_ids": [c.id for c in train],
               "input_tokens_seen": 200, "losses": [2.5, 2.0]}
@@ -67,7 +69,53 @@ def pilot_fixture():
     }
 
 
+def with_training_probe(report):
+    """Attach independently reconstructible train-only measurements to a fixture."""
+    train = generate_maze(seed=13, count=2, tiers=(1,), split="train")
+    wrong = derange_answers(train)
+    probes = {}
+    for arm in ("candidate", "corrupted"):
+        trials = []
+        for index, challenge in enumerate(train):
+            response = ("ANSWER: 0" if arm == "candidate" else f"ANSWER: {wrong[index]}")
+            oracle = score_response(challenge, response)
+            trial = {"id": challenge.id, "correct": oracle.correct,
+                     "score_reason": oracle.reason, "response_preview": response,
+                     "response_sha256": hashlib.sha256(response.encode()).hexdigest()}
+            if arm == "corrupted":
+                trial["training_target_correct"] = score_response(
+                    type(challenge)(**{**challenge.__dict__, "answer": wrong[index]}), response
+                ).correct
+            trials.append(trial)
+        count = len(trials)
+        valid = sum(t["score_reason"] in ("correct", "incorrect") for t in trials)
+        probes[arm] = {"trials": trials, "total": count,
+                       "correct": sum(t["correct"] for t in trials),
+                       "accuracy": sum(t["correct"] for t in trials) / count,
+                       "format_valid": valid, "format_rate": valid / count}
+        if arm == "corrupted":
+            probes[arm]["training_target_hits"] = sum(t["training_target_correct"] for t in trials)
+    report["training_probe"] = probes
+    return report
+
+
 class HfReportAuditTests(unittest.TestCase):
+    def test_optional_training_probe_is_audited_as_training_not_holdout(self):
+        report = with_training_probe(pilot_fixture())
+        outcome = audit_hf_report(report)
+        self.assertEqual(outcome["status"], "PASS", outcome)
+        self.assertEqual(outcome["checked_trials"], 12)
+        self.assertEqual(report["training_probe"]["corrupted"]["training_target_hits"], 2)
+        self.assertEqual(report["evaluations"]["candidate"]["total"], 2)
+
+    def test_forged_corrupted_training_target_recall_is_rejected(self):
+        report = with_training_probe(pilot_fixture())
+        report["training_probe"]["corrupted"]["trials"][0]["training_target_correct"] = False
+        report["training_probe"]["corrupted"]["training_target_hits"] = 1
+        result = audit_hf_report(report)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertTrue(any("training target" in failure for failure in result["failures"]))
+
     def test_consistent_full_preview_scores_pass_internal_audit(self):
         result = audit_hf_report(pilot_fixture())
         self.assertEqual(result["status"], "PASS")

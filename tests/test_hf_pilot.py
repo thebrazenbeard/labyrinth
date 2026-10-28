@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
 import subprocess
@@ -17,6 +18,8 @@ from labyrinth.hf_pilot import (
     _device_headroom,
     _encode_pair,
     _lora_value_digest,
+    _score_model,
+    _trial_record,
     _summarize_trials,
     derange_answers,
     reload_evaluate,
@@ -443,6 +446,72 @@ class HfPilotContractTests(unittest.TestCase):
         self.assertEqual((summary["accuracy"], summary["format_rate"]), (0.0, 0.5))
         with self.assertRaises(ValueError):
             _summarize_trials([])
+
+    def test_training_probe_separates_oracle_and_corrupted_label_memorization(self):
+        case = Challenge("train-example", "arithmetic", 1, "train", "Calculate 3 + 4.", "7")
+        response = "ANSWER: 2"
+        trial = _trial_record(case, response, training_target="2")
+        self.assertFalse(trial["correct"])
+        self.assertTrue(trial["training_target_correct"])
+        self.assertEqual(trial["score_reason"], "incorrect")
+        summary = _summarize_trials([trial])
+        self.assertEqual(summary["correct"], 0)
+        self.assertEqual(summary["training_target_hits"], 1)
+        self.assertEqual(summary["format_valid"], 1)
+
+    def test_training_target_probe_refuses_mixed_or_malformed_provenance(self):
+        case = Challenge("train-example", "arithmetic", 1, "train", "Calculate 3 + 4.", "7")
+        with self.assertRaisesRegex(ValueError, "training target"):
+            _trial_record(case, "ANSWER: 2", training_target=7)
+        trial = _trial_record(case, "ANSWER: 7", training_target="2")
+        del trial["training_target_correct"]
+        with self.assertRaisesRegex(ValueError, "mixed training target"):
+            _summarize_trials([trial, _trial_record(case, "ANSWER: 2", training_target="2")])
+
+    def test_training_probe_uses_actual_generated_text_once_for_both_targets(self):
+        class FakeTensor:
+            shape = (1, 2)
+
+            def to(self, device):
+                return self
+
+            def __getitem__(self, index):
+                return self
+
+        class FakeTokenizer:
+            pad_token_id = 0
+            eos_token_id = 3
+
+            def __call__(self, prompt, *, add_special_tokens, return_tensors):
+                return {"input_ids": FakeTensor(), "attention_mask": FakeTensor()}
+
+            def decode(self, generated, *, skip_special_tokens):
+                return "ANSWER: 2"
+
+        class FakeModel:
+            generated = 0
+
+            def eval(self):
+                pass
+
+            def generate(self, **kwargs):
+                self.generated += 1
+                return FakeTensor()
+
+        class FakeTorch:
+            no_grad = staticmethod(nullcontext)
+
+        case = Challenge("seen", "arithmetic", 1, "train", "Calculate 3 + 4.", "7")
+        model = FakeModel()
+        outcome = _score_model(model, FakeTokenizer(), FakeTorch(), [case],
+                               device="cpu", max_tokens=128, max_new_tokens=8,
+                               training_targets=["2"])
+        self.assertEqual(model.generated, 1)
+        self.assertEqual((outcome["correct"], outcome["training_target_hits"]), (0, 1))
+        with self.assertRaisesRegex(ValueError, "training target count"):
+            _score_model(model, FakeTokenizer(), FakeTorch(), [case],
+                         device="cpu", max_tokens=128, max_new_tokens=8,
+                         training_targets=[])
 
 
 if __name__ == "__main__":
