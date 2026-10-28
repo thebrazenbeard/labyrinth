@@ -7,6 +7,7 @@ fully verify longer generated answers, so those records are INCOMPLETE.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 import math
 import re
 from typing import Any
@@ -237,4 +238,80 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
             fail(f"{arm}: accuracy mismatch")
         if not _proportion(summary.get("format_rate"), reported_format / len(heldout)):
             fail(f"{arm}: format rate mismatch")
+
+    # The optional diagnostic probe is explicitly *training-set* evidence;
+    # never fold these counts into held-out wins or graduation thresholds.
+    if "training_probe" in report:
+        probes = report["training_probe"]
+        if not isinstance(probes, dict) or set(probes) != {"candidate", "corrupted"}:
+            fail("training probe must contain candidate and corrupted arms")
+            return result()
+        for arm in ("candidate", "corrupted"):
+            summary = probes[arm]
+            if (not isinstance(summary, dict) or not isinstance(summary.get("trials"), list)
+                    or len(summary["trials"]) != len(train)):
+                fail(f"training probe {arm}: invalid trial count")
+                continue
+            correct = 0
+            formatted = 0
+            target_hits = 0
+            for index, (trial, challenge) in enumerate(zip(summary["trials"], train)):
+                tag = f"training probe {arm}[{index}]"
+                if not isinstance(trial, dict) or trial.get("id") != challenge.id:
+                    fail(f"{tag}: train challenge id mismatch")
+                    continue
+                response = trial.get("response_preview")
+                digest = trial.get("response_sha256")
+                if not isinstance(response, str) or len(response) > 128 or not _digest(digest):
+                    fail(f"{tag}: invalid response preview or digest")
+                    continue
+                if type(trial.get("correct")) is not bool or trial.get("score_reason") not in (
+                    "correct", "incorrect", "invalid_format", "invalid_response"
+                ):
+                    fail(f"{tag}: invalid score claim")
+                    continue
+                correct += int(trial["correct"])
+                formatted += int(trial["score_reason"] in ("correct", "incorrect"))
+                if arm == "corrupted":
+                    if type(trial.get("training_target_correct")) is not bool:
+                        fail(f"{tag}: missing or invalid corrupted training target claim")
+                        continue
+                    target_hits += int(trial["training_target_correct"])
+                elif "training_target_correct" in trial:
+                    fail(f"{tag}: unexpected candidate alternate training target")
+                try:
+                    checksum = hashlib.sha256(response.encode("utf-8")).hexdigest()
+                except UnicodeEncodeError:
+                    fail(f"{tag}: invalid Unicode in response")
+                    continue
+                if checksum != digest and len(response) == 128:
+                    unverifiable_trials += 1
+                    incomplete(f"training probe {arm}: truncated response cannot be rescored")
+                    continue
+                if checksum != digest:
+                    fail(f"{tag}: response digest mismatch")
+                    continue
+                scored = score_response(challenge, response)
+                if trial["correct"] != scored.correct or trial["score_reason"] != scored.reason:
+                    fail(f"{tag}: oracle score differs from regenerated evaluator")
+                if arm == "corrupted":
+                    target = replace(challenge, answer=corrupted_labels[index])
+                    if trial["training_target_correct"] != score_response(target, response).correct:
+                        fail(f"{tag}: training target claim differs from deranged supervision")
+                checked_trials += 1
+            if summary.get("total") != len(train) or type(summary.get("total")) is not int:
+                fail(f"training probe {arm}: total mismatch")
+            if summary.get("correct") != correct or type(summary.get("correct")) is not int:
+                fail(f"training probe {arm}: oracle correct count mismatch")
+            if summary.get("format_valid") != formatted or type(summary.get("format_valid")) is not int:
+                fail(f"training probe {arm}: format valid count mismatch")
+            if not _proportion(summary.get("accuracy"), correct / len(train)):
+                fail(f"training probe {arm}: oracle accuracy mismatch")
+            if not _proportion(summary.get("format_rate"), formatted / len(train)):
+                fail(f"training probe {arm}: format rate mismatch")
+            if arm == "corrupted":
+                if summary.get("training_target_hits") != target_hits or type(summary.get("training_target_hits")) is not int:
+                    fail("corrupted training target hits mismatch")
+            elif "training_target_hits" in summary:
+                fail("candidate training probe must not claim alternate target hits")
     return result()

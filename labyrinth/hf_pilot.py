@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import hashlib
 from importlib.metadata import version as package_version
 import json
@@ -292,12 +292,38 @@ def validate_tokenized_answer_discrimination(
     return len(train)
 
 
+def _trial_record(challenge: Challenge, response: str,
+                  *, training_target: str | None = None) -> dict[str, Any]:
+    """Retain both oracle correctness and, for a training control, target recall.
+
+    The corrupted-label arm is *supposed* to disagree with the true oracle.
+    Scoring it only against gold would conceal whether wrong labels were
+    actually memorized, so preserve the two truth conditions separately.
+    """
+    result = score_response(challenge, response)
+    trial = {
+        "id": challenge.id, "correct": result.correct,
+        "response_sha256": hashlib.sha256(response.encode("utf-8")).hexdigest(),
+        "response_preview": response[:128], "score_reason": result.reason,
+    }
+    if training_target is not None:
+        if not isinstance(training_target, str):
+            raise ValueError("training target must be a string")
+        trial["training_target_correct"] = score_response(
+            replace(challenge, answer=training_target), response,
+        ).correct
+    return trial
+
+
 def _score_model(model: Any, tokenizer: Any, torch: Any, cases: list[Challenge],
-                 *, device: str, max_tokens: int, max_new_tokens: int) -> dict[str, Any]:
+                 *, device: str, max_tokens: int, max_new_tokens: int,
+                 training_targets: list[str] | None = None) -> dict[str, Any]:
+    if training_targets is not None and len(training_targets) != len(cases):
+        raise ValueError("training target count must match cases")
     model.eval()
     trials: list[dict[str, Any]] = []
     with torch.no_grad():
-        for challenge in cases:
+        for index, challenge in enumerate(cases):
             prompt = f"Task:\n{challenge.prompt}\nAssistant:\n"
             encoded = tokenizer(prompt, add_special_tokens=True, return_tensors="pt")
             ids = encoded["input_ids"]
@@ -311,12 +337,10 @@ def _score_model(model: Any, tokenizer: Any, torch: Any, cases: list[Challenge],
                                     pad_token_id=tokenizer.pad_token_id,
                                     eos_token_id=tokenizer.eos_token_id)
             response = tokenizer.decode(output[0, ids.shape[1]:], skip_special_tokens=True).strip()
-            result = score_response(challenge, response)
-            trials.append({
-                "id": challenge.id, "correct": result.correct,
-                "response_sha256": hashlib.sha256(response.encode("utf-8")).hexdigest(),
-                "response_preview": response[:128], "score_reason": result.reason,
-            })
+            trial = _trial_record(challenge, response,
+                                  training_target=(training_targets[index]
+                                                   if training_targets is not None else None))
+            trials.append(trial)
     return _summarize_trials(trials)
 
 
@@ -326,9 +350,15 @@ def _summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
         raise ValueError("cannot summarize an empty evaluation")
     correct = sum(bool(t["correct"]) for t in trials)
     format_valid = sum(t["score_reason"] in ("correct", "incorrect") for t in trials)
-    return {"correct": correct, "total": len(trials), "accuracy": correct / len(trials),
+    has_target = ["training_target_correct" in trial for trial in trials]
+    if any(has_target) and not all(has_target):
+        raise ValueError("mixed training target provenance in trial summary")
+    result = {"correct": correct, "total": len(trials), "accuracy": correct / len(trials),
             "format_valid": format_valid, "format_rate": format_valid / len(trials),
             "trials": trials}
+    if all(has_target):
+        result["training_target_hits"] = sum(trial["training_target_correct"] for trial in trials)
+    return result
 
 
 def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
@@ -459,6 +489,12 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
         raise RuntimeError("trainable parameter selection differs from LoRA tensor selection")
     candidate = _score_model(model, tokenizer, torch, heldout, device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
+    # A training-set probe is diagnostic, NEVER eligible as held-out evidence.
+    # If even these seen examples fail, a larger unseen test cannot establish
+    # learning; if they succeed while heldout fails, memorization is plausible.
+    candidate_train_probe = _score_model(model, tokenizer, torch, train, device=device,
+                                         max_tokens=config.max_tokens,
+                                         max_new_tokens=config.max_new_tokens)
     # A clean, newly created output directory is used; no existing run changes.
     output_dir.mkdir(mode=0o700, parents=False, exist_ok=False)
     candidate_dir = output_dir / "candidate_adapter"
@@ -477,6 +513,10 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     corrupted_digest = _parameter_digest(model, torch)
     corrupted = _score_model(model, tokenizer, torch, heldout, device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
+    corrupted_train_probe = _score_model(model, tokenizer, torch, train, device=device,
+                                         max_tokens=config.max_tokens,
+                                         max_new_tokens=config.max_new_tokens,
+                                         training_targets=corrupted_answers)
     _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
     candidate_adapter_manifest = _adapter_manifest(candidate_dir)
     result: dict[str, Any] = {
@@ -505,6 +545,8 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
         "cuda_preflight": cuda_headroom,
         "training": {"candidate": correct_training, "corrupted": corrupted_training},
         "evaluations": {"baseline": baseline, "sham": sham, "candidate": candidate, "corrupted": corrupted},
+        "training_probe": {"candidate": candidate_train_probe,
+                           "corrupted": corrupted_train_probe},
         "fresh_process_reload": "NOT RUN: execute `python -m labyrinth.hf_pilot eval` separately",
         "limitations": ["Finite public templates are not evidence of general reasoning transfer.",
                         "One-seed and small-N pilot; do not generalize accuracy deltas.",
