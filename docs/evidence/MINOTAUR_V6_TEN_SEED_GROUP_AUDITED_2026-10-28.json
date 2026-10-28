@@ -1,0 +1,1065 @@
+{
+  "aggregate": {
+    "best_group_accuracy": 0.8527865404837014,
+    "best_seed_accuracy": 0.8579787234042553,
+    "criterion_95pct_on_9_of_10_seeds": false,
+    "grouped_case_confidence": "No IID inference; reversals in each unordered group share supervision.",
+    "mean_group_accuracy": 0.7815983175604627,
+    "mean_seed_accuracy": 0.785971519326568,
+    "median_group_accuracy": 0.7939011566771819,
+    "median_seed_accuracy": 0.7961939387604401,
+    "passing_group_seeds": 0,
+    "passing_seeds": 0,
+    "promotion_recommendation": "DO_NOT_PROMOTE",
+    "qualification": "NOT_ESTABLISHED",
+    "run_count": 10,
+    "runs": [
+      {
+        "canonical_groups": 951,
+        "complete_group_accuracy": 0.8307045215562566,
+        "constant_accuracy": 0.012732095085084438,
+        "frozen_accuracy": 0.011140583554376658,
+        "heldout_accuracy": 0.8366047745358091,
+        "heldout_cases": 1885,
+        "optimizer_steps": 1280,
+        "prediction_sha256": "a0a29e91620ab5d29017f7d72da2abdffba0c0cb8a61d9ee4c1a16240e8b619d",
+        "reversal_consistency_rate": 1.0,
+        "seed": 20261028,
+        "train_accuracy": 1.0
+      },
+      {
+        "canonical_groups": 951,
+        "complete_group_accuracy": 0.7108307045215563,
+        "constant_accuracy": 0.018114011734724045,
+        "frozen_accuracy": 0.006393180607352157,
+        "heldout_accuracy": 0.7165689930740543,
+        "heldout_cases": 1877,
+        "optimizer_steps": 1280,
+        "prediction_sha256": "9be916aedb23ae8e3e875ebc3d04c8267397e8471c8d8fdac6ab62da28bb86ed",
+        "reversal_consistency_rate": 1.0,
+        "seed": 20261029,
+        "train_accuracy": 1.0
+      },
+      {
+        "canonical_groups": 951,
+        "complete_group_accuracy": 0.8096740273396424,
+        "constant_accuracy": 0.02179691568017006,
+        "frozen_accuracy": 0.010101010101010102,
+        "heldout_accuracy": 0.8128654970760234,
+        "heldout_cases": 1881,
+        "optimizer_steps": 1280,
+        "prediction_sha256": "94f5b67ddb52a8bc7560c000becf8841015251c2185092ad34066667c3eb0a2d",
+        "reversal_consistency_rate": 1.0,
+        "seed": 20261030,
+        "train_accuracy": 1.0
+      },
+      {
+        "canonical_groups": 951,
+        "complete_group_accuracy": 0.8201892744479495,
+        "constant_accuracy": 0.01703033596277237,
+        "frozen_accuracy": 0.009579563597658328,
+        "heldout_accuracy": 0.8233102714209686,
+        "heldout_cases": 1879,
+        "optimizer_steps": 1280,
+        "prediction_sha256": "d50316f8731acdf4a71146da84ceddcff12bee117f940ed9ed0da6402c301784",
+        "reversal_consistency_rate": 1.0,
+        "seed": 20261031,
+        "train_accuracy": 1.0
+      },
+      {
+        "canonical_groups": 951,
+        "complete_group_accuracy": 0.8023133543638276,
+        "constant_accuracy": 0.014861995354294777,
+        "frozen_accuracy": 0.012738853503184714,
+        "heldout_accuracy": 0.804140127388535,
+        "heldout_cases": 1884,
+        "optimizer_steps": 1280,
+        "prediction_sha256": "39decd5dc534d43542b8305a255004b7ce6caca9d229b567086a9d5b11dab04e",
+        "reversal_consistency_rate": 1.0,
+        "seed": 20261032,
+        "train_accuracy": 1.0
+      },
+      {
+        "canonical_groups": 951,
+        "complete_group_accuracy": 0.7570977917981072,
+        "constant_accuracy": 0.015932023525238037,
+        "frozen_accuracy": 0.01168348380244291,
+        "heldout_accuracy": 0.7626128518321826,
+        "heldout_cases": 1883,
+        "optimizer_steps": 1280,
+        "prediction_sha256": "a41c16e38fdb4457f272717c8c0c5f4000ad6177a42debadb92bf6706bd1f794",
+        "reversal_consistency_rate": 1.0,
+        "seed": 20261033,
+        "train_accuracy": 1.0
+      },
+      {
+        "canonical_groups": 951,
+        "complete_group_accuracy": 0.7854889589905363,
+        "constant_accuracy": 0.016940180212259293,
+        "frozen_accuracy": 0.009528851244044468,
+        "heldout_accuracy": 0.7882477501323452,
+        "heldout_cases": 1889,
+        "optimizer_steps": 1280,
+        "prediction_sha256": "974ebdd2aa8b766c332e1cb641772eff3c5f55d5f2238dec39e13d1b779a3414",
+        "reversal_consistency_rate": 1.0,
+        "seed": 20261034,
+        "train_accuracy": 1.0
+      },
+      {
+        "canonical_groups": 951,
+        "complete_group_accuracy": 0.6708727655099895,
+        "constant_accuracy": 0.02551834098994732,
+        "frozen_accuracy": 0.01541733120680489,
+        "heldout_accuracy": 0.6762360446570973,
+        "heldout_cases": 1881,
+        "optimizer_steps": 1280,
+        "prediction_sha256": "e64631e88c740d6590f5ba62ef7e5efb3f5481e31ca6d50f443f922f77a3a5c0",
+        "reversal_consistency_rate": 1.0,
+        "seed": 20261035,
+        "train_accuracy": 1.0
+      },
+      {
+        "canonical_groups": 951,
+        "complete_group_accuracy": 0.7760252365930599,
+        "constant_accuracy": 0.02023429237306118,
+        "frozen_accuracy": 0.009052183173588925,
+        "heldout_accuracy": 0.7811501597444089,
+        "heldout_cases": 1878,
+        "optimizer_steps": 1280,
+        "prediction_sha256": "136295c267c6cf89935a2e30080640738e2c382e4f306532c7cc84f0c877591e",
+        "reversal_consistency_rate": 1.0,
+        "seed": 20261036,
+        "train_accuracy": 1.0
+      },
+      {
+        "canonical_groups": 951,
+        "complete_group_accuracy": 0.8527865404837014,
+        "constant_accuracy": 0.01595744676887989,
+        "frozen_accuracy": 0.015425531914893617,
+        "heldout_accuracy": 0.8579787234042553,
+        "heldout_cases": 1880,
+        "optimizer_steps": 1280,
+        "prediction_sha256": "d82b24eb3e3307aa29a374a7d630679e6b6828ead1ba2bed62530e9e477c9b22",
+        "reversal_consistency_rate": 1.0,
+        "seed": 20261037,
+        "train_accuracy": 1.0
+      }
+    ],
+    "worst_group_accuracy": 0.6708727655099895,
+    "worst_seed_accuracy": 0.6762360446570973
+  },
+  "config": {
+    "epochs": 160,
+    "holdout_fraction": 0.2,
+    "max_optimizer_seconds": 85.0,
+    "rank": 192,
+    "seeds": [
+      20261028,
+      20261029,
+      20261030,
+      20261031,
+      20261032,
+      20261033,
+      20261034,
+      20261035,
+      20261036,
+      20261037
+    ]
+  },
+  "individual_runs": [
+    {
+      "candidate": {
+        "holdout": {
+          "accuracy": 0.8366047745358091,
+          "count": 1885,
+          "cross_entropy": 0.8100516645598475
+        },
+        "train": {
+          "accuracy": 1.0,
+          "count": 7524,
+          "cross_entropy": 6.673552265716543e-07
+        }
+      },
+      "conclusion": "positive_holdout_signal",
+      "config": {
+        "batch_size": 1024,
+        "epochs": 160,
+        "holdout_fraction": 0.2,
+        "learning_rate": 0.03,
+        "max_optimizer_seconds": 85.0,
+        "rank": 192,
+        "seed": 20261028,
+        "weight_decay": 0.0001
+      },
+      "controls": {
+        "constant": {
+          "holdout": {
+            "accuracy": 0.012732095085084438,
+            "count": 1885,
+            "cross_entropy": null
+          },
+          "train": {
+            "accuracy": 0.022461457177996635,
+            "count": 7524,
+            "cross_entropy": null
+          }
+        },
+        "frozen_random": {
+          "holdout": {
+            "accuracy": 0.011140583554376658,
+            "count": 1885,
+            "cross_entropy": 4.575343480603448
+          },
+          "train": {
+            "accuracy": 0.008904837852206273,
+            "count": 7524,
+            "cross_entropy": 4.5769600429666735
+          }
+        }
+      },
+      "model": {
+        "architecture": "shared_symmetric_cp_spectral_factorization",
+        "parameter_count": 37537,
+        "pretrained_weights": false,
+        "random_initialization": true
+      },
+      "pair_group_audit": {
+        "canonical_groups": 951,
+        "confidence_intervals": "NOT_COMPUTED; paired public examples are not IID",
+        "correct_complete_groups": 790,
+        "directed_row_accuracy": 0.8366047745358091,
+        "directed_rows": 1885,
+        "independent_label_replay": "minotaur_v6_mul_eval.recompute_mul_label",
+        "pair_complete_accuracy": 0.8307045215562566,
+        "prediction_sha256": "a0a29e91620ab5d29017f7d72da2abdffba0c0cb8a61d9ee4c1a16240e8b619d",
+        "reversal_consistency_rate": 1.0
+      },
+      "schema": "labyrinth.minotaur.v6-spectral.v1",
+      "split": {
+        "holdout_count": 1885,
+        "holdout_used_for_training": false,
+        "method": "grouped_unordered_pair_80_20",
+        "reversals_grouped": true,
+        "train_count": 7524
+      },
+      "training": {
+        "final_minibatch_loss": 8.140324894156947e-07,
+        "gradient_norm_max": 0.19902247190475464,
+        "initial_minibatch_loss": 4.576860427856445,
+        "initial_weight_sha256": "a45e9a103b8c0d23c3e673db99b674099b9f688af39dbe5eeccd497ed854ca11",
+        "minimum_minibatch_loss": 4.711426129233587e-07,
+        "optimizer": "AdamW",
+        "optimizer_seconds": 4.456384100019932,
+        "optimizer_steps": 1280,
+        "stopped_at_time_budget": false,
+        "trained_weight_sha256": "60e9931767f780903d2a930312a8b0ee4b9f3b81cdbb42794b44b5b8741715b7"
+      }
+    },
+    {
+      "candidate": {
+        "holdout": {
+          "accuracy": 0.7165689930740543,
+          "count": 1877,
+          "cross_entropy": 1.5751493979338704
+        },
+        "train": {
+          "accuracy": 1.0,
+          "count": 7532,
+          "cross_entropy": 9.140063519132103e-07
+        }
+      },
+      "conclusion": "positive_holdout_signal",
+      "config": {
+        "batch_size": 1024,
+        "epochs": 160,
+        "holdout_fraction": 0.2,
+        "learning_rate": 0.03,
+        "max_optimizer_seconds": 85.0,
+        "rank": 192,
+        "seed": 20261029,
+        "weight_decay": 0.0001
+      },
+      "controls": {
+        "constant": {
+          "holdout": {
+            "accuracy": 0.018114011734724045,
+            "count": 1877,
+            "cross_entropy": null
+          },
+          "train": {
+            "accuracy": 0.0211099311709404,
+            "count": 7532,
+            "cross_entropy": null
+          }
+        },
+        "frozen_random": {
+          "holdout": {
+            "accuracy": 0.006393180607352157,
+            "count": 1877,
+            "cross_entropy": 4.575064202350826
+          },
+          "train": {
+            "accuracy": 0.009559214020180564,
+            "count": 7532,
+            "cross_entropy": 4.576038913655902
+          }
+        }
+      },
+      "model": {
+        "architecture": "shared_symmetric_cp_spectral_factorization",
+        "parameter_count": 37537,
+        "pretrained_weights": false,
+        "random_initialization": true
+      },
+      "pair_group_audit": {
+        "canonical_groups": 951,
+        "confidence_intervals": "NOT_COMPUTED; paired public examples are not IID",
+        "correct_complete_groups": 676,
+        "directed_row_accuracy": 0.7165689930740543,
+        "directed_rows": 1877,
+        "independent_label_replay": "minotaur_v6_mul_eval.recompute_mul_label",
+        "pair_complete_accuracy": 0.7108307045215563,
+        "prediction_sha256": "9be916aedb23ae8e3e875ebc3d04c8267397e8471c8d8fdac6ab62da28bb86ed",
+        "reversal_consistency_rate": 1.0
+      },
+      "schema": "labyrinth.minotaur.v6-spectral.v1",
+      "split": {
+        "holdout_count": 1877,
+        "holdout_used_for_training": false,
+        "method": "grouped_unordered_pair_80_20",
+        "reversals_grouped": true,
+        "train_count": 7532
+      },
+      "training": {
+        "final_minibatch_loss": 1.002793169391225e-06,
+        "gradient_norm_max": 0.22053436934947968,
+        "initial_minibatch_loss": 4.576995372772217,
+        "initial_weight_sha256": "cbb92e8f3ff674c09ea667572001c60c0f458ffd8d127b6eaeda9aceb2b5f61b",
+        "minimum_minibatch_loss": 6.667817729066883e-07,
+        "optimizer": "AdamW",
+        "optimizer_seconds": 3.8540952999610454,
+        "optimizer_steps": 1280,
+        "stopped_at_time_budget": false,
+        "trained_weight_sha256": "f71587a78ded8a39d9b41eaf52e894e7ae37966d9a8ec50f6adeb594c1cb1ed2"
+      }
+    },
+    {
+      "candidate": {
+        "holdout": {
+          "accuracy": 0.8128654970760234,
+          "count": 1881,
+          "cross_entropy": 1.215811097197302
+        },
+        "train": {
+          "accuracy": 1.0,
+          "count": 7528,
+          "cross_entropy": 5.996540159963895e-07
+        }
+      },
+      "conclusion": "positive_holdout_signal",
+      "config": {
+        "batch_size": 1024,
+        "epochs": 160,
+        "holdout_fraction": 0.2,
+        "learning_rate": 0.03,
+        "max_optimizer_seconds": 85.0,
+        "rank": 192,
+        "seed": 20261030,
+        "weight_decay": 0.0001
+      },
+      "controls": {
+        "constant": {
+          "holdout": {
+            "accuracy": 0.02179691568017006,
+            "count": 1881,
+            "cross_entropy": null
+          },
+          "train": {
+            "accuracy": 0.020191285759210587,
+            "count": 7528,
+            "cross_entropy": null
+          }
+        },
+        "frozen_random": {
+          "holdout": {
+            "accuracy": 0.010101010101010102,
+            "count": 1881,
+            "cross_entropy": 4.577354029605263
+          },
+          "train": {
+            "accuracy": 0.014346439957492029,
+            "count": 7528,
+            "cross_entropy": 4.57540566001511
+          }
+        }
+      },
+      "model": {
+        "architecture": "shared_symmetric_cp_spectral_factorization",
+        "parameter_count": 37537,
+        "pretrained_weights": false,
+        "random_initialization": true
+      },
+      "pair_group_audit": {
+        "canonical_groups": 951,
+        "confidence_intervals": "NOT_COMPUTED; paired public examples are not IID",
+        "correct_complete_groups": 770,
+        "directed_row_accuracy": 0.8128654970760234,
+        "directed_rows": 1881,
+        "independent_label_replay": "minotaur_v6_mul_eval.recompute_mul_label",
+        "pair_complete_accuracy": 0.8096740273396424,
+        "prediction_sha256": "94f5b67ddb52a8bc7560c000becf8841015251c2185092ad34066667c3eb0a2d",
+        "reversal_consistency_rate": 1.0
+      },
+      "schema": "labyrinth.minotaur.v6-spectral.v1",
+      "split": {
+        "holdout_count": 1881,
+        "holdout_used_for_training": false,
+        "method": "grouped_unordered_pair_80_20",
+        "reversals_grouped": true,
+        "train_count": 7528
+      },
+      "training": {
+        "final_minibatch_loss": 5.092862238598173e-07,
+        "gradient_norm_max": 0.1993682086467743,
+        "initial_minibatch_loss": 4.5727434158325195,
+        "initial_weight_sha256": "e23579e57ca7870a6b40a08ab6b6c4f0c0abd80e2612feeefc635db119751ba8",
+        "minimum_minibatch_loss": 3.602751803555293e-07,
+        "optimizer": "AdamW",
+        "optimizer_seconds": 3.9417968000052497,
+        "optimizer_steps": 1280,
+        "stopped_at_time_budget": false,
+        "trained_weight_sha256": "8f7369ce216c6ed6cf592b2eef50f9b41e5ebb0ea53fc07df5d872e1f1419ce6"
+      }
+    },
+    {
+      "candidate": {
+        "holdout": {
+          "accuracy": 0.8233102714209686,
+          "count": 1879,
+          "cross_entropy": 0.9715658678153273
+        },
+        "train": {
+          "accuracy": 1.0,
+          "count": 7530,
+          "cross_entropy": 5.668818896233165e-07
+        }
+      },
+      "conclusion": "positive_holdout_signal",
+      "config": {
+        "batch_size": 1024,
+        "epochs": 160,
+        "holdout_fraction": 0.2,
+        "learning_rate": 0.03,
+        "max_optimizer_seconds": 85.0,
+        "rank": 192,
+        "seed": 20261031,
+        "weight_decay": 0.0001
+      },
+      "controls": {
+        "constant": {
+          "holdout": {
+            "accuracy": 0.01703033596277237,
+            "count": 1879,
+            "cross_entropy": null
+          },
+          "train": {
+            "accuracy": 0.021381141617894173,
+            "count": 7530,
+            "cross_entropy": null
+          }
+        },
+        "frozen_random": {
+          "holdout": {
+            "accuracy": 0.009579563597658328,
+            "count": 1879,
+            "cross_entropy": 4.578200879789782
+          },
+          "train": {
+            "accuracy": 0.010092961487383798,
+            "count": 7530,
+            "cross_entropy": 4.577318525377656
+          }
+        }
+      },
+      "model": {
+        "architecture": "shared_symmetric_cp_spectral_factorization",
+        "parameter_count": 37537,
+        "pretrained_weights": false,
+        "random_initialization": true
+      },
+      "pair_group_audit": {
+        "canonical_groups": 951,
+        "confidence_intervals": "NOT_COMPUTED; paired public examples are not IID",
+        "correct_complete_groups": 780,
+        "directed_row_accuracy": 0.8233102714209686,
+        "directed_rows": 1879,
+        "independent_label_replay": "minotaur_v6_mul_eval.recompute_mul_label",
+        "pair_complete_accuracy": 0.8201892744479495,
+        "prediction_sha256": "d50316f8731acdf4a71146da84ceddcff12bee117f940ed9ed0da6402c301784",
+        "reversal_consistency_rate": 1.0
+      },
+      "schema": "labyrinth.minotaur.v6-spectral.v1",
+      "split": {
+        "holdout_count": 1879,
+        "holdout_used_for_training": false,
+        "method": "grouped_unordered_pair_80_20",
+        "reversals_grouped": true,
+        "train_count": 7530
+      },
+      "training": {
+        "final_minibatch_loss": 6.016413180987001e-07,
+        "gradient_norm_max": 0.2139071673154831,
+        "initial_minibatch_loss": 4.577270030975342,
+        "initial_weight_sha256": "aaa577a2c43f41aef2a2726e89a381c66173623756cdb60842b43dc9784bbcb7",
+        "minimum_minibatch_loss": 3.700826312069694e-07,
+        "optimizer": "AdamW",
+        "optimizer_seconds": 3.8006418999284506,
+        "optimizer_steps": 1280,
+        "stopped_at_time_budget": false,
+        "trained_weight_sha256": "c6c8fd69e60b9f0d17e460899f8b6aa0b900fdc7bbc543ff3034bfd48470cd6f"
+      }
+    },
+    {
+      "candidate": {
+        "holdout": {
+          "accuracy": 0.804140127388535,
+          "count": 1884,
+          "cross_entropy": 0.947111222900909
+        },
+        "train": {
+          "accuracy": 1.0,
+          "count": 7525,
+          "cross_entropy": 6.212790549246972e-07
+        }
+      },
+      "conclusion": "positive_holdout_signal",
+      "config": {
+        "batch_size": 1024,
+        "epochs": 160,
+        "holdout_fraction": 0.2,
+        "learning_rate": 0.03,
+        "max_optimizer_seconds": 85.0,
+        "rank": 192,
+        "seed": 20261032,
+        "weight_decay": 0.0001
+      },
+      "controls": {
+        "constant": {
+          "holdout": {
+            "accuracy": 0.014861995354294777,
+            "count": 1884,
+            "cross_entropy": null
+          },
+          "train": {
+            "accuracy": 0.021926909685134888,
+            "count": 7525,
+            "cross_entropy": null
+          }
+        },
+        "frozen_random": {
+          "holdout": {
+            "accuracy": 0.012738853503184714,
+            "count": 1884,
+            "cross_entropy": 4.575620355626327
+          },
+          "train": {
+            "accuracy": 0.009036544850498339,
+            "count": 7525,
+            "cross_entropy": 4.576556919642857
+          }
+        }
+      },
+      "model": {
+        "architecture": "shared_symmetric_cp_spectral_factorization",
+        "parameter_count": 37537,
+        "pretrained_weights": false,
+        "random_initialization": true
+      },
+      "pair_group_audit": {
+        "canonical_groups": 951,
+        "confidence_intervals": "NOT_COMPUTED; paired public examples are not IID",
+        "correct_complete_groups": 763,
+        "directed_row_accuracy": 0.804140127388535,
+        "directed_rows": 1884,
+        "independent_label_replay": "minotaur_v6_mul_eval.recompute_mul_label",
+        "pair_complete_accuracy": 0.8023133543638276,
+        "prediction_sha256": "39decd5dc534d43542b8305a255004b7ce6caca9d229b567086a9d5b11dab04e",
+        "reversal_consistency_rate": 1.0
+      },
+      "schema": "labyrinth.minotaur.v6-spectral.v1",
+      "split": {
+        "holdout_count": 1884,
+        "holdout_used_for_training": false,
+        "method": "grouped_unordered_pair_80_20",
+        "reversals_grouped": true,
+        "train_count": 7525
+      },
+      "training": {
+        "final_minibatch_loss": 6.588193741663417e-07,
+        "gradient_norm_max": 0.20707771182060242,
+        "initial_minibatch_loss": 4.574974060058594,
+        "initial_weight_sha256": "49f807edc264c57b4069185de78c90ad1a339d0cd75ac9183b6ad80f6311fbd8",
+        "minimum_minibatch_loss": 4.043747310333856e-07,
+        "optimizer": "AdamW",
+        "optimizer_seconds": 3.7619464999297634,
+        "optimizer_steps": 1280,
+        "stopped_at_time_budget": false,
+        "trained_weight_sha256": "f38330a963830058bb993f89eed5d18b3f27c202042e520d29a722a97da612bd"
+      }
+    },
+    {
+      "candidate": {
+        "holdout": {
+          "accuracy": 0.7626128518321826,
+          "count": 1883,
+          "cross_entropy": 1.3266054417817312
+        },
+        "train": {
+          "accuracy": 1.0,
+          "count": 7526,
+          "cross_entropy": 7.402469869208066e-07
+        }
+      },
+      "conclusion": "positive_holdout_signal",
+      "config": {
+        "batch_size": 1024,
+        "epochs": 160,
+        "holdout_fraction": 0.2,
+        "learning_rate": 0.03,
+        "max_optimizer_seconds": 85.0,
+        "rank": 192,
+        "seed": 20261033,
+        "weight_decay": 0.0001
+      },
+      "controls": {
+        "constant": {
+          "holdout": {
+            "accuracy": 0.015932023525238037,
+            "count": 1883,
+            "cross_entropy": null
+          },
+          "train": {
+            "accuracy": 0.02165825106203556,
+            "count": 7526,
+            "cross_entropy": null
+          }
+        },
+        "frozen_random": {
+          "holdout": {
+            "accuracy": 0.01168348380244291,
+            "count": 1883,
+            "cross_entropy": 4.577738627688529
+          },
+          "train": {
+            "accuracy": 0.01222428913101249,
+            "count": 7526,
+            "cross_entropy": 4.5748980357676725
+          }
+        }
+      },
+      "model": {
+        "architecture": "shared_symmetric_cp_spectral_factorization",
+        "parameter_count": 37537,
+        "pretrained_weights": false,
+        "random_initialization": true
+      },
+      "pair_group_audit": {
+        "canonical_groups": 951,
+        "confidence_intervals": "NOT_COMPUTED; paired public examples are not IID",
+        "correct_complete_groups": 720,
+        "directed_row_accuracy": 0.7626128518321826,
+        "directed_rows": 1883,
+        "independent_label_replay": "minotaur_v6_mul_eval.recompute_mul_label",
+        "pair_complete_accuracy": 0.7570977917981072,
+        "prediction_sha256": "a41c16e38fdb4457f272717c8c0c5f4000ad6177a42debadb92bf6706bd1f794",
+        "reversal_consistency_rate": 1.0
+      },
+      "schema": "labyrinth.minotaur.v6-spectral.v1",
+      "split": {
+        "holdout_count": 1883,
+        "holdout_used_for_training": false,
+        "method": "grouped_unordered_pair_80_20",
+        "reversals_grouped": true,
+        "train_count": 7526
+      },
+      "training": {
+        "final_minibatch_loss": 9.316916020907229e-07,
+        "gradient_norm_max": 0.20534564554691315,
+        "initial_minibatch_loss": 4.574861526489258,
+        "initial_weight_sha256": "60561eb8c5632ab2a91a0fe02a036293eb0205af42ab6ebb18cb95575bcd2053",
+        "minimum_minibatch_loss": 5.373711928768898e-07,
+        "optimizer": "AdamW",
+        "optimizer_seconds": 4.0180949999485165,
+        "optimizer_steps": 1280,
+        "stopped_at_time_budget": false,
+        "trained_weight_sha256": "5e45d0f4265c1f8978417b823f85ad3ba3ddbf7d49af5e7fca59fcea0539ce62"
+      }
+    },
+    {
+      "candidate": {
+        "holdout": {
+          "accuracy": 0.7882477501323452,
+          "count": 1889,
+          "cross_entropy": 1.2620655098183562
+        },
+        "train": {
+          "accuracy": 1.0,
+          "count": 7520,
+          "cross_entropy": 6.86733782207197e-07
+        }
+      },
+      "conclusion": "positive_holdout_signal",
+      "config": {
+        "batch_size": 1024,
+        "epochs": 160,
+        "holdout_fraction": 0.2,
+        "learning_rate": 0.03,
+        "max_optimizer_seconds": 85.0,
+        "rank": 192,
+        "seed": 20261034,
+        "weight_decay": 0.0001
+      },
+      "controls": {
+        "constant": {
+          "holdout": {
+            "accuracy": 0.016940180212259293,
+            "count": 1889,
+            "cross_entropy": null
+          },
+          "train": {
+            "accuracy": 0.021409574896097183,
+            "count": 7520,
+            "cross_entropy": null
+          }
+        },
+        "frozen_random": {
+          "holdout": {
+            "accuracy": 0.009528851244044468,
+            "count": 1889,
+            "cross_entropy": 4.576773114908682
+          },
+          "train": {
+            "accuracy": 0.009042553191489361,
+            "count": 7520,
+            "cross_entropy": 4.575170963368517
+          }
+        }
+      },
+      "model": {
+        "architecture": "shared_symmetric_cp_spectral_factorization",
+        "parameter_count": 37537,
+        "pretrained_weights": false,
+        "random_initialization": true
+      },
+      "pair_group_audit": {
+        "canonical_groups": 951,
+        "confidence_intervals": "NOT_COMPUTED; paired public examples are not IID",
+        "correct_complete_groups": 747,
+        "directed_row_accuracy": 0.7882477501323452,
+        "directed_rows": 1889,
+        "independent_label_replay": "minotaur_v6_mul_eval.recompute_mul_label",
+        "pair_complete_accuracy": 0.7854889589905363,
+        "prediction_sha256": "974ebdd2aa8b766c332e1cb641772eff3c5f55d5f2238dec39e13d1b779a3414",
+        "reversal_consistency_rate": 1.0
+      },
+      "schema": "labyrinth.minotaur.v6-spectral.v1",
+      "split": {
+        "holdout_count": 1889,
+        "holdout_used_for_training": false,
+        "method": "grouped_unordered_pair_80_20",
+        "reversals_grouped": true,
+        "train_count": 7520
+      },
+      "training": {
+        "final_minibatch_loss": 6.759670441169874e-07,
+        "gradient_norm_max": 0.23089206218719482,
+        "initial_minibatch_loss": 4.57913064956665,
+        "initial_weight_sha256": "8581bab24dd96edf1468f67ef381a4b17d0ce80984c10de1237d0931dbf51c2b",
+        "minimum_minibatch_loss": 4.1790818272602337e-07,
+        "optimizer": "AdamW",
+        "optimizer_seconds": 4.065203599981032,
+        "optimizer_steps": 1280,
+        "stopped_at_time_budget": false,
+        "trained_weight_sha256": "9a8b84a674c3f43d9e068ab4a51cd279188024df3d813201970b7865a901b0fd"
+      }
+    },
+    {
+      "candidate": {
+        "holdout": {
+          "accuracy": 0.6762360446570973,
+          "count": 1881,
+          "cross_entropy": 2.052491791890949
+        },
+        "train": {
+          "accuracy": 1.0,
+          "count": 7528,
+          "cross_entropy": 8.63011245240678e-07
+        }
+      },
+      "conclusion": "positive_holdout_signal",
+      "config": {
+        "batch_size": 1024,
+        "epochs": 160,
+        "holdout_fraction": 0.2,
+        "learning_rate": 0.03,
+        "max_optimizer_seconds": 85.0,
+        "rank": 192,
+        "seed": 20261035,
+        "weight_decay": 0.0001
+      },
+      "controls": {
+        "constant": {
+          "holdout": {
+            "accuracy": 0.02551834098994732,
+            "count": 1881,
+            "cross_entropy": null
+          },
+          "train": {
+            "accuracy": 0.019261423498392105,
+            "count": 7528,
+            "cross_entropy": null
+          }
+        },
+        "frozen_random": {
+          "holdout": {
+            "accuracy": 0.01541733120680489,
+            "count": 1881,
+            "cross_entropy": 4.576732580741627
+          },
+          "train": {
+            "accuracy": 0.009032943676939426,
+            "count": 7528,
+            "cross_entropy": 4.576486455773446
+          }
+        }
+      },
+      "model": {
+        "architecture": "shared_symmetric_cp_spectral_factorization",
+        "parameter_count": 37537,
+        "pretrained_weights": false,
+        "random_initialization": true
+      },
+      "pair_group_audit": {
+        "canonical_groups": 951,
+        "confidence_intervals": "NOT_COMPUTED; paired public examples are not IID",
+        "correct_complete_groups": 638,
+        "directed_row_accuracy": 0.6762360446570973,
+        "directed_rows": 1881,
+        "independent_label_replay": "minotaur_v6_mul_eval.recompute_mul_label",
+        "pair_complete_accuracy": 0.6708727655099895,
+        "prediction_sha256": "e64631e88c740d6590f5ba62ef7e5efb3f5481e31ca6d50f443f922f77a3a5c0",
+        "reversal_consistency_rate": 1.0
+      },
+      "schema": "labyrinth.minotaur.v6-spectral.v1",
+      "split": {
+        "holdout_count": 1881,
+        "holdout_used_for_training": false,
+        "method": "grouped_unordered_pair_80_20",
+        "reversals_grouped": true,
+        "train_count": 7528
+      },
+      "training": {
+        "final_minibatch_loss": 8.440641181550745e-07,
+        "gradient_norm_max": 0.20981334149837494,
+        "initial_minibatch_loss": 4.578354835510254,
+        "initial_weight_sha256": "be1530d9ffb58d8331c19ff4a5568f09d487596fc08ed7d91aa6ddac287d6865",
+        "minimum_minibatch_loss": 6.586283234355506e-07,
+        "optimizer": "AdamW",
+        "optimizer_seconds": 4.32087080006022,
+        "optimizer_steps": 1280,
+        "stopped_at_time_budget": false,
+        "trained_weight_sha256": "5cfaab8368199252304d5605fe4538040a681da5decbc8522241195c8d67a8ed"
+      }
+    },
+    {
+      "candidate": {
+        "holdout": {
+          "accuracy": 0.7811501597444089,
+          "count": 1878,
+          "cross_entropy": 1.1999091817675054
+        },
+        "train": {
+          "accuracy": 1.0,
+          "count": 7531,
+          "cross_entropy": 5.315084660470549e-07
+        }
+      },
+      "conclusion": "positive_holdout_signal",
+      "config": {
+        "batch_size": 1024,
+        "epochs": 160,
+        "holdout_fraction": 0.2,
+        "learning_rate": 0.03,
+        "max_optimizer_seconds": 85.0,
+        "rank": 192,
+        "seed": 20261036,
+        "weight_decay": 0.0001
+      },
+      "controls": {
+        "constant": {
+          "holdout": {
+            "accuracy": 0.02023429237306118,
+            "count": 1878,
+            "cross_entropy": null
+          },
+          "train": {
+            "accuracy": 0.020581595599651337,
+            "count": 7531,
+            "cross_entropy": null
+          }
+        },
+        "frozen_random": {
+          "holdout": {
+            "accuracy": 0.009052183173588925,
+            "count": 1878,
+            "cross_entropy": 4.576199435070554
+          },
+          "train": {
+            "accuracy": 0.010224405789403798,
+            "count": 7531,
+            "cross_entropy": 4.574658533789504
+          }
+        }
+      },
+      "model": {
+        "architecture": "shared_symmetric_cp_spectral_factorization",
+        "parameter_count": 37537,
+        "pretrained_weights": false,
+        "random_initialization": true
+      },
+      "pair_group_audit": {
+        "canonical_groups": 951,
+        "confidence_intervals": "NOT_COMPUTED; paired public examples are not IID",
+        "correct_complete_groups": 738,
+        "directed_row_accuracy": 0.7811501597444089,
+        "directed_rows": 1878,
+        "independent_label_replay": "minotaur_v6_mul_eval.recompute_mul_label",
+        "pair_complete_accuracy": 0.7760252365930599,
+        "prediction_sha256": "136295c267c6cf89935a2e30080640738e2c382e4f306532c7cc84f0c877591e",
+        "reversal_consistency_rate": 1.0
+      },
+      "schema": "labyrinth.minotaur.v6-spectral.v1",
+      "split": {
+        "holdout_count": 1878,
+        "holdout_used_for_training": false,
+        "method": "grouped_unordered_pair_80_20",
+        "reversals_grouped": true,
+        "train_count": 7531
+      },
+      "training": {
+        "final_minibatch_loss": 7.090116582730843e-07,
+        "gradient_norm_max": 0.19924014806747437,
+        "initial_minibatch_loss": 4.5731682777404785,
+        "initial_weight_sha256": "43fe6586be761e913df3ddec530fff91557cc3314d159927b5cd4a4863408ab7",
+        "minimum_minibatch_loss": 4.0951289292934234e-07,
+        "optimizer": "AdamW",
+        "optimizer_seconds": 4.6755347000434995,
+        "optimizer_steps": 1280,
+        "stopped_at_time_budget": false,
+        "trained_weight_sha256": "a96ba664cfd21b8d2e0c90955a5bf257e25e4187cd106eabb8fbddda1ce1ab9d"
+      }
+    },
+    {
+      "candidate": {
+        "holdout": {
+          "accuracy": 0.8579787234042553,
+          "count": 1880,
+          "cross_entropy": 0.7822266274310173
+        },
+        "train": {
+          "accuracy": 1.0,
+          "count": 7529,
+          "cross_entropy": 4.5840406221612103e-07
+        }
+      },
+      "conclusion": "positive_holdout_signal",
+      "config": {
+        "batch_size": 1024,
+        "epochs": 160,
+        "holdout_fraction": 0.2,
+        "learning_rate": 0.03,
+        "max_optimizer_seconds": 85.0,
+        "rank": 192,
+        "seed": 20261037,
+        "weight_decay": 0.0001
+      },
+      "controls": {
+        "constant": {
+          "holdout": {
+            "accuracy": 0.01595744676887989,
+            "count": 1880,
+            "cross_entropy": null
+          },
+          "train": {
+            "accuracy": 0.021649621427059174,
+            "count": 7529,
+            "cross_entropy": null
+          }
+        },
+        "frozen_random": {
+          "holdout": {
+            "accuracy": 0.015425531914893617,
+            "count": 1880,
+            "cross_entropy": 4.574214074966755
+          },
+          "train": {
+            "accuracy": 0.008633284632753353,
+            "count": 7529,
+            "cross_entropy": 4.576893758197469
+          }
+        }
+      },
+      "model": {
+        "architecture": "shared_symmetric_cp_spectral_factorization",
+        "parameter_count": 37537,
+        "pretrained_weights": false,
+        "random_initialization": true
+      },
+      "pair_group_audit": {
+        "canonical_groups": 951,
+        "confidence_intervals": "NOT_COMPUTED; paired public examples are not IID",
+        "correct_complete_groups": 811,
+        "directed_row_accuracy": 0.8579787234042553,
+        "directed_rows": 1880,
+        "independent_label_replay": "minotaur_v6_mul_eval.recompute_mul_label",
+        "pair_complete_accuracy": 0.8527865404837014,
+        "prediction_sha256": "d82b24eb3e3307aa29a374a7d630679e6b6828ead1ba2bed62530e9e477c9b22",
+        "reversal_consistency_rate": 1.0
+      },
+      "schema": "labyrinth.minotaur.v6-spectral.v1",
+      "split": {
+        "holdout_count": 1880,
+        "holdout_used_for_training": false,
+        "method": "grouped_unordered_pair_80_20",
+        "reversals_grouped": true,
+        "train_count": 7529
+      },
+      "training": {
+        "final_minibatch_loss": 4.2498967900428397e-07,
+        "gradient_norm_max": 0.19709192216396332,
+        "initial_minibatch_loss": 4.577685832977295,
+        "initial_weight_sha256": "05c46309123f93df05e5da3b2e0a8e88a85417bf41a3a63a83a4723611312cfc",
+        "minimum_minibatch_loss": 1.436452379266484e-07,
+        "optimizer": "AdamW",
+        "optimizer_seconds": 4.544304600101896,
+        "optimizer_steps": 1280,
+        "stopped_at_time_budget": false,
+        "trained_weight_sha256": "42cbdc3d97d5e6dd73f845325a6dd5cc6d0cfc0ddb5991b1da0ae6844207fbe9"
+      }
+    }
+  ],
+  "limitations": [
+    "Public seeded grouped-pair holdouts are NOT a private independent exam.",
+    "No withheld-value, absent-output or modulus-101 transfer qualified by this sweep.",
+    "Training and independent external arithmetic scoring are separate pending states.",
+    "No model weights promoted or trainee graduated."
+  ],
+  "promotion_recommendation": "DO_NOT_PROMOTE",
+  "qualification": "NOT_ESTABLISHED",
+  "schema": "labyrinth.minotaur.v6-ten-seed-replication.v1",
+  "source": {
+    "clean": true,
+    "commit": "40695a05869d00211f4d3202c2f00212ac85ccd6",
+    "module_sha256": "bebcd944ff16efc833f13fe6faa71598e9e7d3eef3f5433da74f53a68a4fbede"
+  }
+}
