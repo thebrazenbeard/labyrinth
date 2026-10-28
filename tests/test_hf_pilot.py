@@ -276,6 +276,45 @@ class HfPilotContractTests(unittest.TestCase):
         }), encoding="utf-8")
         self.assertNotEqual(before[index.name], _metadata_digest(self.model)[index.name])
 
+    def test_standalone_chat_templates_are_pinned_in_metadata_manifest(self):
+        main_template = self.model / "chat_template.jinja"
+        main_template.write_text("{{ messages[0]['content'] }}", encoding="utf-8")
+        templates = self.model / "additional_chat_templates"
+        templates.mkdir()
+        auxiliary = templates / "tool_use.jinja"
+        auxiliary.write_text("{{ messages[0]['role'] }}", encoding="utf-8")
+        before = _metadata_digest(self.model)
+        self.assertIn("chat_template.jinja", before)
+        self.assertIn("additional_chat_templates/tool_use.jinja", before)
+        main_template.write_text("OVERRIDDEN MAIN TEMPLATE", encoding="utf-8")
+        changed_main = _metadata_digest(self.model)
+        self.assertNotEqual(before["chat_template.jinja"], changed_main["chat_template.jinja"])
+        auxiliary.write_text("OVERRIDDEN AUXILIARY TEMPLATE", encoding="utf-8")
+        changed_auxiliary = _metadata_digest(self.model)
+        self.assertNotEqual(changed_main["additional_chat_templates/tool_use.jinja"],
+                            changed_auxiliary["additional_chat_templates/tool_use.jinja"])
+
+    def test_unrelated_auxiliary_template_directory_is_not_hf_prompt_metadata(self):
+        templates = self.model / "additional_chat_templates"
+        templates.mkdir()
+        unrelated = templates / "irrelevant_assets"
+        unrelated.mkdir()
+        (unrelated / "memo.txt").write_text("not a direct chat template", encoding="utf-8")
+        self.assertEqual(validate_config(self.spec())[0], self.model)
+        self.assertNotIn("additional_chat_templates/irrelevant_assets", _metadata_digest(self.model))
+
+    def test_symlinked_auxiliary_chat_template_is_refused(self):
+        templates = self.model / "additional_chat_templates"
+        templates.mkdir()
+        target = Path(self.temp.name) / "outside.jinja"
+        target.write_text("external template", encoding="utf-8")
+        try:
+            (templates / "tool_use.jinja").symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        with self.assertRaisesRegex(ValueError, "non-symlink"):
+            validate_config(self.spec())
+
     def test_reload_refuses_symlink_adapter_root_before_loading_model(self):
         external = Path(self.temp.name) / "outside_adapter"
         external.mkdir()
@@ -366,6 +405,117 @@ class HfPilotContractTests(unittest.TestCase):
             "evaluations": {"candidate": {"trials": []}},
         }), encoding="utf-8")
         return candidate, config_file
+
+    def test_reload_report_cannot_modify_pinned_adapter_or_base_model(self):
+        candidate, _ = self._write_reload_adapter_fixture()
+        for destination in (candidate / "reload.json", self.model / "reload.json"):
+            with self.subTest(destination=destination):
+                with patch("labyrinth.hf_pilot._deps", side_effect=AssertionError("heavy dependencies loaded")):
+                    with self.assertRaisesRegex(ValueError, "checkpoint directory"):
+                        reload_evaluate(self.output, destination)
+                self.assertFalse(destination.exists())
+
+    def test_reload_report_parent_symlink_swap_after_validation_refused(self):
+        from labyrinth.hf_pilot import _secure_reload_output_supported
+        if not _secure_reload_output_supported():
+            self.skipTest("descriptor-relative, nofollow output creation unavailable")
+        self._write_reload_adapter_fixture()
+        reports = Path(self.temp.name) / "reports"
+        reports.mkdir()
+
+        class UnchangedPeft:
+            @staticmethod
+            def from_pretrained(*_args, **_kwargs):
+                return object()
+
+        def attack_during_score(*_args, **_kwargs):
+            reports.rename(Path(self.temp.name) / "moved_reports")
+            reports.symlink_to(self.model, target_is_directory=True)
+            return {"trials": []}
+
+        with patch("labyrinth.hf_pilot._deps", return_value=(None, None, None, (None, UnchangedPeft, None), "cpu")), \
+             patch("labyrinth.hf_pilot._load_base", return_value=(object(), object())), \
+             patch("labyrinth.hf_pilot._lora_value_digest", return_value="pretend-lora-digest"), \
+             patch("labyrinth.hf_pilot._score_model", side_effect=attack_during_score):
+            with self.assertRaises(OSError):
+                reload_evaluate(self.output, reports / "verify.json")
+        self.assertFalse((self.model / "verify.json").exists())
+
+    def test_reload_report_parent_directory_replacement_refused(self):
+        from labyrinth.hf_pilot import _secure_reload_output_supported
+        if not _secure_reload_output_supported():
+            self.skipTest("descriptor-relative, nofollow output creation unavailable")
+        self._write_reload_adapter_fixture()
+        reports = Path(self.temp.name) / "reports"
+        reports.mkdir()
+
+        class UnchangedPeft:
+            @staticmethod
+            def from_pretrained(*_args, **_kwargs):
+                return object()
+
+        def attack_during_score(*_args, **_kwargs):
+            reports.rename(Path(self.temp.name) / "moved_reports")
+            reports.mkdir()
+            return {"trials": []}
+
+        with patch("labyrinth.hf_pilot._deps", return_value=(None, None, None, (None, UnchangedPeft, None), "cpu")), \
+             patch("labyrinth.hf_pilot._load_base", return_value=(object(), object())), \
+             patch("labyrinth.hf_pilot._lora_value_digest", return_value="pretend-lora-digest"), \
+             patch("labyrinth.hf_pilot._score_model", side_effect=attack_during_score):
+            with self.assertRaisesRegex(ValueError, "destination parent changed"):
+                reload_evaluate(self.output, reports / "verify.json")
+        self.assertFalse((reports / "verify.json").exists())
+
+    def test_secure_reload_report_creates_only_once_in_bound_parent(self):
+        from labyrinth.hf_pilot import _save_reload_report_new, _secure_reload_output_supported
+        if not _secure_reload_output_supported():
+            self.skipTest("descriptor-relative, nofollow output creation unavailable")
+        report_path = Path(self.temp.name) / "verify.json"
+        parent_stat = report_path.parent.stat()
+        identity = (parent_stat.st_dev, parent_stat.st_ino)
+        _save_reload_report_new(report_path, {"disposition": "RESEARCH_ONLY"}, identity)
+        self.assertEqual(json.loads(report_path.read_text(encoding="utf-8")),
+                         {"disposition": "RESEARCH_ONLY"})
+        with self.assertRaises(FileExistsError):
+            _save_reload_report_new(report_path, {"disposition": "OVERWRITE"}, identity)
+        self.assertEqual(json.loads(report_path.read_text(encoding="utf-8")),
+                         {"disposition": "RESEARCH_ONLY"})
+
+    def test_reload_writes_normal_report_under_run_dir_once(self):
+        from labyrinth.hf_pilot import _secure_reload_output_supported
+        if not _secure_reload_output_supported():
+            self.skipTest("descriptor-relative, nofollow output creation unavailable")
+        self._write_reload_adapter_fixture()
+
+        class UnchangedPeft:
+            @staticmethod
+            def from_pretrained(*_args, **_kwargs):
+                return object()
+
+        report_path = self.output / "verify.json"
+        with patch("labyrinth.hf_pilot._deps", return_value=(None, None, None, (None, UnchangedPeft, None), "cpu")), \
+             patch("labyrinth.hf_pilot._load_base", return_value=(object(), object())), \
+             patch("labyrinth.hf_pilot._lora_value_digest", return_value="pretend-lora-digest"), \
+             patch("labyrinth.hf_pilot._score_model", return_value={"trials": []}):
+            report = reload_evaluate(self.output, report_path)
+        self.assertEqual(report["schema"], "labyrinth.hf-lora-reload-eval.v2")
+        self.assertEqual(json.loads(report_path.read_text(encoding="utf-8"))["schema"],
+                         "labyrinth.hf-lora-reload-eval.v2")
+        with self.assertRaises(FileExistsError):
+            from labyrinth.hf_pilot import _save_reload_report_new
+            parent_stat = report_path.parent.stat()
+            _save_reload_report_new(report_path, report,
+                                    (parent_stat.st_dev, parent_stat.st_ino))
+
+    def test_reload_unsupported_platform_fails_before_loading_model(self):
+        self._write_reload_adapter_fixture()
+        report_path = self.output / "verify.json"
+        with patch("labyrinth.hf_pilot._secure_reload_output_supported", return_value=False), \
+             patch("labyrinth.hf_pilot._deps", side_effect=AssertionError("loaded heavy dependencies")):
+            with self.assertRaisesRegex(RuntimeError, "secure reload report creation unsupported"):
+                reload_evaluate(self.output, report_path)
+        self.assertFalse(report_path.exists())
 
     def test_reload_refuses_adapter_config_swap_during_peft_load(self):
         candidate, config_file = self._write_reload_adapter_fixture()

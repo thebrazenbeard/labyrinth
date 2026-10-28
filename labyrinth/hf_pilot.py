@@ -227,13 +227,24 @@ def _metadata_digest(model_path: Path) -> dict[str, str]:
              "model.safetensors.index.json",
              "tokenizer_config.json", "tokenizer.json", "added_tokens.json",
              "vocab.json", "vocab.txt", "merges.txt", "sentencepiece.bpe.model",
-             "tokenizer.model"}
+             "tokenizer.model", "chat_template.jinja"}
     matches = sorted(path for path in model_path.iterdir()
                      if path.name in names or path.name.startswith("tokenizer"))
+    # Modern Transformers loads standalone Jinja templates (and lets them
+    # override templates embedded in tokenizer_config.json). Pin those bytes
+    # as well, or calibration can change prompts without changing provenance.
+    templates = model_path / "additional_chat_templates"
+    if templates.exists() or templates.is_symlink():
+        if not templates.is_dir() or templates.is_symlink():
+            raise ValueError("local model chat-template directory must be non-symlink")
+        # Transformers discovers only direct *.jinja entries here. Harmless
+        # unrelated files/subdirectories are not part of the prompt template.
+        matches.extend(sorted(path for path in templates.iterdir()
+                              if path.suffix == ".jinja"))
     if any(not p.is_file() or p.is_symlink() or p.stat().st_size > 268_435_456
            for p in matches):
         raise ValueError("local model metadata must be regular non-symlink files")
-    return {p.name: _sha_file(p) for p in matches}
+    return {p.relative_to(model_path).as_posix(): _sha_file(p) for p in matches}
 
 
 def _checkpoint_manifest(model_path: Path, weights: list[Path]) -> dict[str, dict[str, str]]:
@@ -764,9 +775,48 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
 def _save_new(path: Path, result: dict[str, Any]) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(str(path), flags, 0o600)
+    _write_new_report(fd, result)
+
+
+def _write_new_report(fd: int, result: dict[str, Any]) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(result, handle, indent=2, sort_keys=True)
         handle.write("\n")
+
+
+def _secure_reload_output_supported() -> bool:
+    """Require descriptor-relative creation rather than a mutable path lookup."""
+    return (os.open in os.supports_dir_fd
+            and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW"))
+
+
+def _save_reload_report_new(path: Path, result: dict[str, Any],
+                            parent_identity: tuple[int, int]) -> None:
+    """Create a write-once report in the same directory validated before eval.
+
+    A different process can replace pathname components during slow inference.
+    Open every parent component without following symlinks, confirm that the
+    destination parent is still the original inode, and create relative to its
+    held directory descriptor. On platforms without the required operations,
+    fail closed: a normal string-path open would be vulnerable to the race.
+    """
+    if not _secure_reload_output_supported():
+        raise RuntimeError("secure reload report creation unsupported on this platform")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent_fd = os.open(path.anchor, flags)
+    try:
+        for component in path.parent.parts[1:]:
+            child_fd = os.open(component, flags, dir_fd=parent_fd)
+            os.close(parent_fd)
+            parent_fd = child_fd
+        parent_stat = os.fstat(parent_fd)
+        if (parent_stat.st_dev, parent_stat.st_ino) != parent_identity:
+            raise ValueError("reload report destination parent changed during evaluation")
+        file_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        fd = os.open(path.name, file_flags, 0o600, dir_fd=parent_fd)
+        _write_new_report(fd, result)
+    finally:
+        os.close(parent_fd)
 
 
 def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, Any]:
@@ -774,6 +824,10 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
 
     This function cannot by itself attest process separation. The module CLI
     writes its own PID and a different-run CLI invocation is required.
+    Reload report creation needs POSIX descriptor-relative nofollow opens;
+    platforms without them (including standard Windows Python) fail closed.
+    Checkpoint and output directory ownership/permissions must be trusted:
+    a malicious same-user process can reparent an already-open output folder.
     """
     root = Path(run_dir).expanduser().resolve(strict=True)
     source = root / "pilot_report.json"
@@ -797,6 +851,19 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     if _metadata_digest(model_path) != report.get("model_metadata_sha256"):
         raise ValueError("local model tokenizer/config changed after training")
     adapter_dir = root / "candidate_adapter"
+    raw_report_path = Path(report_path).expanduser()
+    if raw_report_path.is_symlink():
+        raise ValueError("reload report path must not be a symlink")
+    destination = raw_report_path.resolve(strict=False)
+    if (destination == model_path or model_path in destination.parents
+            or destination == adapter_dir or adapter_dir in destination.parents):
+        raise ValueError("reload report must not modify the model or adapter checkpoint directory")
+    if not _secure_reload_output_supported():
+        raise RuntimeError("secure reload report creation unsupported on this platform")
+    if not destination.parent.is_dir():
+        raise ValueError("reload report destination parent must already exist")
+    parent_stat = destination.parent.stat()
+    parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
     if adapter_dir.is_symlink():
         raise ValueError("candidate adapter root must not be a symlink")
     actual_adapters = _adapter_manifest(adapter_dir)
@@ -830,8 +897,9 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
              "process_id_differs": os.getpid() != report.get("training_process_id"),
              "matches_original_candidate_trials": observed["trials"] == report["evaluations"]["candidate"]["trials"],
              "limitations": ["Different process must be independently established; PID alone is not proof.",
-                             "Determinism depends on compatible model kernels/hardware."]}
-    _save_new(Path(report_path).expanduser(), value)
+                             "Determinism depends on compatible model kernels/hardware.",
+                             "Output and checkpoint directories require trusted ownership; malicious same-user reparenting is not prevented."]}
+    _save_reload_report_new(destination, value, parent_identity)
     return value
 
 

@@ -313,6 +313,7 @@ def run_experiment(
     # could still have hidden mutable state; disclose that residual risk.
     arms: dict[str, dict[str, Any]] = {}
     instances: list[Model] = []
+    first_provenance: dict[str, Any] | None = None
     arm_prefixes = {
         "baseline": "", "candidate": candidate_prefix,
         "placebo": _placebo_context(len(candidate_prefix)),
@@ -324,6 +325,11 @@ def run_experiment(
             raise ValueError("adapter factory reused the same instance across control arms")
         if instances and adapter.model_id != instances[0].model_id:
             raise ValueError("adapter factory returned different model identities")
+        provenance = _adapter_provenance(adapter)
+        if first_provenance is not None and provenance != first_provenance:
+            raise ValueError("adapter factory returned different adapter provenance across arms")
+        if first_provenance is None:
+            first_provenance = provenance
         instances.append(adapter)
         arms[arm] = _evaluate_arm(adapter, challenges, eval_seed, arm, prefix)
     return {
@@ -331,7 +337,7 @@ def run_experiment(
         "mode": "controlled-few-shot",
         "source": _source_state(),
         "model_id": instances[0].model_id,
-        "adapter": _adapter_provenance(instances[0]),
+        "adapter": first_provenance,
         "parameters": {
             "eval_seed": eval_seed, "eval_count": eval_count, "tiers": list(tiers),
             "original_seed": seed,
