@@ -105,6 +105,34 @@ For an entirely offline **mechanism smoke test only**, `scripts/make_tiny_hf_fix
 
 The next gate is executing this optional path in an isolated environment with independently measured resource use, immutable model/tokenizer identity and a matched repeated-seed experiment. Do not infer from the code or changed adapter bytes that a pretrained language model became better at reasoning.
 
+### Public development calibration and neural-interaction research
+
+The optional frozen calibration command compares the historical raw prompt
+against the checkpoint tokenizer's own chat template on the **public training
+split only**. Both styles use identical development cases and generation
+budgets. It requires an already-local checkpoint and optional Torch and
+Transformers packages; it neither trains the model nor accesses the held-out
+evaluation split. The optional report path must be new.
+
+```bash
+python -m labyrinth.hf_pilot calibrate --model-path LOCAL_HF_MODEL_DIR --dev-count 8 --max-new-tokens 64 --report NEW_CALIBRATION.json
+```
+
+The exploratory NumPy interaction study uses raw operand inputs without a
+supplied multiplication feature. It is **not** a pretrained-model result:
+in-range interpolation succeeded on a public split while out-of-range
+generalization failed. NumPy is optional for the core package but required to
+execute this research study and its tests.
+
+```bash
+python -m labyrinth.minotaur_neural_interaction --seed 41 --steps 10000
+```
+
+`labyrinth.public_matched_preflight` provides a Python API for declared public
+four-arm score checks and family separation. It has no private oracle,
+authenticated evaluator, or promotion authority. Passing those internal checks
+must never be reported as independent model qualification.
+
 See the [research landscape and staged local-training gate](docs/REASONING_TRAINING_LANDSCAPE_2026-10-26.md), its [evidence log and independent review](docs/RESEARCH_LOG_2026-10-26.md), the [HF pilot hostile review](docs/HF_PILOT_HOSTILE_REVIEW_2026-10-26.md), the [experimental qualification protocol](docs/EXPERIMENT_PROTOCOL.md) for learning/transfer controls, and the [independent challenge record](docs/INDEPENDENT_CHALLENGES_2026-10-26.md) for reproduced prototype failures.
 
 ## Verification and limits

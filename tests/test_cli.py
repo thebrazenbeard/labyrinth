@@ -126,6 +126,22 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "same instance"):
             run_experiment(lambda: adapter, seed=8, eval_count=1, tiers=(1,), artifact=artifact)
 
+    def test_four_arm_replay_provenance_must_match_even_with_same_model_id(self):
+        artifact = build_training_artifact(seed=103, count=4, tiers=(1,))
+        for changed in ("fixture", "default"):
+            with self.subTest(changed=changed):
+                calls = iter(range(4))
+
+                def factory():
+                    arm_index = next(calls)
+                    responses = {"a different fixture": "ANSWER: 1"} if changed == "fixture" and arm_index == 1 else {}
+                    default = "ANSWER: 1" if changed == "default" and arm_index == 1 else "ANSWER: 0"
+                    return ReplayAdapter(responses, default=default, model_id="replay:same")
+
+                with self.assertRaisesRegex(ValueError, "different adapter provenance"):
+                    run_experiment(factory, seed=103, eval_count=4,
+                                   tiers=(1,), artifact=artifact)
+
     def test_tampered_training_artifact_rehash_cannot_forge_generated_case(self):
         artifact = build_training_artifact(seed=10, count=2, tiers=(1,))
         artifact["examples"][0]["prompt"] += "\nForged answer: 55555"

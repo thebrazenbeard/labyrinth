@@ -1,4 +1,5 @@
 ﻿"""Real trained Minotaur neural inference must compose with independent V5 evaluation."""
+from contextlib import nullcontext
 import unittest
 try:
     import torch
@@ -8,6 +9,207 @@ except ImportError:
 from labyrinth.minotaur_algebraic_eval_v5 import (
     AtomicEvaluationCase, ProgramRolloutCase,
 )
+
+
+class PublicBridgeProtocolTests(unittest.TestCase):
+    class _Scalar:
+        ndim = 0
+
+        def item(self):
+            return 3
+
+    class _FakeTorch:
+        long = object()
+
+        def no_grad(self):
+            return nullcontext()
+
+        def tensor(self, value, dtype):
+            return value
+
+    def test_incomplete_neural_head_refused_before_inference(self):
+        from labyrinth.minotaur_public_evidence import evaluate_compact_public
+
+        class IncompleteHead:
+            def predict(self, *_args):
+                raise AssertionError("incomplete head was invoked")
+
+            def eval(self):
+                raise AssertionError("incomplete head was invoked")
+
+        try:
+            report = evaluate_compact_public(
+                IncompleteHead(), [AtomicEvaluationCase("safe", "ADD", 1, 2, 3)],
+                [], [(0, 3, 4, 7)], None,
+            )
+        except Exception as exc:
+            self.fail(f"bridge leaked an exception for incomplete neural head: {exc}")
+        self.assertEqual(report["disposition"], "REFUSED")
+        self.assertEqual(report["reason"], "unsupported_neural_head")
+        self.assertEqual(report["graduation_authority"], "none")
+
+    def test_neural_state_restoration_failure_refuses_scored_result(self):
+        from labyrinth.minotaur_public_evidence import evaluate_compact_public
+        prediction = self._Scalar()
+
+        class UnrestorableHead:
+            training = True
+
+            def eval(self):
+                self.training = False
+
+            def predict(self, *_args):
+                return prediction
+
+            def train(self, _mode):
+                raise RuntimeError("state restoration failed")
+
+        try:
+            report = evaluate_compact_public(
+                UnrestorableHead(), [AtomicEvaluationCase("safe", "ADD", 1, 2, 3)],
+                [], [(0, 3, 4, 7)], self._FakeTorch(),
+            )
+        except Exception as exc:
+            self.fail(f"bridge leaked an exception on state restoration: {exc}")
+        self.assertEqual(report["disposition"], "REFUSED")
+        self.assertEqual(report["reason"], "neural_state_restore_failed")
+        self.assertEqual(report["graduation_authority"], "none")
+
+    def test_silent_noop_state_restoration_refuses_scored_result(self):
+        from labyrinth.minotaur_public_evidence import evaluate_compact_public
+        prediction = self._Scalar()
+
+        class NoopRestoreHead:
+            training = True
+
+            def eval(self):
+                self.training = False
+
+            def predict(self, *_args):
+                return prediction
+
+            def train(self, _mode):
+                pass
+
+        report = evaluate_compact_public(
+            NoopRestoreHead(), [AtomicEvaluationCase("safe", "ADD", 1, 2, 3)],
+            [], [(0, 3, 4, 7)], self._FakeTorch(),
+        )
+        self.assertEqual(report["disposition"], "REFUSED")
+        self.assertEqual(report["reason"], "neural_state_restore_failed")
+
+    def test_mixed_child_modes_are_restored_after_public_diagnostic(self):
+        from labyrinth.minotaur_public_evidence import evaluate_compact_public
+        prediction = self._Scalar()
+
+        class Child:
+            training = False
+
+            def train(self, mode):
+                self.training = mode
+
+        class CompositeHead:
+            training = True
+
+            def __init__(self):
+                self.child = Child()
+
+            def modules(self):
+                yield self
+                yield self.child
+
+            def eval(self):
+                self.train(False)
+
+            def train(self, mode):
+                self.training = mode
+                self.child.train(mode)
+
+            def predict(self, *_args):
+                return prediction
+
+        head = CompositeHead()
+        report = evaluate_compact_public(
+            head, [AtomicEvaluationCase("safe", "ADD", 1, 2, 3)],
+            [], [(0, 3, 4, 7)], self._FakeTorch(),
+        )
+        self.assertEqual(report["disposition"], "PUBLIC_DIAGNOSTIC")
+        self.assertTrue(head.training)
+        self.assertFalse(head.child.training)
+
+    def test_nested_mode_restoration_noop_refuses_diagnostic(self):
+        from labyrinth.minotaur_public_evidence import evaluate_compact_public
+        prediction = self._Scalar()
+
+        class Child:
+            training = False
+
+            def train(self, _mode):
+                pass
+
+        class CompositeHead:
+            training = True
+
+            def __init__(self):
+                self.child = Child()
+
+            def modules(self):
+                return [self, self.child]
+
+            def eval(self):
+                self.training = False
+                self.child.training = True
+
+            def train(self, mode):
+                self.training = mode
+
+            def predict(self, *_args):
+                return prediction
+
+        head = CompositeHead()
+        report = evaluate_compact_public(
+            head, [AtomicEvaluationCase("safe", "ADD", 1, 2, 3)],
+            [], [(0, 3, 4, 7)], self._FakeTorch(),
+        )
+        self.assertEqual(report["disposition"], "REFUSED")
+        self.assertEqual(report["reason"], "neural_state_restore_failed")
+
+    def test_nested_topology_drift_refuses_diagnostic(self):
+        from labyrinth.minotaur_public_evidence import evaluate_compact_public
+        prediction = self._Scalar()
+
+        class Child:
+            training = False
+
+            def train(self, mode):
+                self.training = mode
+
+        class MutableHead:
+            training = True
+
+            def __init__(self):
+                self.children = [Child()]
+
+            def modules(self):
+                yield self
+                yield from self.children
+
+            def eval(self):
+                self.training = False
+                self.children = [Child()]
+
+            def train(self, mode):
+                self.training = mode
+
+            def predict(self, *_args):
+                return prediction
+
+        report = evaluate_compact_public(
+            MutableHead(), [AtomicEvaluationCase("safe", "ADD", 1, 2, 3)],
+            [], [(0, 3, 4, 7)], self._FakeTorch(),
+        )
+        self.assertEqual(report["disposition"], "REFUSED")
+        self.assertEqual(report["reason"], "neural_state_restore_failed")
 
 
 @unittest.skipUnless(torch is not None,"torch optional")

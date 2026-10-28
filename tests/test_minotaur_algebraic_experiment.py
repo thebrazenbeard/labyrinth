@@ -10,8 +10,30 @@ except ImportError:
     torch = None
     safetensors = None
 
+class SourceProvenanceTests(unittest.TestCase):
+    def test_installed_package_without_git_cannot_claim_source_commit(self):
+        from labyrinth import minotaur_algebraic_experiment as experiment
+        with tempfile.TemporaryDirectory() as temp:
+            installed = Path(temp) / "site-packages" / "labyrinth"
+            installed.mkdir(parents=True)
+            with patch.object(experiment, "__file__", str(installed / "minotaur_algebraic_experiment.py")):
+                self.assertIsNone(experiment._source())
+                self.assertEqual(experiment._provenance_kind(experiment._source()),
+                                 "local_source_hashes_only")
+
+
 @unittest.skipUnless(torch is not None and safetensors is not None, "torch+safetensors optional")
 class AlgebraicExperimentTests(unittest.TestCase):
+    def test_source_identity_preflight_failure_creates_no_checkpoint(self):
+        from labyrinth.minotaur_algebraic_experiment import run_experiment
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "no-partial-artifact"
+            with patch("labyrinth.minotaur_algebraic_experiment._source",
+                       side_effect=RuntimeError("source identity unavailable")):
+                with self.assertRaisesRegex(RuntimeError, "source identity unavailable"):
+                    run_experiment(target, torch, steps=1)
+            self.assertFalse(target.exists())
+
     def test_stale_imported_training_source_refuses_after_disk_edit(self):
         import shutil
         from labyrinth import minotaur_algebraic_experiment as experiment
@@ -61,8 +83,64 @@ class AlgebraicExperimentTests(unittest.TestCase):
             replay=reload_experiment(Path(temp)/"output",torch)
             self.assertTrue(replay["matches_original"])
             self.assertTrue(replay["process_id_differs"] is False)  # same-process unit test
+            self.assertIs(replay["process_start_token_differs"], False)
+            self.assertEqual(replay["process_identity_attestation"], "NOT_ESTABLISHED")
             with self.assertRaises(FileExistsError):
                 run_experiment(Path(temp)/"output",torch,seed=47)
+
+    def test_startup_token_not_numeric_pid_controls_fresh_process_exit(self):
+        import contextlib
+        import io
+        from labyrinth.minotaur_algebraic_experiment import (
+            main, reload_experiment, run_experiment,
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp)/"run"
+            report=run_experiment(folder,torch,steps=1)
+            # Different interpreter startup token, but PID reused by a new
+            # namespace: successful replay must not be falsely rejected.
+            with patch("labyrinth.minotaur_algebraic_experiment._PROCESS_START_TOKEN",
+                       "f"*64), patch("labyrinth.minotaur_algebraic_experiment.os.getpid",
+                                      return_value=report["train_process_id"]):
+                replay=reload_experiment(folder,torch)
+                self.assertTrue(replay["matches_original"])
+                self.assertIs(replay["process_id_differs"],False)
+                self.assertIs(replay["process_start_token_differs"],True)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["reload","--output-dir",str(folder)]),0)
+            # A changed PID in the *same* interpreter must not falsely pass.
+            with patch("labyrinth.minotaur_algebraic_experiment.os.getpid",
+                       return_value=report["train_process_id"]+1), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as refusal:
+                    main(["reload","--output-dir",str(folder)])
+                self.assertEqual(refusal.exception.code,2)
+
+    def test_invalid_or_legacy_startup_token_cannot_qualify_cli(self):
+        import contextlib
+        import hashlib
+        import io
+        import json
+        from labyrinth.minotaur_algebraic_experiment import main,run_experiment
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp)/"run"
+            run_experiment(folder,torch,steps=1)
+            report_path=folder/"report.json"
+            receipt_path=folder/"report.sha256"
+            report=json.loads(report_path.read_text())
+            for token in ("not-a-token", None):
+                modified=dict(report)
+                if token is None:
+                    modified.pop("train_process_start_token")
+                else:
+                    modified["train_process_start_token"]=token
+                encoded=json.dumps(modified,sort_keys=True,indent=2)+"\n"
+                report_path.write_text(encoded)
+                receipt_path.write_text(hashlib.sha256(encoded.encode()).hexdigest()+"\n")
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as refusal:
+                        main(["reload","--output-dir",str(folder)])
+                    self.assertEqual(refusal.exception.code,2)
 
     def test_max_valid_training_seed_records_bounded_corruption_seed(self):
         from labyrinth.minotaur_algebraic_experiment import run_experiment,reload_experiment

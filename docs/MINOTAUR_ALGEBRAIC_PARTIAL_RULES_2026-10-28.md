@@ -36,6 +36,12 @@ checkpoint plus a source-bound report. The reload command verifies
 checkpoint file and tensor digests, a fresh process, all-atom scores
 and 128 previously seeded free-running programs. A green result is
 local reproducibility, NOT an independent trusted examiner.
+The fresh-start CLI check uses a random 256-bit token generated on interpreter
+startup, not numeric PID inequality: separate PID namespaces can reuse a PID.
+The token is self-reported and forgeable, so it is only an operational
+distinct-startup diagnostic, not independent execution attestation. Historical
+reports without a startup token remain inspectable but cannot pass the
+fresh-start CLI condition.
 
 The candidate is compared against frozen initialization, a same-step
 zero-learning-rate control, a wrong-label model trained with
@@ -61,6 +67,11 @@ bytecode executed), the serialized coefficient tensors, saved checkpoint and ord
 and program predictions. A sibling report.sha256 detects unaccompanied
 report modifications. Reload bounds local report/checkpoint sizes and rejects
 changed source, missing/truncated state vectors and mismatched trial digests.
+In an installed wheel without an adjacent Git checkout, `source_commit` is
+`null` and `source_provenance_kind` is `local_source_hashes_only`; the recorded
+file digests still bind local replay, but the runtime never invents a Git HEAD.
+In a checkout, the reported HEAD is explicitly self-reported, not an attested
+identity. Cross-environment replays with different provenance fail closed.
 The module refuses ordinary disk changes after import, but an already-stale
 dependency imported before the experiment module cannot be proven fresh by
 disk hashes alone. For source-provenance claims, use a fresh Python process

@@ -244,6 +244,7 @@ def evaluate_checkpoint_public(
             "qualification": "NOT_ESTABLISHED", "graduation_authority": "none",
             "minotaur_graduated": False, "deployed": False,
             "source_commit": report["source_commit"],
+            "source_provenance_kind": report.get("source_provenance_kind", "legacy_unknown"),
             "training_source_manifest": report["source_manifest"],
             "public_evaluator_source_manifest": public_source_manifest,
             "training_report_sha256": hashlib.sha256(report_bytes).hexdigest(),
@@ -253,6 +254,7 @@ def evaluate_checkpoint_public(
             "parameter_count": 12, "torch_version": str(torch.__version__),
             "process_diagnostic": {
                 "numeric_pid_differs_from_training": replay["process_id_differs"],
+                "startup_token_differs_from_training": replay["process_start_token_differs"],
                 "independent_process_attestation": "NOT_ESTABLISHED",
             },
             "evaluation": evaluated,

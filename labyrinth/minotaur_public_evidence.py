@@ -71,16 +71,48 @@ def evaluate_compact_public(
         )
         if preview_program["disposition"]!="SCORED":
             return _refusal("independent_evaluator_refused")
-    if not hasattr(head,"predict") or not hasattr(head,"eval"):
+    try:
+        predictor = getattr(head,"predict")
+        enter_eval = getattr(head,"eval")
+        restore_mode = getattr(head,"train")
+        was_training = getattr(head,"training")
+    except Exception:
         return _refusal("unsupported_neural_head")
-    was_training=head.training
+    if (not callable(predictor) or not callable(enter_eval)
+            or not callable(restore_mode) or type(was_training) is not bool):
+        return _refusal("unsupported_neural_head")
+    try:
+        # torch.nn.Module.train() recursively changes every descendant, even
+        # when some children were deliberately in a different mode. Preserve
+        # the complete pre-evaluation mode map rather than just the root flag.
+        module_iter = getattr(head, "modules", None)
+        if module_iter is None:
+            modes = [(head, was_training)]
+        else:
+            if not callable(module_iter):
+                return _refusal("unsupported_neural_head")
+            modes = []
+            seen = set()
+            for module in module_iter():
+                identifier = id(module)
+                if identifier in seen or len(modes) >= 4096:
+                    return _refusal("unsupported_neural_head")
+                seen.add(identifier)
+                mode = getattr(module, "training")
+                if type(mode) is not bool or not callable(getattr(module, "train")):
+                    return _refusal("unsupported_neural_head")
+                modes.append((module, mode))
+            if not modes or modes[0][0] is not head or modes[0][1] is not was_training:
+                return _refusal("unsupported_neural_head")
+    except Exception:
+        return _refusal("unsupported_neural_head")
 
     def neural_predict(op: str,x: int,y: int) -> int:
         if (type(op) is not str or op not in _OPS
                 or type(x) is not int or not 0 <= x < 97
                 or type(y) is not int or not 0 <= y < 97):
             raise ValueError("invalid_neural_input")
-        result=head.predict(
+        result=predictor(
             torch.tensor(_OPS[op],dtype=torch.long),
             torch.tensor(x,dtype=torch.long),
             torch.tensor(y,dtype=torch.long),
@@ -90,7 +122,7 @@ def evaluate_compact_public(
         return int(result.item())
 
     try:
-        head.eval()
+        enter_eval()
         with torch.no_grad():
             # Recheck public oracle claims before invoking predictions.
             # The independent evaluator rejects forged labels or malformed IDs.
@@ -122,7 +154,30 @@ def evaluate_compact_public(
         # A normal refusal carries no raw untrusted exception data.
         return _refusal("neural_inference_failed")
     finally:
-        head.train(was_training)
+        try:
+            # PyTorch's modules() visits parents before children. Restore in
+            # that order so a parent's recursive train() cannot overwrite the
+            # original mixed training/evaluation state of a descendant.
+            for module, mode in modes:
+                module.train(mode)
+            if module_iter is not None:
+                current_iter = getattr(head, "modules")
+                if not callable(current_iter):
+                    return _refusal("neural_state_restore_failed")
+                current = []
+                for module in current_iter():
+                    if len(current) >= len(modes):
+                        return _refusal("neural_state_restore_failed")
+                    current.append(module)
+                if (len(current) != len(modes)
+                        or any(actual is not expected for actual, (expected, _) in zip(current, modes))):
+                    return _refusal("neural_state_restore_failed")
+            if any(getattr(module, "training") is not mode for module, mode in modes):
+                return _refusal("neural_state_restore_failed")
+        except Exception:
+            # An unreadable model state invalidates the whole diagnostic,
+            # including a score that was otherwise computed successfully.
+            return _refusal("neural_state_restore_failed")
 
     return {
         "disposition":"PUBLIC_DIAGNOSTIC",

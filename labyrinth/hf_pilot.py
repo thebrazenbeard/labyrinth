@@ -32,6 +32,7 @@ from .runner import _source_state, load_json
 LEGACY_SCHEMA = "labyrinth.hf-lora-pilot.v2"
 SCHEMA = "labyrinth.hf-lora-pilot.v3"
 EVAL_SCHEMA = "labyrinth.hf-lora-reload-eval.v2"
+CALIBRATION_SCHEMA = "labyrinth.hf-frozen-prompt-calibration.v1"
 EVAL_SEED_XOR = 0x5C18A7
 # No quantization/CPU offload in v1: bound pre-existing weights to a small size.
 MAX_LOCAL_WEIGHTS = 1_073_741_824
@@ -55,15 +56,28 @@ class PilotConfig:
     answer_only: bool = False
 
 
+@dataclass(frozen=True)
+class CalibrationConfig:
+    """Public development-set comparison; never reads the held-out eval split."""
+
+    model_path: str
+    seed: int = 0
+    dev_count: int = 8
+    tiers: tuple[int, ...] = (1,)
+    max_tokens: int = 512
+    max_new_tokens: int = 64
+    device: str = "cpu"
+
+
 def _check_int(value: object, label: str, lower: int, upper: int) -> None:
     if type(value) is not int or not lower <= value <= upper:
         raise ValueError(f"{label} must be an integer in [{lower}, {upper}]")
 
 
-def _paths(config: PilotConfig, *, output_must_be_new: bool) -> tuple[Path, Path, list[Path]]:
-    if not isinstance(config.model_path, str) or not isinstance(config.output_dir, str):
-        raise ValueError("model_path and output_dir must be strings")
-    model = Path(config.model_path).expanduser().resolve(strict=True)
+def _model_paths(model_path: str) -> tuple[Path, list[Path]]:
+    if not isinstance(model_path, str):
+        raise ValueError("model_path must be a string")
+    model = Path(model_path).expanduser().resolve(strict=True)
     if not model.is_dir() or not (model / "config.json").is_file() or (model / "config.json").is_symlink():
         raise ValueError("model_path must be an existing local HF model directory")
     weights = sorted(model.glob("*.safetensors"))
@@ -73,6 +87,13 @@ def _paths(config: PilotConfig, *, output_must_be_new: bool) -> tuple[Path, Path
     if not 0 < total <= MAX_LOCAL_WEIGHTS:
         raise ValueError("checkpoint exceeds the 1 GiB no-quantization pilot limit")
     _validate_sharded_index(model, weights)
+    return model, weights
+
+
+def _paths(config: PilotConfig, *, output_must_be_new: bool) -> tuple[Path, Path, list[Path]]:
+    if not isinstance(config.output_dir, str):
+        raise ValueError("output_dir must be a string")
+    model, weights = _model_paths(config.model_path)
     raw_output = Path(config.output_dir).expanduser()
     if raw_output.is_symlink():
         raise ValueError("output path must not be a symlink")
@@ -137,6 +158,28 @@ def validate_config(config: PilotConfig, *, output_must_be_new: bool = True) -> 
     return resolved
 
 
+def validate_calibration(config: CalibrationConfig) -> tuple[Path, list[Path]]:
+    """Preflight a frozen, public TRAIN-split calibration without making files."""
+    if not isinstance(config, CalibrationConfig):
+        raise TypeError("expected CalibrationConfig")
+    _check_int(config.seed, "seed", 0, 2**31 - 1)
+    _check_int(config.dev_count, "dev_count", 2, 32)
+    _check_int(config.max_tokens, "max_tokens", 32, 1024)
+    _check_int(config.max_new_tokens, "max_new_tokens", 1, 128)
+    if config.max_new_tokens >= config.max_tokens:
+        raise ValueError("generation budget must be smaller than context budget")
+    if type(config.tiers) is not tuple or not config.tiers or any(type(t) is not int for t in config.tiers):
+        raise ValueError("tiers must be a non-empty tuple of integers")
+    generate_maze(seed=config.seed, count=1, tiers=config.tiers, split="train")
+    if len(config.tiers) * config.dev_count > 64:
+        raise ValueError("development set limited to 64 public examples")
+    if config.device not in ("cpu", "cuda"):
+        raise ValueError("device must be cpu or cuda")
+    model, weights = _model_paths(config.model_path)
+    _metadata_digest(model)
+    return model, weights
+
+
 def training_cases(config: PilotConfig) -> tuple[list[Challenge], list[Challenge]]:
     """Keep supervision entirely on the TRAIN split; eval gold never enters SGD."""
     train = generate_maze(seed=config.seed, count=config.train_count, tiers=config.tiers, split="train")
@@ -184,13 +227,24 @@ def _metadata_digest(model_path: Path) -> dict[str, str]:
              "model.safetensors.index.json",
              "tokenizer_config.json", "tokenizer.json", "added_tokens.json",
              "vocab.json", "vocab.txt", "merges.txt", "sentencepiece.bpe.model",
-             "tokenizer.model"}
+             "tokenizer.model", "chat_template.jinja"}
     matches = sorted(path for path in model_path.iterdir()
                      if path.name in names or path.name.startswith("tokenizer"))
+    # Modern Transformers loads standalone Jinja templates (and lets them
+    # override templates embedded in tokenizer_config.json). Pin those bytes
+    # as well, or calibration can change prompts without changing provenance.
+    templates = model_path / "additional_chat_templates"
+    if templates.exists() or templates.is_symlink():
+        if not templates.is_dir() or templates.is_symlink():
+            raise ValueError("local model chat-template directory must be non-symlink")
+        # Transformers discovers only direct *.jinja entries here. Harmless
+        # unrelated files/subdirectories are not part of the prompt template.
+        matches.extend(sorted(path for path in templates.iterdir()
+                              if path.suffix == ".jinja"))
     if any(not p.is_file() or p.is_symlink() or p.stat().st_size > 268_435_456
            for p in matches):
         raise ValueError("local model metadata must be regular non-symlink files")
-    return {p.name: _sha_file(p) for p in matches}
+    return {p.relative_to(model_path).as_posix(): _sha_file(p) for p in matches}
 
 
 def _checkpoint_manifest(model_path: Path, weights: list[Path]) -> dict[str, dict[str, str]]:
@@ -313,15 +367,37 @@ def _encode_pair(tokenizer: Any, prompt: str, answer: str, max_tokens: int, *,
     return prefix + suffix, [-100] * len(prefix) + suffix
 
 
+def _encode_scoring_prompt(tokenizer: Any, prompt: str, *,
+                           prompt_style: str, answer_only: bool) -> Any:
+    """Tokenize the raw historic format or the model's own chat template."""
+    if prompt_style == "raw":
+        raw = f"Task:\n{prompt}\nAssistant:\n" + ("ANSWER:" if answer_only else "")
+        return tokenizer(raw, add_special_tokens=True, return_tensors="pt")
+    if prompt_style != "chat":
+        raise ValueError("unsupported scoring prompt style")
+    if answer_only:
+        raise ValueError("chat calibration does not use assistant answer prefill")
+    template = getattr(tokenizer, "chat_template", None)
+    formatter = getattr(tokenizer, "apply_chat_template", None)
+    if not template or not callable(formatter):
+        raise ValueError("checkpoint tokenizer has no usable chat template")
+    # tokenize=True avoids re-tokenizing a rendered template and adding a
+    # second set of BOS/EOS tokens. The tokenizer owns all role markers.
+    return formatter([{"role": "user", "content": f"Task:\n{prompt}"}],
+                     tokenize=True, add_generation_prompt=True,
+                     return_tensors="pt", return_dict=True)
+
+
 def _score_model(model: Any, tokenizer: Any, torch: Any, cases: list[Challenge],
                  *, device: str, max_tokens: int, max_new_tokens: int,
-                 answer_only: bool = False) -> dict[str, Any]:
+                 answer_only: bool = False, prompt_style: str = "raw") -> dict[str, Any]:
     model.eval()
     trials: list[dict[str, Any]] = []
     with torch.no_grad():
         for challenge in cases:
-            prompt = f"Task:\n{challenge.prompt}\nAssistant:\n" + ("ANSWER:" if answer_only else "")
-            encoded = tokenizer(prompt, add_special_tokens=True, return_tensors="pt")
+            encoded = _encode_scoring_prompt(tokenizer, challenge.prompt,
+                                             prompt_style=prompt_style,
+                                             answer_only=answer_only)
             ids = encoded["input_ids"]
             mask = encoded.get("attention_mask")
             if mask is None or mask.shape != ids.shape:
@@ -444,6 +520,18 @@ def _deps(device: str) -> tuple[Any, Any, Any, Any, Any]:
     return torch, AutoModelForCausalLM, AutoTokenizer, (LoraConfig, PeftModel, get_peft_model), device
 
 
+def _calibration_deps(device: str) -> tuple[Any, Any, Any]:
+    """Frozen calibration needs no PEFT or optimizer installation."""
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except ImportError as exc:
+        raise RuntimeError("optional torch and transformers are required; nothing was installed") from exc
+    if device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA calibration unavailable; no CPU fallback")
+    return torch, AutoModelForCausalLM, AutoTokenizer
+
+
 def _device_headroom(torch: Any, device: str, weights: list[Path]) -> dict[str, int] | None:
     """Conservative CUDA preflight; not a memory-use guarantee for any model."""
     if device != "cuda":
@@ -472,6 +560,59 @@ def _load_base(model_path: Path, device: str, *, torch: Any,
     model.to(device)
     model.config.use_cache = False
     return model, tokenizer
+
+
+def run_calibration(config: CalibrationConfig) -> dict[str, Any]:
+    """Compare two prompt encodings on public development cases, with no SGD.
+
+    This deliberately never calls ``training_cases`` or creates an eval split.
+    Scores are calibration diagnostics, not a model-qualification result.
+    """
+    model_path, weights = validate_calibration(config)
+    manifest = _checkpoint_manifest(model_path, weights)
+    cases = generate_maze(seed=config.seed, count=config.dev_count,
+                          tiers=config.tiers, split="train")
+    if any(case.split != "train" for case in cases):
+        raise ValueError("calibration must use only public train-split cases")
+    torch, auto_model, auto_tokenizer = _calibration_deps(config.device)
+    _device_headroom(torch, config.device, weights)
+    if config.device == "cpu":
+        torch.set_num_threads(min(torch.get_num_threads(), 4))
+    torch.manual_seed(config.seed)
+    if config.device == "cuda":
+        torch.cuda.manual_seed_all(config.seed)
+    torch.use_deterministic_algorithms(True)
+    model, tokenizer = _load_base(model_path, config.device, torch=torch,
+                                  auto_model=auto_model, auto_tokenizer=auto_tokenizer)
+    _assert_checkpoint_unchanged(model_path, weights, manifest)
+    before_buffers = _buffer_digest(model, torch)
+    scores = {}
+    for prompt_style in ("raw", "chat"):
+        scores[prompt_style] = _score_model(
+            model, tokenizer, torch, cases, device=config.device,
+            max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
+            prompt_style=prompt_style,
+        )
+        if _buffer_digest(model, torch) != before_buffers:
+            raise RuntimeError("frozen model buffers mutated during calibration")
+        _assert_checkpoint_unchanged(model_path, weights, manifest)
+    if [t["id"] for t in scores["raw"]["trials"]] != [t["id"] for t in scores["chat"]["trials"]]:
+        raise RuntimeError("calibration prompt styles used different development cases")
+    return {
+        "schema": CALIBRATION_SCHEMA,
+        "config": {**asdict(config), "tiers": list(config.tiers)},
+        "model_weights_sha256": manifest["weights"],
+        "model_metadata_sha256": manifest["metadata"],
+        "public_dev_prompt_sha256": _prompt_commitment(cases),
+        "public_dev_case_ids": [case.id for case in cases],
+        "model_updated": False,
+        "prompt_styles": scores,
+        "limitations": [
+            "Only public train-split development cases; no private or held-out evaluation.",
+            "Template, max_new_tokens and model choice are calibrated before any sealed trial.",
+            "This result cannot establish training gains or transferable reasoning.",
+        ],
+    }
 
 
 def run_pilot(config: PilotConfig) -> dict[str, Any]:
@@ -634,9 +775,48 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
 def _save_new(path: Path, result: dict[str, Any]) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(str(path), flags, 0o600)
+    _write_new_report(fd, result)
+
+
+def _write_new_report(fd: int, result: dict[str, Any]) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(result, handle, indent=2, sort_keys=True)
         handle.write("\n")
+
+
+def _secure_reload_output_supported() -> bool:
+    """Require descriptor-relative creation rather than a mutable path lookup."""
+    return (os.open in os.supports_dir_fd
+            and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW"))
+
+
+def _save_reload_report_new(path: Path, result: dict[str, Any],
+                            parent_identity: tuple[int, int]) -> None:
+    """Create a write-once report in the same directory validated before eval.
+
+    A different process can replace pathname components during slow inference.
+    Open every parent component without following symlinks, confirm that the
+    destination parent is still the original inode, and create relative to its
+    held directory descriptor. On platforms without the required operations,
+    fail closed: a normal string-path open would be vulnerable to the race.
+    """
+    if not _secure_reload_output_supported():
+        raise RuntimeError("secure reload report creation unsupported on this platform")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent_fd = os.open(path.anchor, flags)
+    try:
+        for component in path.parent.parts[1:]:
+            child_fd = os.open(component, flags, dir_fd=parent_fd)
+            os.close(parent_fd)
+            parent_fd = child_fd
+        parent_stat = os.fstat(parent_fd)
+        if (parent_stat.st_dev, parent_stat.st_ino) != parent_identity:
+            raise ValueError("reload report destination parent changed during evaluation")
+        file_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        fd = os.open(path.name, file_flags, 0o600, dir_fd=parent_fd)
+        _write_new_report(fd, result)
+    finally:
+        os.close(parent_fd)
 
 
 def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, Any]:
@@ -644,6 +824,10 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
 
     This function cannot by itself attest process separation. The module CLI
     writes its own PID and a different-run CLI invocation is required.
+    Reload report creation needs POSIX descriptor-relative nofollow opens;
+    platforms without them (including standard Windows Python) fail closed.
+    Checkpoint and output directory ownership/permissions must be trusted:
+    a malicious same-user process can reparent an already-open output folder.
     """
     root = Path(run_dir).expanduser().resolve(strict=True)
     source = root / "pilot_report.json"
@@ -667,6 +851,19 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     if _metadata_digest(model_path) != report.get("model_metadata_sha256"):
         raise ValueError("local model tokenizer/config changed after training")
     adapter_dir = root / "candidate_adapter"
+    raw_report_path = Path(report_path).expanduser()
+    if raw_report_path.is_symlink():
+        raise ValueError("reload report path must not be a symlink")
+    destination = raw_report_path.resolve(strict=False)
+    if (destination == model_path or model_path in destination.parents
+            or destination == adapter_dir or adapter_dir in destination.parents):
+        raise ValueError("reload report must not modify the model or adapter checkpoint directory")
+    if not _secure_reload_output_supported():
+        raise RuntimeError("secure reload report creation unsupported on this platform")
+    if not destination.parent.is_dir():
+        raise ValueError("reload report destination parent must already exist")
+    parent_stat = destination.parent.stat()
+    parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
     if adapter_dir.is_symlink():
         raise ValueError("candidate adapter root must not be a symlink")
     actual_adapters = _adapter_manifest(adapter_dir)
@@ -700,8 +897,9 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
              "process_id_differs": os.getpid() != report.get("training_process_id"),
              "matches_original_candidate_trials": observed["trials"] == report["evaluations"]["candidate"]["trials"],
              "limitations": ["Different process must be independently established; PID alone is not proof.",
-                             "Determinism depends on compatible model kernels/hardware."]}
-    _save_new(Path(report_path).expanduser(), value)
+                             "Determinism depends on compatible model kernels/hardware.",
+                             "Output and checkpoint directories require trusted ownership; malicious same-user reparenting is not prevented."]}
+    _save_reload_report_new(destination, value, parent_identity)
     return value
 
 
@@ -727,9 +925,35 @@ def main(argv: list[str] | None = None) -> int:
     evaluate = commands.add_parser("eval", help="Reload saved adapter in a new Python process")
     evaluate.add_argument("--run-dir", required=True)
     evaluate.add_argument("--report", required=True)
+    calibrate = commands.add_parser(
+        "calibrate", help="Frozen raw-vs-chat comparison on public train-split development cases")
+    calibrate.add_argument("--model-path", required=True)
+    calibrate.add_argument("--seed", type=int, default=0)
+    calibrate.add_argument("--dev-count", type=int, default=8)
+    calibrate.add_argument("--tiers", default="1")
+    calibrate.add_argument("--max-tokens", type=int, default=512)
+    calibrate.add_argument("--max-new-tokens", type=int, default=64)
+    calibrate.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    calibrate.add_argument("--report", help="Optional NEW JSON report path, never overwritten")
     args = parser.parse_args(argv)
     try:
-        if args.command == "train":
+        if args.command == "calibrate":
+            parsed = {key: value for key, value in vars(args).items()
+                      if key not in ("command", "report")}
+            parsed["tiers"] = tuple(int(t) for t in args.tiers.split(",")) if args.tiers else ()
+            result = run_calibration(CalibrationConfig(**parsed))
+            if args.report:
+                model_path = Path(args.model_path).expanduser().resolve(strict=True)
+                destination = Path(args.report).expanduser().resolve(strict=False)
+                if destination == model_path or model_path in destination.parents:
+                    raise ValueError("calibration report must not modify the model directory")
+                _save_new(destination, result)
+            print(json.dumps({"schema": result["schema"], "train_split_only": True,
+                              "raw_correct": result["prompt_styles"]["raw"]["correct"],
+                              "chat_correct": result["prompt_styles"]["chat"]["correct"],
+                              "cases": len(result["public_dev_case_ids"]),
+                              "report": str(destination) if args.report else None}))
+        elif args.command == "train":
             config_dict = {key: value for key, value in vars(args).items() if key != "command"}
             config_dict["tiers"] = tuple(int(t) for t in args.tiers.split(",")) if args.tiers else ()
             result = run_pilot(PilotConfig(**config_dict))
