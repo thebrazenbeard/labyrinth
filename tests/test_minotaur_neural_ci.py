@@ -29,6 +29,7 @@ class NeuralQualificationWorkflowContractTests(unittest.TestCase):
         self.assertIn("tests.test_minotaur_v3_ablation", workflow)
         self.assertIn("tests.test_minotaur_scratch_v2", workflow)
         self.assertIn("tests.test_minotaur_combinatorial_curriculum", workflow)
+        self.assertIn("tests.test_minotaur_combinatorial_training", workflow)
         self.assertIn("timeout 90s", workflow)
         self.assertIn("actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683", workflow)
         self.assertIn("actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", workflow)

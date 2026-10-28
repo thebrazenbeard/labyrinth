@@ -38,7 +38,7 @@ workflow preflight requires those packages and versions before invoking it, so
 that job cannot pass by skipping neural execution.
 
 The optional job also runs the actual random-initialized V2 gradient smoke,
-bounded multi-seed V3 ablation tests, and the independent combinatorial
-curriculum tests with PyTorch present. These tests establish executable
+bounded multi-seed V3 ablation tests, the independent combinatorial
+curriculum tests and the combinatorial neural-training smoke tests with PyTorch present. These tests establish executable
 behavior and exact negative/diagnostic results, **not** semantic mastery.
 They run when Minotaur modules/tests change; they do not sign release receipts.
