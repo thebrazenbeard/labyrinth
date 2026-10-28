@@ -20,11 +20,7 @@ TRAIN_MAX = 8
 
 
 def incomplete_training_atoms(seed: int, per_operation: int = 12) -> list[tuple[int,int,int,int]]:
-    """Select partial small-operand data with derangeable control labels.
-
-    Preserve the shuffled sample unless a label occurs in more than half
-    the rows; that multiset cannot support a no-fixed-point label control.
-    """
+    """Select only non-wrapping small operands (never all 28,227 atoms)."""
     if type(seed) is not int or not 0 <= seed < 2**31:
         raise ValueError("seed must be a 31-bit integer")
     if type(per_operation) is not int or not 5 <= per_operation <= 24:
@@ -34,32 +30,12 @@ def incomplete_training_atoms(seed: int, per_operation: int = 12) -> list[tuple[
     for op in range(OPS):
         pairs = [(a,b) for a in range(TRAIN_MAX+1) for b in range(TRAIN_MAX+1)
                  if op != 1 or a >= b]
-        # Integer arithmetic here is exclusively for supervision creation.
-        candidates = [(a,b,a+b if op == 0 else a-b if op == 1 else a*b)
-                      for a,b in pairs]
-        rng.shuffle(candidates)
-        selected = candidates[:per_operation]
-        counts = Counter(label for _,_,label in selected)
-        ceiling = per_operation // 2
-        dominant = next((label for label,n in counts.items() if n > ceiling),None)
-        if dominant is not None:
-            # Repair only the impossible control case, retaining unique pairs
-            # and every other member of the original randomized selection.
-            for replacement in candidates[per_operation:]:
-                if counts[dominant] <= ceiling:
-                    break
-                label = replacement[2]
-                if label == dominant or counts[label] >= ceiling:
-                    continue
-                index = next(i for i in range(per_operation-1,-1,-1)
-                             if selected[i][2] == dominant)
-                selected[index] = replacement
-                counts[dominant] -= 1
-                counts[label] += 1
-            if counts[dominant] > ceiling:
-                raise ValueError("cannot select a derangeable partial label multiset")
-        assert all(0 <= label < MOD for _,_,label in selected)
-        result.extend((op,a,b,label) for a,b,label in selected)
+        rng.shuffle(pairs)
+        for a,b in pairs[:per_operation]:
+            # This integer arithmetic exists exclusively in data creation.
+            y = a+b if op == 0 else a-b if op == 1 else a*b
+            assert 0 <= y < MOD
+            result.append((op,a,b,y))
     return result
 
 
@@ -68,8 +44,8 @@ def corrupt_labels_within_op(
 ) -> list[tuple[int,int,int,int]]:
     """Deterministically derange each operation's unchanged label multiset.
 
-    A majority label makes this control impossible and is rejected; callers
-    preparing random samples should use ``incomplete_training_atoms``.
+    A majority label makes this control impossible and is rejected without
+    changing the caller's training examples.
     """
     if type(seed) is not int or not 0 <= seed < 2**31:
         raise ValueError("invalid corruption seed")
@@ -85,9 +61,11 @@ def corrupt_labels_within_op(
         largest_group = max(Counter(labels).values())
         if 2 * largest_group > len(labels):
             raise ValueError("cannot derange operation labels: majority label")
-        # Sorted equal-label blocks have length <= largest_group. Rotating by
-        # that amount moves every label outside its original block.
-        rotated = labels[largest_group:] + labels[:largest_group]
+        # With equal labels sorted into blocks of length <= largest_group,
+        # every shift in [largest_group, n-largest_group] avoids fixed labels.
+        # Draw among valid shifts so the control actually depends on its seed.
+        shift = rng.randint(largest_group, len(labels)-largest_group)
+        rotated = labels[shift:] + labels[:shift]
         for i,label in zip(positions,rotated):
             old=examples[i]
             output[i]=(old[0],old[1],old[2],label)
