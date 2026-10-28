@@ -25,6 +25,7 @@ class MinotaurV8StructureTests(unittest.TestCase):
         self.assertTrue(all(53 not in (x, y, target)
                             for x, y, target in zip(split.train.x.tolist(), split.train.y.tolist(), split.train.target.tolist())))
         self.assertTrue(all(target == 53 for target in split.missing_output.target.tolist()))
+        self.assertEqual(len(split.missing_output), 94)
         self.assertTrue(all(x == 53 or y == 53
                             for x, y in zip(split.unseen_operand.x.tolist(), split.unseen_operand.y.tolist())))
         self.assertEqual(len(split.mod101_test), 101 ** 2)

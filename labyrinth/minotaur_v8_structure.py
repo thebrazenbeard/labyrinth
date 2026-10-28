@@ -96,7 +96,9 @@ def build_structure_split(*, seed=20261028, dev_fraction=.10):
     eligible, missing, operand = [], [], []
     for a, b in groups:
         target = (a * b) % MOD
-        if target == CHALLENGE:
+        # Keep this at V7's exact 94-row missing-output comparison: the two
+        # rows that also use operand 53 belong only to the operand challenge.
+        if target == CHALLENGE and a != CHALLENGE and b != CHALLENGE:
             missing.append((a, b))
         if a == CHALLENGE or b == CHALLENGE:
             operand.append((a, b))
