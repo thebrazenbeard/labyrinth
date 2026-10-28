@@ -39,7 +39,7 @@ class TransitionConfig:
                 or type(self.max_steps) is not int or self.max_steps != 6
                 or type(self.modulus) is not int or self.modulus != 97
                 or type(self.architecture) is not str
-                or self.architecture not in ('mlp', 'learned_table')
+                or self.architecture not in ('mlp', 'learned_table', 'algebraic_rule')
                 or type(self.temperature) is not float
                 or not 0.05 <= self.temperature <= 10.0):
             raise ValueError("invalid bounded transition configuration")
@@ -107,9 +107,12 @@ def _teacher_states(initial: tuple[int, int], instructions: Sequence[tuple[int, 
     return output
 
 
-def encode_transition_cases(cases: Sequence[Any], config: TransitionConfig, torch: Any
+def encode_transition_cases(cases: Sequence[Any], config: TransitionConfig, torch: Any,
+                            *, include_supervision: bool = True
                             ) -> tuple[TransitionFeatures, Any]:
     config.validate()
+    if type(include_supervision) is not bool:
+        raise ValueError("include_supervision must be a boolean")
     if (not isinstance(cases, (list, tuple)) or not 1 <= len(cases) <= 4096):
         raise ValueError("bounded nonempty transition cases required")
     n, steps = len(cases), config.max_steps
@@ -120,7 +123,8 @@ def encode_transition_cases(cases: Sequence[Any], config: TransitionConfig, torc
     operand_values = torch.zeros((n, steps), dtype=torch.long)
     mask = torch.zeros((n, steps), dtype=torch.bool)
     step_numbers = torch.zeros((n, steps), dtype=torch.long)
-    expected = torch.zeros((n, steps, 2), dtype=torch.long)
+    expected = (torch.zeros((n, steps, 2), dtype=torch.long)
+                if include_supervision else None)
     for i, case in enumerate(cases):
         start, instructions = _parse_question(case.question)
         if (type(case.steps) is not tuple or len(case.steps) != len(instructions)):
@@ -135,8 +139,9 @@ def encode_transition_cases(cases: Sequence[Any], config: TransitionConfig, torc
             operations[i, j], targets[i, j] = op, target
             as_reg[i, j], operand_values[i, j] = register, value
             mask[i, j], step_numbers[i, j] = True, j + 1
-        expected[i, :len(instructions)] = torch.tensor(
-            _teacher_states(start, instructions), dtype=torch.long)
+        if expected is not None:
+            expected[i, :len(instructions)] = torch.tensor(
+                _teacher_states(start, instructions), dtype=torch.long)
     return (TransitionFeatures(initial, operations, targets, as_reg,
                                operand_values, mask, step_numbers), expected)
 
@@ -172,7 +177,10 @@ def build_transition_model(config: TransitionConfig = TransitionConfig()) -> Any
     class TransitionNet(nn.Module):
         def __init__(self) -> None:
             super().__init__()
-            if config.architecture == "learned_table":
+            if config.architecture == "algebraic_rule":
+                from .minotaur_algebraic_rules import build_algebraic_head
+                self.algebraic_head = build_algebraic_head(torch, seed=config.seed)
+            elif config.architecture == "learned_table":
                 # A finite-domain neural transition memory: logits are actual
                 # learnable parameters, initialized without arithmetic answers.
                 # It CAN generalize across programs after exhaustive atomic
@@ -203,7 +211,9 @@ def build_transition_model(config: TransitionConfig = TransitionConfig()) -> Any
             targeted = prev.gather(1, target[:, None]).squeeze(1)
             operand = torch.where(as_reg, prev.gather(
                 1, operand_index.clamp(0, 1)[:, None]).squeeze(1), operand_index)
-            if config.architecture == "learned_table":
+            if config.architecture == "algebraic_rule":
+                learned_target_logits = self.algebraic_head.logits(op, targeted, operand) / config.temperature
+            elif config.architecture == "learned_table":
                 key = op * (MOD * MOD) + targeted * MOD + operand
                 learned_target_logits = self.atomic_logits(key) / config.temperature
             else:
@@ -226,6 +236,8 @@ def build_transition_model(config: TransitionConfig = TransitionConfig()) -> Any
             if (max_steps != MAX_STEPS or features.initial_states.shape != (batch, 2)
                     or features.operations.shape != (batch, MAX_STEPS)):
                 raise ValueError("invalid transition feature shapes")
+            if teacher_states is not None and not self.training:
+                raise ValueError("teacher states forbidden during evaluation")
             if teacher_states is not None and teacher_states.shape != (batch, MAX_STEPS, 2):
                 raise ValueError("invalid teacher target shape")
             prev = features.initial_states

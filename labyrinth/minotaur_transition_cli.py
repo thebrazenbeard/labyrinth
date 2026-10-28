@@ -42,7 +42,8 @@ def predict_guarded_transition(checkpoint,question,steps):
             self.question,self.steps=question,steps
     torch.set_num_threads(min(2,torch.get_num_threads()))
     config=TransitionConfig(seed=20261027,architecture="learned_table")
-    features,_=encode_transition_cases([InputTrace(question,steps)],config,torch)
+    features,_=encode_transition_cases(
+        [InputTrace(question,steps)],config,torch,include_supervision=False)
     model=build_transition_model(config)
     model.load_state_dict(load_file(str(checkpoint),device="cpu"),strict=True)
     digest=hashlib.sha256(model.atomic_logits.weight.detach().cpu().contiguous().numpy().tobytes()).hexdigest()
