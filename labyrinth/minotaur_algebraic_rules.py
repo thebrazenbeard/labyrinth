@@ -9,6 +9,7 @@ or an independent Minotaur graduation system.
 """
 from __future__ import annotations
 
+import hashlib
 import random
 from typing import Any
 
@@ -151,4 +152,8 @@ def all_atom_accuracy(head: Any, torch: Any) -> dict[str,int]:
         prediction=head.predict(op,a,b)
         oracle=torch.where(op==0,a+b,torch.where(op==1,a-b,a*b)).remainder(MOD)
         correct=int((prediction==oracle).sum().item())
-    return {"correct":correct,"total":OPS*MOD*MOD}
+        prediction_sha256=hashlib.sha256(
+            prediction.to(dtype=torch.uint8).cpu().contiguous().numpy().tobytes()
+        ).hexdigest()
+    return {"correct":correct,"total":OPS*MOD*MOD,
+            "prediction_sha256":prediction_sha256}

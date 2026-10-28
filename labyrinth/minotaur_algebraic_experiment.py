@@ -30,6 +30,17 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _source_manifest() -> dict[str, str]:
+    """Bind exact executed implementation bytes, not only branch commit."""
+    folder=Path(__file__).resolve().parent
+    names=(
+        "minotaur_algebraic_experiment.py",
+        "minotaur_algebraic_rules.py",
+        "minotaur_transition_v4.py",
+    )
+    return {name:_sha(folder/name) for name in names}
+
+
 def _source() -> str:
     root=Path(__file__).resolve().parents[1]
     return subprocess.check_output(["git","-C",str(root),"rev-parse","HEAD"],
@@ -95,15 +106,24 @@ def evaluate_programs(
     model.algebraic_head.load_state_dict(head.state_dict(),strict=True)
     model.eval()
     with torch.no_grad():
-        predicted=model(features)["predicted_states"].tolist()
+        output=model(features)["predicted_states"]
+    if tuple(output.shape) != (count,MAX_STEPS,2):
+        raise ValueError("prediction length or tensor shape mismatched")
+    predicted=output.tolist()
     exact=0
     correct_steps=0
     steps_total=0
     for actual,wanted in zip(predicted,gold):
+        if len(actual)!=MAX_STEPS or not 1 <= len(wanted) <= MAX_STEPS:
+            raise ValueError("prediction length mismatch")
         steps_total+=len(wanted)
         correct_steps+=sum(tuple(p)==g for p,g in zip(actual,wanted))
         exact+=int(all(tuple(p)==g for p,g in zip(actual,wanted)))
+    predictions_sha256=hashlib.sha256(
+        json.dumps(predicted,separators=(",",":")).encode("utf8")
+    ).hexdigest()
     return {"exact_programs":exact,"total_programs":count,
+            "prediction_sha256":predictions_sha256,
             "correct_states":correct_steps,"total_states":steps_total,
             "seen_atomic_visits":seen_visits,
             "unseen_atomic_visits":unseen_visits}
@@ -172,6 +192,7 @@ def run_experiment(
     report={
         "schema":SCHEMA,
         "source_commit":_source(),
+        "source_manifest":_source_manifest(),
         "train_process_id":os.getpid(),
         "donor":"scratch algebraically biased neural rule head, no pretrained model",
         "model_architecture":"learned_coefficients[3,4] over [1,x/8,y/8,xy/64]",
@@ -205,6 +226,9 @@ def run_experiment(
     with fp.open("x",encoding="utf8") as stream:
         json.dump(report,stream,sort_keys=True,indent=2)
         stream.write("\n")
+    checksum=output_dir/"report.sha256"
+    with checksum.open("x",encoding="utf8") as stream:
+        stream.write(_sha(fp)+"\n")
     return report
 
 
@@ -212,14 +236,28 @@ def reload_experiment(output_dir: Path, torch: Any) -> dict[str, Any]:
     """Recompute stored candidate metrics from a new loaded model."""
     root=Path(output_dir)
     report_file=root/"report.json"
+    checksum=root/"report.sha256"
     checkpoint=root/"candidate.safetensors"
-    if (not report_file.is_file() or report_file.is_symlink() or
-            not checkpoint.is_file() or checkpoint.is_symlink()
+    if (not report_file.is_file() or report_file.is_symlink()
+            or not checksum.is_file() or checksum.is_symlink()
+            or not checkpoint.is_file() or checkpoint.is_symlink()
+            or report_file.stat().st_size > 128_000
+            or checksum.stat().st_size > 100
             or checkpoint.stat().st_size > 100_000):
         raise ValueError("report/checkpoint must be bounded local regular files")
+    if checksum.read_text(encoding="utf8").strip() != _sha(report_file):
+        raise ValueError("report bytes changed after training")
     report=json.loads(report_file.read_text(encoding="utf8"))
-    if report.get("schema")!=SCHEMA or report.get("source_commit")!=_source():
-        raise ValueError("report schema/source mismatch")
+    if not isinstance(report,dict) or report.get("schema")!=SCHEMA:
+        raise ValueError("invalid report schema")
+    if report.get("source_commit")!=_source() or report.get("source_manifest")!=_source_manifest():
+        raise ValueError("source bytes changed since training")
+    if (report.get("minotaur_graduated") is not False
+            or report.get("deployed") is not False
+            or report.get("parameter_count") != 12
+            or type(report.get("seed")) is not int
+            or type(report.get("train_examples_by_operation")) is not int):
+        raise ValueError("report qualification and training fields invalid")
     if _sha(checkpoint)!=report.get("checkpoint_sha256"):
         raise ValueError("checkpoint changed after training")
     from safetensors.torch import load_file

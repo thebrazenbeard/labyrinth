@@ -52,3 +52,17 @@ biased 12-parameter model is narrower than unconstrained arithmetic
 discovery, untrained operation semantics, different moduli or
 arbitrarily long programs. The public exhaustive audit is not a
 private blind test.
+
+## Evidence integrity and hostile-review limits
+
+The experiment report includes hashes of the exact executed source files,
+the serialized coefficient tensors, the saved checkpoint and ordered atomic
+and program predictions. A sibling report.sha256 detects unaccompanied
+report modifications. Reload bounds local report/checkpoint sizes and rejects
+changed source, missing/truncated state vectors and mismatched trial digests.
+
+These are local **consistency checks**, not signatures or trustworthy
+third-party custody: an operator able to rewrite both a report and its
+checksum may still fabricate evidence. PID inequality similarly cannot
+authenticate process isolation. The operator never receives graduation
+authority from a local score, even at 100% on this synthetic family.

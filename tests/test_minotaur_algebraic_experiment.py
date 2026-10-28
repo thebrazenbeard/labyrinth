@@ -42,3 +42,41 @@ class AlgebraicExperimentTests(unittest.TestCase):
             self.assertTrue(replay["process_id_differs"] is False)  # same-process unit test
             with self.assertRaises(FileExistsError):
                 run_experiment(Path(temp)/"output",torch,seed=47)
+
+    def test_rejects_report_tampering_and_source_drift(self):
+        import json
+        from unittest.mock import patch
+        from labyrinth.minotaur_algebraic_experiment import (
+            run_experiment, reload_experiment,
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp)/"run"
+            run_experiment(folder,torch,seed=47,steps=60)
+            fp=folder/"report.json"
+            original=fp.read_bytes()
+            data=json.loads(original)
+            data["minotaur_graduated"]=True
+            fp.write_text(json.dumps(data),encoding="utf8")
+            with self.assertRaisesRegex(ValueError,"report.*changed"):
+                reload_experiment(folder,torch)
+            fp.write_bytes(original)
+            with patch("labyrinth.minotaur_algebraic_experiment._source_manifest",
+                       return_value={"tampered":"source"}):
+                with self.assertRaisesRegex(ValueError,"source.*changed"):
+                    reload_experiment(folder,torch)
+
+    def test_truncated_program_predictions_cannot_score_perfect(self):
+        from unittest.mock import patch
+        from labyrinth.minotaur_algebraic_experiment import evaluate_programs
+        from labyrinth.minotaur_algebraic_rules import build_algebraic_head
+        class MalformedModel:
+            def __init__(self): self.algebraic_head=self
+            def load_state_dict(self, state, strict=True): pass
+            def eval(self): return self
+            def __call__(self, features):
+                return {"predicted_states":torch.empty((features.mask.shape[0],0,2),dtype=torch.long)}
+        with patch("labyrinth.minotaur_algebraic_experiment.build_transition_model",
+                   return_value=MalformedModel()):
+            with self.assertRaisesRegex(ValueError,"prediction.*length"):
+                evaluate_programs(build_algebraic_head(torch,seed=19),
+                                  torch,seed=808,count=8)
