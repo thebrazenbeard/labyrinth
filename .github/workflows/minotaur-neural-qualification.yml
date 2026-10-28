@@ -82,4 +82,4 @@ jobs:
           OMP_NUM_THREADS: "2"
           MKL_NUM_THREADS: "2"
         run: |
-          timeout 90s python -m unittest tests.test_minotaur_v7_numeric tests.test_minotaur_v7_benchmark -q
+          timeout 90s python -m unittest tests.test_minotaur_v7_numeric tests.test_minotaur_v7_benchmark tests.test_minotaur_v7_intermediate tests.test_minotaur_v7_blindish_eval tests.test_minotaur_v7_intermediate_replay tests.test_minotaur_v7_intermediate_audit -q

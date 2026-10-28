@@ -1,0 +1,213 @@
+{
+  "auxiliary_supervision": {
+    "product_scale": "offline normalized integer product",
+    "quotient": "offline floor(product/modulus)",
+    "remainder": "offline residue label"
+  },
+  "config": {
+    "batch_size": 512,
+    "depth": 2,
+    "epochs": 30,
+    "holdout_fraction": 0.1,
+    "learning_rate": 0.003,
+    "max_optimizer_seconds": 90.0,
+    "seed": 20261028,
+    "seeds": [
+      20261028,
+      20261029
+    ],
+    "width": 28
+  },
+  "group_pair_audit": {
+    "all_disjoint": true,
+    "groups": {
+      "absent_operand": 97,
+      "absent_output": 48,
+      "independent_holdout": 461,
+      "train": 4147
+    },
+    "reversals_together": true
+  },
+  "limits": "Public synthetic data; mod101 is evaluation only; no private-exam claim.",
+  "model": {
+    "architecture": "symmetric_shared_encoder_learned_sum_absdiff_multihead",
+    "forward_product_or_modulo": false,
+    "parameters": 3587,
+    "supplied_inductive_priors": [
+      "shared operand encoder",
+      "exchange symmetry",
+      "normalized bounded coordinates",
+      "fixed Fourier coordinate features"
+    ]
+  },
+  "promotion_recommendation": "DO_NOT_PROMOTE",
+  "qualification": "NOT_ESTABLISHED",
+  "runs": [
+    {
+      "controls": {
+        "constant": {
+          "absent_operand_53": {
+            "accuracy": 0.010362694039940834
+          },
+          "absent_output_53": {
+            "accuracy": 0.0
+          },
+          "independent_holdout": {
+            "accuracy": 0.015384615398943424
+          },
+          "modulus_101": {
+            "accuracy": 0.019703950732946396
+          }
+        },
+        "frozen_random": {
+          "absent_operand_53": {
+            "accuracy": 0.010362694300518135,
+            "correct": 2,
+            "count": 193
+          },
+          "absent_output_53": {
+            "accuracy": 0.0,
+            "correct": 0,
+            "count": 94
+          },
+          "independent_holdout": {
+            "accuracy": 0.01098901098901099,
+            "correct": 10,
+            "count": 910
+          },
+          "modulus_101": {
+            "accuracy": 0.00941084207430644,
+            "correct": 96,
+            "count": 10201
+          }
+        }
+      },
+      "evaluation": {
+        "absent_operand_53": {
+          "accuracy": 0.010362694300518135,
+          "correct": 2,
+          "count": 193
+        },
+        "absent_output_53": {
+          "accuracy": 0.02127659574468085,
+          "correct": 2,
+          "count": 94
+        },
+        "independent_holdout": {
+          "accuracy": 0.013186813186813187,
+          "correct": 12,
+          "count": 910
+        },
+        "modulus_101": {
+          "accuracy": 0.013724144691696893,
+          "correct": 140,
+          "count": 10201
+        }
+      },
+      "seed": 20261028,
+      "split": {
+        "operand_53_train_rows": 0,
+        "target_53_train_rows": 0,
+        "train_count": 8212
+      },
+      "training": {
+        "initial_sha256": "b0658ae3bc94ea347ed1bd0b8eace4995b8d66d4ae2d3b10203c507720109f2d",
+        "last_auxiliary_losses": {
+          "product_scale": 0.0003337973612360656,
+          "quotient": 0.00011053483467549086,
+          "remainder": 0.03443712741136551
+        },
+        "optimizer_seconds": 1.583023100043647,
+        "optimizer_steps": 510,
+        "stopped_at_budget": false,
+        "trained_sha256": "91f24459606bad08aa777eab1936819ad0d3742e94c849a502441ec263a35f0c"
+      }
+    },
+    {
+      "controls": {
+        "constant": {
+          "absent_operand_53": {
+            "accuracy": 0.010362694039940834
+          },
+          "absent_output_53": {
+            "accuracy": 0.0
+          },
+          "independent_holdout": {
+            "accuracy": 0.015384615398943424
+          },
+          "modulus_101": {
+            "accuracy": 0.019703950732946396
+          }
+        },
+        "frozen_random": {
+          "absent_operand_53": {
+            "accuracy": 0.010362694300518135,
+            "correct": 2,
+            "count": 193
+          },
+          "absent_output_53": {
+            "accuracy": 0.0,
+            "correct": 0,
+            "count": 94
+          },
+          "independent_holdout": {
+            "accuracy": 0.012087912087912088,
+            "correct": 11,
+            "count": 910
+          },
+          "modulus_101": {
+            "accuracy": 0.009802960494069209,
+            "correct": 100,
+            "count": 10201
+          }
+        }
+      },
+      "evaluation": {
+        "absent_operand_53": {
+          "accuracy": 0.05181347150259067,
+          "correct": 10,
+          "count": 193
+        },
+        "absent_output_53": {
+          "accuracy": 0.0425531914893617,
+          "correct": 4,
+          "count": 94
+        },
+        "independent_holdout": {
+          "accuracy": 0.02857142857142857,
+          "correct": 26,
+          "count": 910
+        },
+        "modulus_101": {
+          "accuracy": 0.014312322321341045,
+          "correct": 146,
+          "count": 10201
+        }
+      },
+      "seed": 20261029,
+      "split": {
+        "operand_53_train_rows": 0,
+        "target_53_train_rows": 0,
+        "train_count": 8212
+      },
+      "training": {
+        "initial_sha256": "50e8a21f79494cca718d4be76ebe3c75e82fed5a5547070b69512676b424dc41",
+        "last_auxiliary_losses": {
+          "product_scale": 0.0006452269153669477,
+          "quotient": 0.0002840936940629035,
+          "remainder": 0.044689252972602844
+        },
+        "optimizer_seconds": 1.633998200064525,
+        "optimizer_steps": 510,
+        "stopped_at_budget": false,
+        "trained_sha256": "94ce75e8de991cff6edeebd70e25d3e87adfbc2fdbea6c0facd35ede7c706be7"
+      }
+    }
+  ],
+  "schema": "labyrinth.minotaur.v7-intermediate.v1",
+  "source": {
+    "clean": true,
+    "head": "e5c8f60a03937b6bd1d2f2dbec2f3217ee8d77a2",
+    "model_sha256": "bcf6fed738682793d160bc2ebd80a7d2d1939d4857dad17820b01a3ca87e0902"
+  }
+}

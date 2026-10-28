@@ -165,14 +165,20 @@ def _digest(model):
     return digest.hexdigest()
 
 
-def _score(model, batch, modulus):
+def _predict_values(model, batch, modulus):
+    """Return neural predictions only, never a gold arithmetic result."""
     model.eval()
-    prediction = []
+    predictions = []
     with torch.no_grad():
         for start in range(0, len(batch), 1024):
             item = slice(start, start + 1024)
             out = model(batch.x[item], batch.y[item], torch.full_like(batch.x[item], modulus))["remainder"]
-            prediction.extend(out.round().long().clamp(0, modulus - 1).tolist())
+            predictions.extend(out.round().long().clamp(0, modulus - 1).tolist())
+    return predictions
+
+
+def _score(model, batch, modulus):
+    prediction = _predict_values(model, batch, modulus)
     hits = sum(a == b for a, b in zip(prediction, batch.remainder.tolist()))
     return {"correct": hits, "count": len(batch), "accuracy": hits / len(batch) if len(batch) else 0.0}
 
@@ -185,7 +191,7 @@ def _loss(prediction, batch, modulus):
     return rem + .35 * quo + .15 * prod, {"remainder": float(rem.detach()), "quotient": float(quo.detach()), "product_scale": float(prod.detach())}
 
 
-def run_intermediate_study(config=IntermediateConfig()):
+def run_intermediate_study(config=IntermediateConfig(), *, prediction_sink=None):
     config.validate()
     torch.set_num_threads(min(2, torch.get_num_threads()))
     split = build_intermediate_split(seed=config.seed, holdout_fraction=config.holdout_fraction)
@@ -217,6 +223,19 @@ def run_intermediate_study(config=IntermediateConfig()):
             if timed_out: break
         elapsed = time.perf_counter() - started
         evaluated = {name: _score(model, batch, 101 if name == "modulus_101" else MOD) for name, batch in names.items()}
+        if prediction_sink is not None:
+            for name, batch in names.items():
+                modulus = 101 if name == "modulus_101" else MOD
+                values = _predict_values(model, batch, modulus)
+                mapping = {(int(a), int(b)): int(value) for a, b, value in
+                           zip(batch.x.tolist(), batch.y.tolist(), values)}
+                if len(mapping) != len(batch):
+                    raise ValueError("Duplicate prediction coordinates")
+                external_name = {"independent_holdout":"unseen_group_pairs",
+                                 "absent_output_53":"missing_output_53",
+                                 "absent_operand_53":"missing_input_53",
+                                 "modulus_101":"mod101"}[name]
+                prediction_sink(seed, external_name, mapping)
         constant = int(torch.bincount(split.train.remainder, minlength=MOD).argmax())
         controls = {"constant": {name: {"accuracy": (batch.remainder == constant).float().mean().item()} for name, batch in names.items()},
                     "frozen_random": frozen}
