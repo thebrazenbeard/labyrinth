@@ -11,7 +11,9 @@ import unittest
 from unittest.mock import patch
 
 from labyrinth.hf_pilot import (
+    CalibrationConfig,
     PilotConfig,
+    _encode_scoring_prompt,
     _metadata_digest,
     _weights_digest,
     _device_headroom,
@@ -20,9 +22,11 @@ from labyrinth.hf_pilot import (
     _summarize_trials,
     derange_answers,
     reload_evaluate,
+    run_calibration,
     run_pilot,
     training_cases,
     validate_config,
+    validate_calibration,
 )
 from labyrinth.maze import Challenge
 
@@ -105,6 +109,93 @@ class HfPilotContractTests(unittest.TestCase):
         self.assertEqual(labels[visible:], ids[visible:])
         with self.assertRaisesRegex(ValueError, "token budget"):
             _encode_pair(tokenizer, "X" * 200, "2", 64)
+
+    def test_scoring_chat_uses_tokenizer_owned_roles_without_retokenization(self):
+        class ChatTokenizer:
+            chat_template = "model owned template"
+
+            def apply_chat_template(self, messages, **kwargs):
+                self.received = (messages, kwargs)
+                return {"input_ids": "chat-ids", "attention_mask": "chat-mask"}
+
+        tokenizer = ChatTokenizer()
+        encoded = _encode_scoring_prompt(tokenizer, "1 + 1?",
+                                         prompt_style="chat", answer_only=False)
+        self.assertEqual(encoded["input_ids"], "chat-ids")
+        self.assertEqual(tokenizer.received[0], [{"role": "user", "content": "Task:\n1 + 1?"}])
+        self.assertEqual(tokenizer.received[1], {
+            "tokenize": True, "add_generation_prompt": True,
+            "return_tensors": "pt", "return_dict": True,
+        })
+        with self.assertRaisesRegex(ValueError, "no usable chat template"):
+            _encode_scoring_prompt(DummyTokenizer(), "1 + 1?",
+                                   prompt_style="chat", answer_only=False)
+        with self.assertRaisesRegex(ValueError, "answer prefill"):
+            _encode_scoring_prompt(tokenizer, "1 + 1?",
+                                   prompt_style="chat", answer_only=True)
+
+    def test_frozen_calibration_uses_train_only_and_identical_budget(self):
+        config = CalibrationConfig(model_path=str(self.model), seed=29,
+                                   dev_count=4, max_tokens=512, max_new_tokens=64)
+        self.assertEqual(validate_calibration(config)[0], self.model)
+        self.assertFalse(self.output.exists())
+
+        class FakeTorch:
+            @staticmethod
+            def set_num_threads(value):
+                pass
+
+            @staticmethod
+            def get_num_threads():
+                return 1
+
+            @staticmethod
+            def manual_seed(value):
+                pass
+
+            @staticmethod
+            def use_deterministic_algorithms(value):
+                pass
+
+        from labyrinth.maze import generate_maze as genuine_generate
+        requested_splits = []
+        observed_calls = []
+
+        def generate_train_only(**kwargs):
+            requested_splits.append(kwargs["split"])
+            if kwargs["split"] != "train":
+                raise AssertionError("calibration opened sealed evaluation")
+            return genuine_generate(**kwargs)
+
+        def score_only(model, tokenizer, torch, cases, **kwargs):
+            observed_calls.append((kwargs, [case.id for case in cases]))
+            return {"correct": 0, "trials": [{"id": case.id} for case in cases]}
+
+        with patch("labyrinth.hf_pilot.generate_maze", side_effect=generate_train_only), \
+             patch("labyrinth.hf_pilot._calibration_deps", return_value=(FakeTorch, None, None)), \
+             patch("labyrinth.hf_pilot._load_base", return_value=(object(), object())), \
+             patch("labyrinth.hf_pilot._buffer_digest", return_value="same"), \
+             patch("labyrinth.hf_pilot._score_model", side_effect=score_only), \
+             patch("labyrinth.hf_pilot._device_headroom", return_value=None):
+            report = run_calibration(config)
+        self.assertEqual(set(requested_splits), {"train"})
+        self.assertEqual([call[0]["prompt_style"] for call in observed_calls], ["raw", "chat"])
+        self.assertEqual(observed_calls[0][1], observed_calls[1][1])
+        for kwargs, _ in observed_calls:
+            self.assertEqual(kwargs["max_tokens"], 512)
+            self.assertEqual(kwargs["max_new_tokens"], 64)
+        self.assertFalse(report["model_updated"])
+        self.assertEqual(len(report["public_dev_case_ids"]), 4)
+        self.assertFalse(self.output.exists())
+
+    def test_calibration_preflight_rejects_unbounded_generation(self):
+        for bad in (0, 129, True):
+            with self.subTest(value=bad):
+                with self.assertRaises(ValueError):
+                    validate_calibration(CalibrationConfig(model_path=str(self.model), max_new_tokens=bad))
+        with self.assertRaisesRegex(ValueError, "smaller"):
+            validate_calibration(CalibrationConfig(model_path=str(self.model),
+                                                   max_tokens=64, max_new_tokens=64))
 
     def test_no_torch_import_neither_creates_nor_changes_run_dir(self):
         with patch("labyrinth.hf_pilot._deps", side_effect=RuntimeError("optional deps unavailable")):
