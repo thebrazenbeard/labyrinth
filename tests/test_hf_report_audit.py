@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from labyrinth.evaluation import score_response
-from labyrinth.hf_pilot import EVAL_SEED_XOR, SCHEMA, _prompt_commitment
+from labyrinth.hf_pilot import EVAL_SEED_XOR, LEGACY_SCHEMA, _prompt_commitment
 from labyrinth.maze import generate_maze
 from labyrinth.runner import _source_state
 from labyrinth.hf_report_audit import audit_hf_report
@@ -36,7 +36,7 @@ def pilot_fixture():
               "visited_case_ids": [c.id for c in train],
               "input_tokens_seen": 200, "losses": [2.5, 2.0]}
     return {
-        "schema": SCHEMA, "source": _source_state(),
+        "schema": LEGACY_SCHEMA, "source": _source_state(),
         "config": {"model_path": "C:/fixture/base", "output_dir": "C:/fixture/run",
                    "seed": 13, "train_count": 2, "eval_count": 2,
                    "tiers": [1], "steps": 2, "max_tokens": 256,

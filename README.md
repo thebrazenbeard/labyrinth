@@ -79,7 +79,21 @@ python -m labyrinth eval-hf --run-dir NEW_EMPTY_PARENT/RUN_001 --report NEW_EMPT
 python -m labyrinth audit-hf-report --input NEW_EMPTY_PARENT/RUN_001/pilot_report.json
 ```
 
-This path never downloads weights, installs packages, runs arbitrary model text, or replaces the base checkpoint. It rejects existing output directories and checkpoints exceeding its strict 1 GiB no-quantization limit; therefore the existing ~6.15 GB 3B-class local checkpoint on Lappy is **not eligible** for this initial pilot. Its default two steps consume only two of eight default generated training examples. The public finite mazes are a mechanism smoke test, **not** a qualified learning effect. The current untrained-adapter `sham` performs no training visits or optimizer steps, so it is **not a compute-matched placebo**.
+This path never downloads weights, installs packages, runs arbitrary model text, or replaces the base checkpoint. It rejects existing output directories and checkpoints exceeding its strict 1 GiB no-quantization limit; therefore the existing ~6.15 GB 3B-class local checkpoint on Lappy is **not eligible** for this initial pilot. Its default two steps consume only two of eight default generated training examples. The public finite mazes are a mechanism smoke test, **not** a qualified learning effect. New runs from the v3 pilot use a **zero-learning-rate, same-exposure placebo**
+that executes the same number of forward/backward and optimizer steps and the
+same deterministic tier-balanced training-case order. The source verifies its
+LoRA tensors **and persistent model buffers** are unchanged, failing closed
+rather than claiming matched initial conditions if stateful model buffers
+change during any arm. This is better matched for training operations and
+example visits but is *not* proof of identical kernel timing, private test
+independence, or semantic learning. Historical v2 reports retain the original
+unmatched sham meaning. The opt-in --answer-only mode moves the fixed
+ANSWER: scaffold into the prompt, where it receives no supervised loss.
+Only answer tokens and EOS receive targets. In that mode format_valid
+means the model emitted a parseable numeric suffix after an operator-provided
+scaffold, not that the model independently learned output formatting. This
+separates numeric correctness from the trivial constant format token but does
+not make public finite arithmetic templates an independent reasoning exam.
 
 `audit-hf-report` is dependency-free and re-generates the declared train/eval case IDs, held-out prompt commitment, control metadata, training visit order, and reported evaluation metrics. It verifies file/tensor **digest receipt syntax**, but does not open or authenticate the checkpoint files. For responses whose entire text is recoverable from the stored 128-character preview, it independently rechecks the response digest and answer score. Longer responses whose hashes differ from their preview yield `INCOMPLETE`, never an unqualified `PASS`. Inconsistent records yield `FAIL`; the command exits nonzero for both. Source fingerprints must match the auditor checkout, so older reports should be audited at their source revision. All receipts and model-origin claims are self-reported: even `PASS` is **not proof** that training actually occurred or improved reasoning. The original run's full generated text was not always retained; future run schemas should save auditable full text in a separately controlled evidence artifact.
 
