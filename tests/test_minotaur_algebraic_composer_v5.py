@@ -3,6 +3,12 @@ import unittest
 
 from labyrinth.minotaur_algebraic_composer_v5 import predict_composed_operators
 
+try:
+    import torch
+except ImportError:
+    torch=None
+
+@unittest.skipIf(torch is None, "optional Torch is tested in neural CI")
 class AlgebraicComposerTests(unittest.TestCase):
     def test_known_add_primitive_composes_sub_and_mul(self):
         try:

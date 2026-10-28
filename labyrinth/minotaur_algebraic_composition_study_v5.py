@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 import subprocess
 
-from .minotaur_algebraic_v5 import AlgebraicConfig, build_algebraic_model
 from .minotaur_algebraic_data_v5 import atomic_split
 from .minotaur_algebraic_training_v5 import train_atomic_operator
 from .minotaur_algebraic_composer_v5 import predict_composed_operators
@@ -40,7 +39,10 @@ class CompositionStudyConfig:
             or type(self.lr) is not float or not 0<self.lr<=.02
             or type(self.time_budget) is not float or not 1<=self.time_budget<=90):
             raise ValueError("bounded hybrid composition config required")
-        AlgebraicConfig(seed=self.seed,width=self.width,rank=self.rank).validate()
+        if (type(self.width) is not int or type(self.rank) is not int or
+                self.width < 1 or self.rank < 1 or
+                6*self.width*self.width+9*self.width*self.rank+202*self.width+98 >= 150000):
+            raise ValueError('compact model parameter budget exceeded')
         return self
 
 
@@ -79,6 +81,7 @@ def _evaluate(model,rows,op_ids,torch,batch_size,train_rows):
 
 def run_study(config=CompositionStudyConfig(),checkpoint_dir=None):
     config.validate()
+    from .minotaur_algebraic_v5 import AlgebraicConfig, build_algebraic_model
     import torch
     from safetensors.torch import load_file,save_file
     torch.set_num_threads(min(2,torch.get_num_threads()))

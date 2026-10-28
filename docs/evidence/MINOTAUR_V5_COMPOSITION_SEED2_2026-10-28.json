@@ -1,0 +1,287 @@
+{
+  "architecture": {
+    "all_atomic_pair_table": false,
+    "learned_rule": "ADD modulo97 from 80% of atomic addition pairs",
+    "neural_parameters": 32258,
+    "provided_rules": [
+      "SUB(x,y) = ADD(x, inverse_mod97(y))",
+      "MUL uses binary double-and-add via learned ADD"
+    ]
+  },
+  "checkpoint": {
+    "bytes": 148936,
+    "reloaded_predictions_identical": true,
+    "sha256": "1b9951f515dacbe55f827c87c09a563ad4a7408f6206bbce5dab9b10444e8a1d"
+  },
+  "config": {
+    "batch_size": 384,
+    "challenge": "none",
+    "lr": 0.003,
+    "rank": 20,
+    "seed": 20261029,
+    "split_seed": 9911,
+    "steps": 1200,
+    "time_budget": 85.0,
+    "width": 48
+  },
+  "graduation_authority": "none",
+  "heldout": {
+    "audit": {
+      "audited_cases": 2823,
+      "failures": [],
+      "structural_overlap_audit": {
+        "evaluation_group_overlap": [],
+        "exact_training_pair_overlap": [],
+        "operation_overlap": [
+          "ADD"
+        ]
+      },
+      "total_cases": 2823
+    },
+    "baselines": {
+      "always_constant": {
+        "best_constant": 84,
+        "metrics": {
+          "abstentions": 0,
+          "coverage": 1.0,
+          "exact_accuracy": 0.017357421183138506,
+          "exact_correct": 49,
+          "non_abstentions": 2823,
+          "selective_exact_accuracy": 0.017357421183138506,
+          "total": 2823
+        }
+      },
+      "copy_x": {
+        "abstentions": 0,
+        "coverage": 1.0,
+        "exact_accuracy": 0.010626992561105207,
+        "exact_correct": 30,
+        "non_abstentions": 2823,
+        "selective_exact_accuracy": 0.010626992561105207,
+        "total": 2823
+      }
+    },
+    "confidence_intervals": "not_computed_grouped_or_paired_dependence",
+    "disposition": "SCORED",
+    "graduation_authority": "none",
+    "limitations": [
+      "Groups and paired inputs may be dependent; no IID confidence is claimed.",
+      "This evaluator establishes neither training provenance nor broad mastery."
+    ],
+    "metrics": {
+      "abstentions": 0,
+      "coverage": 1.0,
+      "exact_accuracy": 1.0,
+      "exact_correct": 2823,
+      "non_abstentions": 2823,
+      "selective_exact_accuracy": 1.0,
+      "total": 2823
+    },
+    "oracle": "local_arithmetic_recomputed_from_op_x_y",
+    "per_operation": {
+      "ADD": {
+        "abstentions": 0,
+        "coverage": 1.0,
+        "exact_accuracy": 1.0,
+        "exact_correct": 941,
+        "non_abstentions": 941,
+        "selective_exact_accuracy": 1.0,
+        "total": 941
+      },
+      "MUL": {
+        "abstentions": 0,
+        "coverage": 1.0,
+        "exact_accuracy": 1.0,
+        "exact_correct": 941,
+        "non_abstentions": 941,
+        "selective_exact_accuracy": 1.0,
+        "total": 941
+      },
+      "SUB": {
+        "abstentions": 0,
+        "coverage": 1.0,
+        "exact_accuracy": 1.0,
+        "exact_correct": 941,
+        "non_abstentions": 941,
+        "selective_exact_accuracy": 1.0,
+        "total": 941
+      }
+    },
+    "qualification": "NOT_ESTABLISHED",
+    "schema": "labyrinth.minotaur-algebraic-eval.v5",
+    "structural_overlap_audit": {
+      "evaluation_group_overlap": [],
+      "exact_training_pair_overlap": [],
+      "operation_overlap": [
+        "ADD"
+      ]
+    },
+    "subgroups": {
+      "diagonal": {
+        "abstentions": 0,
+        "coverage": 1.0,
+        "exact_accuracy": 1.0,
+        "exact_correct": 3,
+        "non_abstentions": 3,
+        "selective_exact_accuracy": 1.0,
+        "total": 3
+      },
+      "unseen_pair": {
+        "abstentions": 0,
+        "coverage": 1.0,
+        "exact_accuracy": 1.0,
+        "exact_correct": 2823,
+        "non_abstentions": 2823,
+        "selective_exact_accuracy": 1.0,
+        "total": 2823
+      },
+      "zero": {
+        "abstentions": 0,
+        "coverage": 1.0,
+        "exact_accuracy": 1.0,
+        "exact_correct": 44,
+        "non_abstentions": 44,
+        "selective_exact_accuracy": 1.0,
+        "total": 44
+      },
+      "zero_operand": {
+        "abstentions": 0,
+        "coverage": 1.0,
+        "exact_accuracy": 1.0,
+        "exact_correct": 44,
+        "non_abstentions": 44,
+        "selective_exact_accuracy": 1.0,
+        "total": 44
+      }
+    }
+  },
+  "limitations": [
+    "Operations SUB/MUL are composed by explicit algorithms; this does NOT show the network independently learned multiplication.",
+    "Public deterministic finite-domain tests, not a blind independent examiner.",
+    "No target labels enter neural forward; the learned ADD network remains fallible on unobserved pairs."
+  ],
+  "predictions_sha256": "f2013eb671c473d3cfbb85faecaf4dd3b17b16e26c82429a99e80ffc6be432da",
+  "promotion_recommendation": "RESEARCH_ONLY_NO_PRODUCTION",
+  "qualification": "NOT_ESTABLISHED",
+  "schema": "labyrinth.minotaur-v5-neural-add-hybrid-composition.v1",
+  "source": {
+    "clean": true,
+    "head": "22e71c35c946b4abfe67d9068bd8eb66a9ecb4b7",
+    "module_sha256": "5dd6485a303884ef9c0f10029f8510d5b857b0fad3c60c49fc4bc433e2842501"
+  },
+  "supervision": {
+    "ADD_train_pairs": 7527,
+    "ADD_validation_pairs": 941,
+    "semantic_op_ids": [
+      0,
+      2,
+      1
+    ],
+    "split_commitments": {
+      "holdout": "5ab11c1ef1ac8571dcb3c116ccf1378c9ed7cab9a8d3ad55143550da31018fd0",
+      "train": "b240c398cae11c98a2695242c1ed61a45e22e9cefaf729ff3112b82d6ab65b73",
+      "val": "7b29f4c6be1d157add9287f511a0ffd6c229bd4a2ce368c9fb9f8e9f84b62019"
+    },
+    "test_not_used_for_optimizer": true
+  },
+  "training": {
+    "final": {
+      "macro": {
+        "all": {
+          "accuracy": 1.0,
+          "mean_confidence": 0.9949239097796895,
+          "operations": 1
+        },
+        "seen_pairs": {
+          "accuracy": null,
+          "mean_confidence": null,
+          "operations": 0
+        },
+        "truly_unseen_pairs": {
+          "accuracy": 1.0,
+          "mean_confidence": 0.9949239097796895,
+          "operations": 1
+        }
+      },
+      "per_op": {
+        "0": {
+          "all": {
+            "accuracy": 1.0,
+            "correct": 941,
+            "mean_confidence": 0.9949239097796895,
+            "total": 941
+          },
+          "seen_pairs": {
+            "accuracy": null,
+            "correct": 0,
+            "mean_confidence": null,
+            "total": 0
+          },
+          "truly_unseen_pairs": {
+            "accuracy": 1.0,
+            "correct": 941,
+            "mean_confidence": 0.9949239097796895,
+            "total": 941
+          }
+        }
+      }
+    },
+    "frozen_baseline": {
+      "macro": {
+        "all": {
+          "accuracy": 0.008501594048884165,
+          "mean_confidence": 0.02444561484777522,
+          "operations": 1
+        },
+        "seen_pairs": {
+          "accuracy": null,
+          "mean_confidence": null,
+          "operations": 0
+        },
+        "truly_unseen_pairs": {
+          "accuracy": 0.008501594048884165,
+          "mean_confidence": 0.02444561484777522,
+          "operations": 1
+        }
+      },
+      "per_op": {
+        "0": {
+          "all": {
+            "accuracy": 0.008501594048884165,
+            "correct": 8,
+            "mean_confidence": 0.02444561484777522,
+            "total": 941
+          },
+          "seen_pairs": {
+            "accuracy": null,
+            "correct": 0,
+            "mean_confidence": null,
+            "total": 0
+          },
+          "truly_unseen_pairs": {
+            "accuracy": 0.008501594048884165,
+            "correct": 8,
+            "mean_confidence": 0.02444561484777522,
+            "total": 941
+          }
+        }
+      }
+    },
+    "mean_training_loss": 0.4774266347291026,
+    "optimizer": "AdamW(weight_decay=0.0)",
+    "optimizer_updates": 1200,
+    "reproducibility": {
+      "batch_order": "sequential cyclic; no trainer RNG",
+      "time_budget_seconds": 85.0
+    },
+    "requested_updates": 1200,
+    "schema": "labyrinth.minotaur-algebraic-training-v5.v1",
+    "split_policy": "dev is evaluation-only; no heldout/test rows are accepted or used for selection",
+    "timed_out": false,
+    "weight_digest": {
+      "changed": true,
+      "final_sha256": "b94075ca5216a917c9405578d718efc33aac60eef6843af22684dc9efa01a86c",
+      "initial_sha256": "a1a914aac3f7507e50383fa651637448ccb491baf04aa7139366502a457a1780"
+    }
+  }
+}

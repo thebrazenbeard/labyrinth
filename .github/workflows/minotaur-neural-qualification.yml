@@ -8,6 +8,7 @@ on:
       - "labyrinth/minotaur_scratch.py"
       - "models/minotaur_scratch_v1/**"
       - "models/minotaur_transition_v4_development/**"
+      - "models/minotaur_algebraic_v5_development/**"
       - "tests/test_minotaur_neural_ci.py"
       - "labyrinth/minotaur_*.py"
       - "tests/test_minotaur_*.py"
@@ -18,6 +19,7 @@ on:
       - "labyrinth/minotaur_scratch.py"
       - "models/minotaur_scratch_v1/**"
       - "models/minotaur_transition_v4_development/**"
+      - "models/minotaur_algebraic_v5_development/**"
       - "tests/test_minotaur_neural_ci.py"
       - "labyrinth/minotaur_*.py"
       - "tests/test_minotaur_*.py"
@@ -63,3 +65,9 @@ jobs:
           MKL_NUM_THREADS: "2"
         run: |
           timeout 90s python -m unittest tests.test_minotaur_transition_v4 tests.test_minotaur_transition_curriculum tests.test_minotaur_transition_eval tests.test_minotaur_transition_study tests.test_minotaur_atomic_training tests.test_minotaur_transition_cli -q
+      - name: Execute compact V5 learned algebraic checkpoint and composition tests
+        env:
+          OMP_NUM_THREADS: "2"
+          MKL_NUM_THREADS: "2"
+        run: |
+          timeout 90s python -m unittest tests.test_minotaur_algebraic_v5 tests.test_minotaur_algebraic_data_v5 tests.test_minotaur_algebraic_training_v5 tests.test_minotaur_algebraic_eval_v5 tests.test_minotaur_algebraic_experiment_v5 tests.test_minotaur_algebraic_composer_v5 tests.test_minotaur_algebraic_composition_study_v5 tests.test_minotaur_algebraic_checkpoint_v5 -q
