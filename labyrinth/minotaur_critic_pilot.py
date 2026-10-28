@@ -64,7 +64,7 @@ class CriticConfig:
     lora_rank: int = 4
     lora_alpha: int = 8
     device: str = "cpu"
-    loss_kind: str = "causal_token_ce"  # alternatively pairwise_margin_rank
+    loss_kind: str = "causal_token_ce"  # also pairwise_margin_rank, hybrid_margin_bce_rank
 
     def validate_fields(self) -> None:
         for name in ("seed", "train_seed", "dev_seed", "transfer_seed"):
@@ -84,7 +84,8 @@ class CriticConfig:
             raise ValueError("learning_rate must be a finite supported float")
         if self.device not in ("cpu", "cuda"):
             raise ValueError("device must be cpu or cuda")
-        if self.loss_kind not in ("causal_token_ce", "pairwise_margin_rank"):
+        if self.loss_kind not in ("causal_token_ce", "pairwise_margin_rank",
+                                 "hybrid_margin_bce_rank"):
             raise ValueError("unsupported critic loss objective")
         if len({self.train_seed, self.dev_seed, self.transfer_seed}) != 3:
             raise ValueError("training and evaluation seeds must differ")
@@ -262,6 +263,45 @@ def score_pairwise_margins(examples: Sequence[CriticExample],
             "qualification": "NOT_ESTABLISHED"}
 
 
+def hybrid_margin_loss_and_gradients(correct_margin: float,
+                                     incorrect_margin: float) -> tuple[float, float, float]:
+    """Equal-weight absolute binary BCE plus same-case ranking loss.
+
+    A relative ranking loss alone admits an arbitrarily all-No or all-Yes
+    decision bias. Binary margin BCE anchors correct verdicts above zero and
+    incorrect verdicts below zero, while ranking requires the correct answer
+    score to exceed the incorrect answer for the *same task*.
+
+    Returns scalar loss and dL/d(correct Yes-No), dL/d(incorrect Yes-No).
+    These exact analytic derivatives permit two sequential low-memory backward
+    passes without storing both language-model activation graphs together.
+    """
+    if (type(correct_margin) not in (float, int)
+            or type(incorrect_margin) not in (float, int)
+            or not math.isfinite(correct_margin) or not math.isfinite(incorrect_margin)):
+        raise ValueError("finite numeric verdict margins required")
+
+    def softplus(x: float) -> float:
+        return max(x, 0.0) + math.log1p(math.exp(-abs(x)))
+
+    def sigmoid(x: float) -> float:
+        if x >= 0:
+            return 1.0 / (1.0 + math.exp(-x))
+        positive = math.exp(x)
+        return positive / (1.0 + positive)
+
+    good = float(correct_margin)
+    bad = float(incorrect_margin)
+    rank = bad - good
+    # Equal weight between the *average* binary CE over both verdicts and
+    # the single same-case ranking CE. The earlier sum weighted binary loss
+    # twice as heavily as ranking once the verdict pair was normalized.
+    loss = 0.25 * (softplus(-good) + softplus(bad)) + 0.5 * softplus(rank)
+    good_grad = -0.25 * sigmoid(-good) - 0.5 * sigmoid(rank)
+    bad_grad = 0.25 * sigmoid(bad) + 0.5 * sigmoid(rank)
+    return loss, good_grad, bad_grad
+
+
 def verdict_logit_diagnostics(
     examples: Sequence[CriticExample], logits: Sequence[tuple[float, float]],
 ) -> dict[str, Any]:
@@ -425,11 +465,10 @@ def _updates(model: Any, tokenizer: Any, torch: Any,
     for prepared_pair in prepared:
         optimizer.zero_grad(set_to_none=True)
         paired_loss = 0.0
-        # Pairwise compares only relative Yes-minus-No margins for the
-        # correct and incorrect answer to one task. A global Yes/No shift
-        # cannot directly improve this loss. Recomputing one activation
-        # graph at a time avoids doubling peak memory on CPU.
-        if config.loss_kind == "pairwise_margin_rank":
+        # Paired objectives use the same-task correct/wrong margins. Hybrid
+        # additionally anchors each verdict to the Yes-No zero decision
+        # boundary. Sequential autograd avoids holding two model graphs.
+        if config.loss_kind in ("pairwise_margin_rank", "hybrid_margin_bce_rank"):
             detached: list[tuple[bool, float]] = []
             with torch.no_grad():
                 for tokens, labels in prepared_pair:
@@ -446,16 +485,20 @@ def _updates(model: Any, tokenizer: Any, torch: Any,
                 raise ValueError("pairwise training requires opposite labels")
             good = next(m for truth, m in detached if truth)
             bad = next(m for truth, m in detached if not truth)
-            difference = good - bad
-            coefficient = (math.exp(-difference) / (1 + math.exp(-difference))
-                           if difference >= 0 else 1 / (1 + math.exp(difference)))
-            paired_loss = (math.log1p(math.exp(-difference)) if difference >= 0
-                           else -difference + math.log1p(math.exp(difference)))
+            if config.loss_kind == "hybrid_margin_bce_rank":
+                paired_loss, good_grad, bad_grad = hybrid_margin_loss_and_gradients(good, bad)
+            else:
+                difference = good - bad
+                coefficient = (math.exp(-difference) / (1 + math.exp(-difference))
+                               if difference >= 0 else 1 / (1 + math.exp(difference)))
+                paired_loss = (math.log1p(math.exp(-difference)) if difference >= 0
+                               else -difference + math.log1p(math.exp(difference)))
+                good_grad, bad_grad = -coefficient, coefficient
             for (tokens, labels), (truth, _) in zip(prepared_pair, detached):
                 ids = torch.tensor([tokens[:-1]], dtype=torch.long, device=config.device)
                 logits = model(input_ids=ids, attention_mask=torch.ones_like(ids)).logits[0, -1]
                 margin = logits[yes_tokens[0]] - logits[no_tokens[0]]
-                (margin * (-coefficient if truth else coefficient)).backward()
+                (margin * (good_grad if truth else bad_grad)).backward()
         else:
             # Matched training exposures under the original token-CE path.
             for tokens, labels in prepared_pair:
@@ -481,7 +524,7 @@ def _updates(model: Any, tokenizer: Any, torch: Any,
         losses.append(paired_loss)
     return {"optimizer_steps": len(losses), "forward_backward_steps": 2 * len(losses),
             "detached_forward_passes": (2 * len(losses)
-                if config.loss_kind == "pairwise_margin_rank" else 0),
+                if config.loss_kind in ("pairwise_margin_rank", "hybrid_margin_bce_rank") else 0),
             "examples_per_optimizer_step": 2,
             "visited_example_ids": [ex.example_id for pair in pairs for ex in pair],
             "zeroed_gradients": mode == "zero_update", "losses": losses}
@@ -639,6 +682,9 @@ def main(argv: list[str] | None = None) -> int:
     train.add_argument("--output-dir", required=True)
     train.add_argument("--steps", type=int, default=24)
     train.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    train.add_argument("--loss-kind", choices=("causal_token_ce", "pairwise_margin_rank",
+                                              "hybrid_margin_bce_rank"),
+                       default="causal_token_ce")
     evaluate = sub.add_parser("reload")
     evaluate.add_argument("--run-dir", required=True)
     evaluate.add_argument("--report", required=True)
@@ -647,7 +693,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "train":
             result = run_critic(CriticConfig(model_path=args.model_path,
                                              output_dir=args.output_dir,
-                                             steps=args.steps, device=args.device))
+                                             steps=args.steps, device=args.device,
+                                             loss_kind=args.loss_kind))
             print(json.dumps({"schema": result["schema"],
                               "parameter_digests": result["parameter_digests"],
                               "evaluations": result["evaluations"]}))

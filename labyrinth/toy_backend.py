@@ -79,6 +79,54 @@ def _deranged_labels(labels: list[float], seed: int) -> list[float]:
     return corrupted
 
 
+def _open_checkpoint_readonly(path: Path) -> int:
+    """Open without following the final link, including on Windows.
+
+    Native Windows opens a reparse entry itself, checks that HANDLE's reparse
+    attribute, and transfers ownership of the accepted HANDLE to a Python fd.
+    This guards the opened object rather than racing a subsequent path check.
+    Parent-directory replacement is outside this primitive's threat model.
+    """
+    if os.name != "nt":
+        return os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                       | getattr(os, "O_NONBLOCK", 0))
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+
+    create = ctypes.WinDLL("kernel32", use_last_error=True).CreateFileW
+    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                       wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                       wintypes.HANDLE)
+    create.restype = wintypes.HANDLE
+
+    get_info = ctypes.WinDLL("kernel32", use_last_error=True).GetFileInformationByHandleEx
+    get_info.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+    get_info.restype = wintypes.BOOL
+    close = ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle
+    close.argtypes = (wintypes.HANDLE,)
+    close.restype = wintypes.BOOL
+
+    class FileAttributeTagInfo(ctypes.Structure):
+        _fields_ = (("attributes", wintypes.DWORD), ("reparse_tag", wintypes.DWORD))
+
+    handle = create(str(path), 0x80000000, 0x00000001, None, 3,
+                    0x00200000 | 0x02000000, None)
+    if handle in (None, ctypes.c_void_p(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        info = FileAttributeTagInfo()
+        if not get_info(handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if info.attributes & 0x00000400:
+            raise ValueError("checkpoint reparse points are not admitted")
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        handle = None
+        return descriptor
+    finally:
+        if handle is not None:
+            close(handle)
+
 class ToyLinearAdapter:
     """A four-parameter linear policy implementing the ModelAdapter protocol."""
 
@@ -180,13 +228,17 @@ class ToyLinearAdapter:
     @classmethod
     def load_checkpoint(cls, path: str | Path) -> "ToyLinearAdapter":
         """Reject unknown fields/versions, duplicate keys, bad numbers and hashes."""
-        # O_NOFOLLOW is absent on Windows; reject a link there as well.
-        if Path(path).is_symlink():
-            raise ValueError("checkpoint must not be a symlink")
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-        fd = os.open(os.fspath(path), flags)
+        target = Path(path)
+        before = target.lstat()
+        if not stat.S_ISREG(before.st_mode) or target.is_symlink() or getattr(target, "is_junction", lambda: False)():
+            raise ValueError("checkpoint must be a nonlinked regular file")
+        fd = _open_checkpoint_readonly(target)
         with os.fdopen(fd, "rb") as stream:
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            opened = os.fstat(stream.fileno())
+            after = target.lstat()
+            if (not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(after.st_mode)
+                    or (opened.st_dev, opened.st_ino) != (after.st_dev, after.st_ino)
+                    or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)):
                 raise ValueError("checkpoint must be a regular file")
             raw = stream.read(_MAX_CHECKPOINT + 1)
         if len(raw) > _MAX_CHECKPOINT:

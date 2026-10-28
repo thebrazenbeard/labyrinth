@@ -266,6 +266,32 @@ def _encode_pair(tokenizer: Any, prompt: str, answer: str, max_tokens: int) -> t
     return prefix + suffix, [-100] * len(prefix) + suffix
 
 
+def validate_tokenized_answer_discrimination(
+    tokenizer: Any, train: list[Challenge], corrupted_answers: list[str], max_tokens: int,
+) -> int:
+    """Refuse a control that is textually wrong but token-identical to gold.
+
+    A tokenizer may normalize two distinct numeric strings into the same IDs.
+    In that case LoRA receives identical supervised targets for correct and
+    corrupted labels, and no semantic control is possible. Check the exact
+    labels used by the optimizer, not just the answer strings.
+    """
+    if not train or len(train) != len(corrupted_answers):
+        raise ValueError("mismatched training and corrupted-label sequences")
+    seen_targets: dict[tuple[int, ...], str] = {}
+    for case, corrupted in zip(train, corrupted_answers):
+        if not isinstance(corrupted, str) or case.answer == corrupted:
+            raise ValueError("corrupted label must differ from oracle answer")
+        for answer in (case.answer, corrupted):
+            _tokens, labels = _encode_pair(tokenizer, case.prompt, answer, max_tokens)
+            supervised = tuple(token for token in labels if token != -100)
+            previous = seen_targets.get(supervised)
+            if previous is not None and previous != answer:
+                raise ValueError("distinct numeric answers tokenized to labels that collide")
+            seen_targets[supervised] = answer
+    return len(train)
+
+
 def _score_model(model: Any, tokenizer: Any, torch: Any, cases: list[Challenge],
                  *, device: str, max_tokens: int, max_new_tokens: int) -> dict[str, Any]:
     model.eval()
@@ -273,11 +299,15 @@ def _score_model(model: Any, tokenizer: Any, torch: Any, cases: list[Challenge],
     with torch.no_grad():
         for challenge in cases:
             prompt = f"Task:\n{challenge.prompt}\nAssistant:\n"
-            ids = tokenizer(prompt, add_special_tokens=True, return_tensors="pt")["input_ids"]
+            encoded = tokenizer(prompt, add_special_tokens=True, return_tensors="pt")
+            ids = encoded["input_ids"]
+            mask = encoded.get("attention_mask")
+            if mask is None or mask.shape != ids.shape:
+                raise ValueError("tokenizer must supply an aligned attention mask")
             if ids.shape[1] + max_new_tokens > max_tokens:
                 raise ValueError("evaluation prompt exceeds context budget")
             ids = ids.to(device)
-            output = model.generate(input_ids=ids, do_sample=False, max_new_tokens=max_new_tokens,
+            output = model.generate(input_ids=ids, attention_mask=mask.to(device), do_sample=False, max_new_tokens=max_new_tokens,
                                     pad_token_id=tokenizer.pad_token_id,
                                     eos_token_id=tokenizer.eos_token_id)
             response = tokenizer.decode(output[0, ids.shape[1]:], skip_special_tokens=True).strip()
@@ -406,11 +436,10 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     base, tokenizer = _load_base(model_path, device, torch=torch,
                                  auto_model=auto_model, auto_tokenizer=auto_tokenizer)
     _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
-    # Validate all token budgets before creating an output directory.
-    for case in train:
-        _encode_pair(tokenizer, case.prompt, case.answer, config.max_tokens)
-    for case, answer in zip(train, corrupted_answers):
-        _encode_pair(tokenizer, case.prompt, answer, config.max_tokens)
+    # Validate token budgets and ensure the real tokenizer distinguishes gold
+    # from deranged answers BEFORE evaluating or creating a run directory.
+    validate_tokenized_answer_discrimination(tokenizer, train, corrupted_answers,
+                                              config.max_tokens)
     baseline = _score_model(base, tokenizer, torch, heldout, device=device,
                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
     model = get_peft_model(base, lora_config(r=config.lora_rank, lora_alpha=config.lora_alpha,

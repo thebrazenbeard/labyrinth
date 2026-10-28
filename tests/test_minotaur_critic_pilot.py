@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 from pathlib import Path
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from labyrinth.minotaur_critic_pilot import (
     encode_supervised_verdict, validate_dataset_separation, reload_critic, SCHEMA,
     verify_reload_contract, prepare_verdict_pair,
     verdict_logit_diagnostics, score_pairwise_margins,
+    hybrid_margin_loss_and_gradients,
 )
 
 
@@ -127,6 +129,45 @@ class CriticPilotTests(unittest.TestCase):
             score_pairwise_margins(examples, [0.0, 1.0, 2.0])
         CriticConfig(model_path="model", output_dir="new",
                      loss_kind="pairwise_margin_rank").validate_fields()
+
+    def test_hybrid_margin_loss_penalizes_all_yes_all_no_and_reversed_pairs(self):
+        good = hybrid_margin_loss_and_gradients(4.0, -4.0)
+        all_no = hybrid_margin_loss_and_gradients(-8.0, -8.0)
+        all_yes = hybrid_margin_loss_and_gradients(8.0, 8.0)
+        reversed_pair = hybrid_margin_loss_and_gradients(-4.0, 4.0)
+        self.assertLess(good[0], all_no[0])
+        self.assertLess(good[0], all_yes[0])
+        self.assertLess(all_no[0], reversed_pair[0])
+        self.assertLess(all_no[1] + all_no[2], 0.0)  # shift both up helps all-No
+        self.assertGreater(all_yes[1] + all_yes[2], 0.0)  # shift both down helps all-Yes
+        self.assertLess(all_no[1], 0.0)
+        self.assertGreater(all_yes[2], 0.0)
+        CriticConfig(model_path="model", output_dir="new",
+                     loss_kind="hybrid_margin_bce_rank").validate_fields()
+
+    def test_hybrid_uses_equal_weight_mean_binary_ce_and_pair_rank_ce(self):
+        # For zero margins both mean binary CE and ranking CE are ln(2).
+        # A prior unnormalized sum returned 1.5*ln(2), over-weighting BCE.
+        loss, correct_grad, incorrect_grad = hybrid_margin_loss_and_gradients(0.0, 0.0)
+        self.assertAlmostEqual(loss, math.log(2), places=12)
+        self.assertAlmostEqual(correct_grad, -0.375, places=12)
+        self.assertAlmostEqual(incorrect_grad, 0.375, places=12)
+
+    def test_hybrid_margin_analytic_grads_match_independent_central_differences(self):
+        for correct, incorrect in [(-8.0, -8.0), (8.0, 8.0), (-2.0, 1.0), (2.0, -1.0)]:
+            loss, grad_correct, grad_incorrect = hybrid_margin_loss_and_gradients(
+                correct, incorrect)
+            eps = 1e-5
+            numeric_good = (hybrid_margin_loss_and_gradients(correct + eps, incorrect)[0]
+                            - hybrid_margin_loss_and_gradients(correct - eps, incorrect)[0]) / (2 * eps)
+            numeric_bad = (hybrid_margin_loss_and_gradients(correct, incorrect + eps)[0]
+                           - hybrid_margin_loss_and_gradients(correct, incorrect - eps)[0]) / (2 * eps)
+            self.assertAlmostEqual(grad_correct, numeric_good, places=6)
+            self.assertAlmostEqual(grad_incorrect, numeric_bad, places=6)
+            self.assertGreaterEqual(loss, 0.0)
+        for values in [(float("nan"), 0.0), (0.0, float("inf"))]:
+            with self.assertRaisesRegex(ValueError, "finite"):
+                hybrid_margin_loss_and_gradients(*values)
 
     def test_config_bounds_no_auto_download(self):
         config = CriticConfig(model_path="/not-a-real-model", output_dir="/tmp/not-a-run")
