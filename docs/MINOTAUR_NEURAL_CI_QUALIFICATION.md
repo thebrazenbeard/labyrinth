@@ -7,7 +7,9 @@ not install PyTorch or Safetensors and therefore cannot execute this neural
 checkpoint.
 
 The job is pinned to Ubuntu 22.04, x64 CPython 3.12, `torch==2.5.1+cpu` from
-the official PyTorch CPU index, and `safetensors==0.4.5`. Its GitHub actions
+the official PyTorch CPU index, `safetensors==0.4.5`, and `numpy==1.26.4`.
+NumPy is an explicit digest/runtime dependency: the model parameter
+fingerprint uses torch.Tensor.numpy(), which fails when NumPy is absent. Its GitHub actions
 are full commit SHAs, its token has read-only contents permission, credentials
 are not persisted, and package installation accepts wheels only. Pip resolves
 PyTorch's runtime dependencies from its standard package indexes; these

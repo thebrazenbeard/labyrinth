@@ -21,6 +21,7 @@ class NeuralQualificationWorkflowContractTests(unittest.TestCase):
         self.assertIn("timeout-minutes: 5", workflow)
         self.assertIn("torch==2.5.1+cpu", workflow)
         self.assertIn("safetensors==0.4.5", workflow)
+        self.assertIn("numpy==1.26.4", workflow)
         self.assertIn("--extra-index-url https://download.pytorch.org/whl/cpu", workflow)
         self.assertNotIn("--no-deps", workflow)
         self.assertIn("timeout 90s", workflow)
