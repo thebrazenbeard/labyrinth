@@ -71,3 +71,9 @@ jobs:
           MKL_NUM_THREADS: "2"
         run: |
           timeout 90s python -m unittest tests.test_minotaur_algebraic_v5 tests.test_minotaur_algebraic_data_v5 tests.test_minotaur_algebraic_training_v5 tests.test_minotaur_algebraic_eval_v5 tests.test_minotaur_algebraic_experiment_v5 tests.test_minotaur_algebraic_composer_v5 tests.test_minotaur_algebraic_composition_study_v5 tests.test_minotaur_algebraic_checkpoint_v5 -q
+      - name: Execute V6 experimental direct multiplication and independent holdout tests
+        env:
+          OMP_NUM_THREADS: "2"
+          MKL_NUM_THREADS: "2"
+        run: |
+          timeout 90s python -m unittest tests.test_minotaur_v6_spectral tests.test_minotaur_v6_latent tests.test_minotaur_v6_holdouts tests.test_minotaur_v6_mul_eval -q

@@ -1,0 +1,79 @@
+{
+  "candidate": {
+    "holdout": {
+      "accuracy": 0.8366047745358091,
+      "count": 1885,
+      "cross_entropy": 0.8100516645598475
+    },
+    "train": {
+      "accuracy": 1.0,
+      "count": 7524,
+      "cross_entropy": 6.673552265716543e-07
+    }
+  },
+  "conclusion": "positive_holdout_signal",
+  "config": {
+    "batch_size": 1024,
+    "epochs": 160,
+    "holdout_fraction": 0.2,
+    "learning_rate": 0.03,
+    "max_optimizer_seconds": 85.0,
+    "rank": 192,
+    "seed": 20261028,
+    "weight_decay": 0.0001
+  },
+  "controls": {
+    "constant": {
+      "holdout": {
+        "accuracy": 0.012732095085084438,
+        "count": 1885,
+        "cross_entropy": null
+      },
+      "train": {
+        "accuracy": 0.022461457177996635,
+        "count": 7524,
+        "cross_entropy": null
+      }
+    },
+    "frozen_random": {
+      "holdout": {
+        "accuracy": 0.011140583554376658,
+        "count": 1885,
+        "cross_entropy": 4.575343480603448
+      },
+      "train": {
+        "accuracy": 0.008904837852206273,
+        "count": 7524,
+        "cross_entropy": 4.5769600429666735
+      }
+    }
+  },
+  "model": {
+    "architecture": "shared_symmetric_cp_spectral_factorization",
+    "parameter_count": 37537,
+    "pretrained_weights": false,
+    "random_initialization": true
+  },
+  "qualification": "RESEARCH_ONLY_DO_NOT_PROMOTE",
+  "schema": "labyrinth.minotaur.v6-spectral.v1",
+  "source_commit": "c6fed15bea0d3bda3ee341908a7e3fe4f8ca529c",
+  "split": {
+    "holdout_count": 1885,
+    "holdout_used_for_training": false,
+    "method": "grouped_unordered_pair_80_20",
+    "reversals_grouped": true,
+    "train_count": 7524
+  },
+  "training": {
+    "final_minibatch_loss": 8.140324894156947e-07,
+    "gradient_norm_max": 0.19902247190475464,
+    "initial_minibatch_loss": 4.576860427856445,
+    "initial_weight_sha256": "a45e9a103b8c0d23c3e673db99b674099b9f688af39dbe5eeccd497ed854ca11",
+    "minimum_minibatch_loss": 4.711426129233587e-07,
+    "optimizer": "AdamW",
+    "optimizer_seconds": 4.44686859997455,
+    "optimizer_steps": 1280,
+    "stopped_at_time_budget": false,
+    "trained_weight_sha256": "60e9931767f780903d2a930312a8b0ee4b9f3b81cdbb42794b44b5b8741715b7"
+  }
+}
