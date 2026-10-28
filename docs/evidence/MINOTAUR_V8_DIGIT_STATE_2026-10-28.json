@@ -1,0 +1,228 @@
+{
+  "config": {
+    "batch_size": 512,
+    "dev_fraction": 0.1,
+    "epochs": 28,
+    "hidden_size": 56,
+    "layers": 1,
+    "learning_rate": 0.003,
+    "max_optimizer_seconds": 40.0,
+    "seed": 20261028,
+    "seeds": [
+      20261028,
+      20261029
+    ]
+  },
+  "limits": "Public synthetic experiment; 101 is evaluation-only and no test split feeds fitting.",
+  "model": {
+    "architecture": "symmetric_binary_digit_gru_scalar_residue_head",
+    "forward_product_or_modulo": false,
+    "hardcoded_arithmetic_priors": "seven-bit integer representation, digit order, operand symmetry",
+    "parameters": 21001
+  },
+  "promotion_recommendation": "DO_NOT_PROMOTE",
+  "qualification": "NOT_ESTABLISHED",
+  "runs": [
+    {
+      "conclusion": "reported_without_test_selection",
+      "controls": {
+        "constant": {
+          "dev": {
+            "accuracy": 0.015384615398943424
+          },
+          "missing_output_53": {
+            "accuracy": 0.0
+          },
+          "modulus_101": {
+            "accuracy": 0.019703950732946396
+          },
+          "unseen_operand_53": {
+            "accuracy": 0.010362694039940834
+          }
+        },
+        "frozen_random": {
+          "dev": {
+            "accuracy": 0.017582417582417582,
+            "correct": 16,
+            "count": 910
+          },
+          "missing_output_53": {
+            "accuracy": 0.0,
+            "correct": 0,
+            "count": 94
+          },
+          "modulus_101": {
+            "accuracy": 0.00941084207430644,
+            "correct": 96,
+            "count": 10201
+          },
+          "unseen_operand_53": {
+            "accuracy": 0.010362694300518135,
+            "correct": 2,
+            "count": 193
+          }
+        },
+        "shuffled_labels": {
+          "dev": {
+            "accuracy": 0.005494505494505495,
+            "correct": 5,
+            "count": 910
+          },
+          "missing_output_53": {
+            "accuracy": 0.0,
+            "correct": 0,
+            "count": 94
+          },
+          "modulus_101": {
+            "accuracy": 0.010587197333594745,
+            "correct": 108,
+            "count": 10201
+          },
+          "unseen_operand_53": {
+            "accuracy": 0.010362694300518135,
+            "correct": 2,
+            "count": 193
+          }
+        }
+      },
+      "evaluation": {
+        "dev": {
+          "accuracy": 0.015384615384615385,
+          "correct": 14,
+          "count": 910
+        },
+        "missing_output_53": {
+          "accuracy": 0.0851063829787234,
+          "correct": 8,
+          "count": 94
+        },
+        "modulus_101": {
+          "accuracy": 0.010195078913831977,
+          "correct": 104,
+          "count": 10201
+        },
+        "unseen_operand_53": {
+          "accuracy": 0.010362694300518135,
+          "correct": 2,
+          "count": 193
+        }
+      },
+      "seed": 20261028,
+      "split": {
+        "dev_count": 910,
+        "missing_output_train_rows": 0,
+        "operand_53_train_rows": 0,
+        "train_count": 8212
+      },
+      "training": {
+        "initial_sha256": "5bc808fa2557c4346c96af6ce03e9902ca8dfabb8e6ec249091fb222400c8829",
+        "optimizer_seconds": 7.3449874999932945,
+        "optimizer_steps": 476,
+        "stopped_at_budget": false,
+        "trained_sha256": "cc1f9b8b07c094337de899e854b4f93304cf5df05d21d4e813bcdd7ecb1b599d"
+      }
+    },
+    {
+      "conclusion": "reported_without_test_selection",
+      "controls": {
+        "constant": {
+          "dev": {
+            "accuracy": 0.015384615398943424
+          },
+          "missing_output_53": {
+            "accuracy": 0.0
+          },
+          "modulus_101": {
+            "accuracy": 0.019703950732946396
+          },
+          "unseen_operand_53": {
+            "accuracy": 0.010362694039940834
+          }
+        },
+        "frozen_random": {
+          "dev": {
+            "accuracy": 0.02197802197802198,
+            "correct": 20,
+            "count": 910
+          },
+          "missing_output_53": {
+            "accuracy": 0.0,
+            "correct": 0,
+            "count": 94
+          },
+          "modulus_101": {
+            "accuracy": 0.010489167728654054,
+            "correct": 107,
+            "count": 10201
+          },
+          "unseen_operand_53": {
+            "accuracy": 0.010362694300518135,
+            "correct": 2,
+            "count": 193
+          }
+        },
+        "shuffled_labels": {
+          "dev": {
+            "accuracy": 0.01098901098901099,
+            "correct": 10,
+            "count": 910
+          },
+          "missing_output_53": {
+            "accuracy": 0.0,
+            "correct": 0,
+            "count": 94
+          },
+          "modulus_101": {
+            "accuracy": 0.011077345358298206,
+            "correct": 113,
+            "count": 10201
+          },
+          "unseen_operand_53": {
+            "accuracy": 0.0,
+            "correct": 0,
+            "count": 193
+          }
+        }
+      },
+      "evaluation": {
+        "dev": {
+          "accuracy": 0.017582417582417582,
+          "correct": 16,
+          "count": 910
+        },
+        "missing_output_53": {
+          "accuracy": 0.10638297872340426,
+          "correct": 10,
+          "count": 94
+        },
+        "modulus_101": {
+          "accuracy": 0.008724634839721596,
+          "correct": 89,
+          "count": 10201
+        },
+        "unseen_operand_53": {
+          "accuracy": 0.010362694300518135,
+          "correct": 2,
+          "count": 193
+        }
+      },
+      "seed": 20261029,
+      "split": {
+        "dev_count": 910,
+        "missing_output_train_rows": 0,
+        "operand_53_train_rows": 0,
+        "train_count": 8212
+      },
+      "training": {
+        "initial_sha256": "525fe8f2aabd9154776f17c61410a22d6a8a8c2cb0170c1d75e79695b8169aa3",
+        "optimizer_seconds": 7.008402700070292,
+        "optimizer_steps": 476,
+        "stopped_at_budget": false,
+        "trained_sha256": "53c3d304d860eaaa94f4df2326b3b6e5ed241f89c621312700aa746795333fbe"
+      }
+    }
+  ],
+  "schema": "labyrinth.minotaur.v8-structure.v1",
+  "source_clean_at_run": true,
+  "source_commit": "803651c56da1b6841e1269218ff61801b45a12c7"
+}

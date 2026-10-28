@@ -83,3 +83,9 @@ jobs:
           MKL_NUM_THREADS: "2"
         run: |
           timeout 90s python -m unittest tests.test_minotaur_v7_numeric tests.test_minotaur_v7_benchmark -q
+      - name: Execute V8 recurrent, independent examiner and cross-prime neural tests
+        env:
+          OMP_NUM_THREADS: "2"
+          MKL_NUM_THREADS: "2"
+        run: |
+          timeout 90s python -m unittest tests.test_minotaur_v8_structure tests.test_minotaur_v8_examiner tests.test_minotaur_v8_qualification tests.test_minotaur_v8_transfer -q

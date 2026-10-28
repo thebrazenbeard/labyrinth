@@ -1,0 +1,304 @@
+{
+  "config": {
+    "batch_size": 512,
+    "epochs": 28,
+    "hidden_size": 56,
+    "max_optimizer_seconds": 40.0,
+    "seed": 20261028,
+    "seeds": [
+      20261028,
+      20261029
+    ]
+  },
+  "graduation_authority": "none",
+  "limitations": [
+    "Public synthetic test with known generating function, not private examiner",
+    "Training seed and public test family predeclared, no private custody",
+    "Output 53 and input 53 absent from train; new modulus 101 unseen",
+    "Mod101 exam intentionally restricts pairs to prevent key collision with mod97"
+  ],
+  "plan": {
+    "canonical_training_members": 4147,
+    "evaluation_canonical_groups": {
+      "independent_holdout": 461,
+      "input_53": 97,
+      "modulus_101": 398,
+      "output_53": 48
+    },
+    "modulus_101_scope": "only pairs containing residues 97-100; 97x97 overlapping pairs excluded",
+    "sha256": "bc02f929926a286d96e631a7fc130ce33b6df0d03562a4d49cf5609045e0accc"
+  },
+  "promotion_recommendation": "DO_NOT_PROMOTE",
+  "qualification": "NOT_ESTABLISHED",
+  "runs": [
+    {
+      "exam": {
+        "controls": {
+          "copy_x": {
+            "independent_holdout": {
+              "accuracy": 0.01735357917570499,
+              "correct": 8,
+              "count": 461
+            },
+            "input_53": {
+              "accuracy": 0.010309278350515464,
+              "correct": 1,
+              "count": 97
+            },
+            "modulus_101": {
+              "accuracy": 0.010050251256281407,
+              "correct": 4,
+              "count": 398
+            },
+            "output_53": {
+              "accuracy": 0.0,
+              "correct": 0,
+              "count": 48
+            }
+          },
+          "frozen_random": {
+            "independent_holdout": {
+              "accuracy": 0.010845986984815618,
+              "correct": 5,
+              "count": 461
+            },
+            "input_53": {
+              "accuracy": 0.010309278350515464,
+              "correct": 1,
+              "count": 97
+            },
+            "modulus_101": {
+              "accuracy": 0.022613065326633167,
+              "correct": 9,
+              "count": 398
+            },
+            "output_53": {
+              "accuracy": 0.020833333333333332,
+              "correct": 1,
+              "count": 48
+            }
+          },
+          "train_majority": {
+            "independent_holdout": {
+              "accuracy": 0.01735357917570499,
+              "correct": 8,
+              "count": 461
+            },
+            "input_53": {
+              "accuracy": 0.010309278350515464,
+              "correct": 1,
+              "count": 97
+            },
+            "modulus_101": {
+              "accuracy": 0.010050251256281407,
+              "correct": 4,
+              "count": 398
+            },
+            "output_53": {
+              "accuracy": 0.0,
+              "correct": 0,
+              "count": 48
+            }
+          },
+          "zero": {
+            "independent_holdout": {
+              "accuracy": 0.01735357917570499,
+              "correct": 8,
+              "count": 461
+            },
+            "input_53": {
+              "accuracy": 0.010309278350515464,
+              "correct": 1,
+              "count": 97
+            },
+            "modulus_101": {
+              "accuracy": 0.010050251256281407,
+              "correct": 4,
+              "count": 398
+            },
+            "output_53": {
+              "accuracy": 0.0,
+              "correct": 0,
+              "count": 48
+            }
+          }
+        },
+        "custody_sha256": "bc02f929926a286d96e631a7fc130ce33b6df0d03562a4d49cf5609045e0accc",
+        "groups": {
+          "independent_holdout": {
+            "accuracy": 0.013015184381778741,
+            "correct": 6,
+            "count": 461
+          },
+          "input_53": {
+            "accuracy": 0.020618556701030927,
+            "correct": 2,
+            "count": 97
+          },
+          "modulus_101": {
+            "accuracy": 0.020100502512562814,
+            "correct": 8,
+            "count": 398
+          },
+          "output_53": {
+            "accuracy": 0.0,
+            "correct": 0,
+            "count": 48
+          }
+        },
+        "prediction_sha256": "a71768223b636282040c162b54e564178fbd04ea3a1319a449f27afd4222e302",
+        "row_policy": "one canonical unordered pair is one sample",
+        "sample_group_accuracy": 0.01343356089884312,
+        "schema": "labyrinth.minotaur.v8-examiner.v1",
+        "verdict": "SCORED"
+      },
+      "seed": 20261028,
+      "training": {
+        "initial_weight_sha256": "5bc808fa2557c4346c96af6ce03e9902ca8dfabb8e6ec249091fb222400c8829",
+        "input_53_train_rows": 0,
+        "optimizer_seconds": 5.131374699994922,
+        "optimizer_steps": 476,
+        "stopped_at_budget": false,
+        "target_53_train_rows": 0,
+        "train_count": 8216,
+        "trained_weight_sha256": "97a72aea3d35811e54fad402709dd404aa1f9ce9dd19d5d3b315877dc28920f7"
+      }
+    },
+    {
+      "exam": {
+        "controls": {
+          "copy_x": {
+            "independent_holdout": {
+              "accuracy": 0.01735357917570499,
+              "correct": 8,
+              "count": 461
+            },
+            "input_53": {
+              "accuracy": 0.010309278350515464,
+              "correct": 1,
+              "count": 97
+            },
+            "modulus_101": {
+              "accuracy": 0.010050251256281407,
+              "correct": 4,
+              "count": 398
+            },
+            "output_53": {
+              "accuracy": 0.0,
+              "correct": 0,
+              "count": 48
+            }
+          },
+          "frozen_random": {
+            "independent_holdout": {
+              "accuracy": 0.010845986984815618,
+              "correct": 5,
+              "count": 461
+            },
+            "input_53": {
+              "accuracy": 0.010309278350515464,
+              "correct": 1,
+              "count": 97
+            },
+            "modulus_101": {
+              "accuracy": 0.022613065326633167,
+              "correct": 9,
+              "count": 398
+            },
+            "output_53": {
+              "accuracy": 0.020833333333333332,
+              "correct": 1,
+              "count": 48
+            }
+          },
+          "train_majority": {
+            "independent_holdout": {
+              "accuracy": 0.01735357917570499,
+              "correct": 8,
+              "count": 461
+            },
+            "input_53": {
+              "accuracy": 0.010309278350515464,
+              "correct": 1,
+              "count": 97
+            },
+            "modulus_101": {
+              "accuracy": 0.010050251256281407,
+              "correct": 4,
+              "count": 398
+            },
+            "output_53": {
+              "accuracy": 0.0,
+              "correct": 0,
+              "count": 48
+            }
+          },
+          "zero": {
+            "independent_holdout": {
+              "accuracy": 0.01735357917570499,
+              "correct": 8,
+              "count": 461
+            },
+            "input_53": {
+              "accuracy": 0.010309278350515464,
+              "correct": 1,
+              "count": 97
+            },
+            "modulus_101": {
+              "accuracy": 0.010050251256281407,
+              "correct": 4,
+              "count": 398
+            },
+            "output_53": {
+              "accuracy": 0.0,
+              "correct": 0,
+              "count": 48
+            }
+          }
+        },
+        "custody_sha256": "bc02f929926a286d96e631a7fc130ce33b6df0d03562a4d49cf5609045e0accc",
+        "groups": {
+          "independent_holdout": {
+            "accuracy": 0.019522776572668113,
+            "correct": 9,
+            "count": 461
+          },
+          "input_53": {
+            "accuracy": 0.020618556701030927,
+            "correct": 2,
+            "count": 97
+          },
+          "modulus_101": {
+            "accuracy": 0.01256281407035176,
+            "correct": 5,
+            "count": 398
+          },
+          "output_53": {
+            "accuracy": 0.0,
+            "correct": 0,
+            "count": 48
+          }
+        },
+        "prediction_sha256": "4fe2d995ac5b94716c9a6795167dc857e512a290a5c15f13eb2929b815b99172",
+        "row_policy": "one canonical unordered pair is one sample",
+        "sample_group_accuracy": 0.0131760368360127,
+        "schema": "labyrinth.minotaur.v8-examiner.v1",
+        "verdict": "SCORED"
+      },
+      "seed": 20261029,
+      "training": {
+        "initial_weight_sha256": "525fe8f2aabd9154776f17c61410a22d6a8a8c2cb0170c1d75e79695b8169aa3",
+        "input_53_train_rows": 0,
+        "optimizer_seconds": 5.902678799931891,
+        "optimizer_steps": 476,
+        "stopped_at_budget": false,
+        "target_53_train_rows": 0,
+        "train_count": 8216,
+        "trained_weight_sha256": "d703b470e57c28b00e158305db361a2dd9d43f690e3f0b13ac9bde86025be183"
+      }
+    }
+  ],
+  "schema": "labyrinth.minotaur.v8-independent-public-exam.v1",
+  "source_clean_at_run": true,
+  "source_commit": "ea1fe4b7248df46ea8e3da2156ba2016c1e851e2"
+}
