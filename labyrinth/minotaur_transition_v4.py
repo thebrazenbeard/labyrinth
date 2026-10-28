@@ -31,12 +31,15 @@ class TransitionConfig:
     max_steps: int = 6
     modulus: int = 97
     temperature: float = 1.0
+    architecture: str = 'mlp'
 
     def validate(self) -> "TransitionConfig":
         if (type(self.seed) is not int or not 0 <= self.seed < 2**31
                 or type(self.width) is not int or not 16 <= self.width <= 128
                 or type(self.max_steps) is not int or self.max_steps != 6
                 or type(self.modulus) is not int or self.modulus != 97
+                or type(self.architecture) is not str
+                or self.architecture not in ('mlp', 'learned_table')
                 or type(self.temperature) is not float
                 or not 0.05 <= self.temperature <= 10.0):
             raise ValueError("invalid bounded transition configuration")
@@ -169,15 +172,23 @@ def build_transition_model(config: TransitionConfig = TransitionConfig()) -> Any
     class TransitionNet(nn.Module):
         def __init__(self) -> None:
             super().__init__()
-            self.residue_embedding = nn.Embedding(MOD, config.width)
-            self.op_embedding = nn.Embedding(3, config.width)
-            self.affine = nn.Sequential(
-                nn.Linear(input_width, config.width * 2),
-                nn.GELU(),
-                nn.Linear(config.width * 2, config.width),
-                nn.GELU(),
-                nn.Linear(config.width, MOD),
-            )
+            if config.architecture == "learned_table":
+                # A finite-domain neural transition memory: logits are actual
+                # learnable parameters, initialized without arithmetic answers.
+                # It CAN generalize across programs after exhaustive atomic
+                # training, but NOT to unseen arithmetic operand pairs.
+                self.atomic_logits = nn.Embedding(3 * MOD * MOD, MOD)
+                nn.init.zeros_(self.atomic_logits.weight)
+            else:
+                self.residue_embedding = nn.Embedding(MOD, config.width)
+                self.op_embedding = nn.Embedding(3, config.width)
+                self.affine = nn.Sequential(
+                    nn.Linear(input_width, config.width * 2),
+                    nn.GELU(),
+                    nn.Linear(config.width * 2, config.width),
+                    nn.GELU(),
+                    nn.Linear(config.width, MOD),
+                )
 
         def _numeric(self, residues: Any) -> Any:
             x = residues.to(torch.float32) / MOD
@@ -192,12 +203,16 @@ def build_transition_model(config: TransitionConfig = TransitionConfig()) -> Any
             targeted = prev.gather(1, target[:, None]).squeeze(1)
             operand = torch.where(as_reg, prev.gather(
                 1, operand_index.clamp(0, 1)[:, None]).squeeze(1), operand_index)
-            embedded = torch.cat([
-                self.residue_embedding(targeted), self.residue_embedding(operand),
-                self.op_embedding(op), self._numeric(targeted), self._numeric(operand),
-                as_reg.float()[:, None], target.float()[:, None]
-            ], dim=-1)
-            learned_target_logits = self.affine(embedded) / config.temperature
+            if config.architecture == "learned_table":
+                key = op * (MOD * MOD) + targeted * MOD + operand
+                learned_target_logits = self.atomic_logits(key) / config.temperature
+            else:
+                embedded = torch.cat([
+                    self.residue_embedding(targeted), self.residue_embedding(operand),
+                    self.op_embedding(op), self._numeric(targeted), self._numeric(operand),
+                    as_reg.float()[:, None], target.float()[:, None]
+                ], dim=-1)
+                learned_target_logits = self.affine(embedded) / config.temperature
             copied = torch.full((prev.shape[0], 2, MOD), -14.0,
                                 dtype=learned_target_logits.dtype, device=prev.device)
             copied.scatter_(2, prev.unsqueeze(-1), 14.0)

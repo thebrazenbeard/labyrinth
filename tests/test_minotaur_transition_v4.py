@@ -106,6 +106,24 @@ class TransitionV4Tests(unittest.TestCase):
         self.assertEqual(derive_first_mismatch(first, case.steps), 1)
         self.assertEqual(derive_first_mismatch(later, case.steps), 3)
 
+    def test_learned_atomic_memory_is_random_initialized_and_not_a_symbolic_verifier(self):
+        import torch
+        config = TransitionConfig(seed=5, width=32, architecture="learned_table")
+        features, expected = encode_transition_cases(self.cases[:6], config, torch)
+        model = build_transition_model(config)
+        self.assertTrue(hasattr(model, "atomic_logits"))
+        self.assertEqual(tuple(model.atomic_logits.weight.shape), (3 * 97 * 97, 97))
+        self.assertFalse(hasattr(model, "correctness_head"))
+        output = model(features, teacher_states=expected)
+        self.assertEqual(tuple(output["state_logits"].shape), (6, 6, 2, 97))
+        loss = torch.nn.functional.cross_entropy(
+            output["state_logits"][features.mask].reshape(-1,97),
+            expected[features.mask].reshape(-1))
+        loss.backward()
+        self.assertIsNotNone(model.atomic_logits.weight.grad)
+        self.assertTrue(bool((model.atomic_logits.weight.grad != 0).any()))
+        self.assertTrue(bool(torch.all(model.atomic_logits.weight == 0)))
+
     def test_empty_and_malformed_inputs_are_rejected(self):
         with self.assertRaises(ValueError):
             encode_transition_cases([], TransitionConfig(), self.torch)
