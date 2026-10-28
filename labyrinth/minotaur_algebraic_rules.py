@@ -103,15 +103,8 @@ def build_algebraic_head(torch: Any, *, seed: int = 20261028) -> Any:
     return AlgebraicRuleHead()
 
 
-def train_rule_head(
-    head: Any, examples: list[tuple[int,int,int,int]], torch: Any,
-    *, steps: int = 500, learning_rate: float = 0.06,
-) -> int:
-    """Actual gradient updates, fixed steps and batch for matched controls."""
-    if type(steps) is not int or not 1 <= steps <= 1000:
-        raise ValueError("bounded steps required")
-    if type(learning_rate) is not float or not 0.0 <= learning_rate <= 0.1:
-        raise ValueError("bounded nonnegative learning rate required")
+def _checked_supervision_tensors(head: Any, examples: list[tuple[int,int,int,int]], torch: Any):
+    """Validate one small supervised batch for either optimizer, without oracle access."""
     if type(examples) is not list or not examples or len(examples) > 3*24:
         raise ValueError("bounded nonempty supervised examples required")
     for row in examples:
@@ -127,6 +120,19 @@ def train_rule_head(
     x=torch.tensor([row[1] for row in examples],dtype=torch.float64,device=device)
     y=torch.tensor([row[2] for row in examples],dtype=torch.float64,device=device)
     labels=torch.tensor([row[3] for row in examples],dtype=torch.float64,device=device)/64.0
+    return ops,x,y,labels
+
+
+def train_rule_head(
+    head: Any, examples: list[tuple[int,int,int,int]], torch: Any,
+    *, steps: int = 500, learning_rate: float = 0.06,
+) -> int:
+    """Actual AdamW gradient updates, fixed steps and batch for matched controls."""
+    if type(steps) is not int or not 1 <= steps <= 1000:
+        raise ValueError("bounded steps required")
+    if type(learning_rate) is not float or not 0.0 <= learning_rate <= 0.1:
+        raise ValueError("bounded nonnegative learning rate required")
+    ops,x,y,labels=_checked_supervision_tensors(head,examples,torch)
     optimizer=torch.optim.AdamW(head.parameters(),lr=learning_rate,weight_decay=0.0)
     head.train()
     for _ in range(steps):
@@ -140,6 +146,97 @@ def train_rule_head(
         optimizer.step()
     head.eval()
     return steps
+
+
+def train_rule_head_lbfgs(
+    head: Any, examples: list[tuple[int,int,int,int]], torch: Any,
+    *, max_iter: int = 200, max_eval: int | None = None,
+    learning_rate: float = 1.0,
+    require_fit: bool = True,
+) -> dict[str,Any]:
+    """Opt-in float64 L-BFGS coefficient study; never a graduation gate.
+
+    No table, arithmetic oracle, teacher state, or closed-form coefficient
+    solution enters training. A fit means low supervised MSE only; exact
+    withheld generalization must be measured separately. Strong-Wolfe may
+    call the closure more times than max_iter or the requested max_eval, so
+    actual counts are returned. Sparse samples may be rank-deficient even
+    when they admit a zero-loss training fit.
+    """
+    if type(max_iter) is not int or not 1 <= max_iter <= 500:
+        raise ValueError("bounded L-BFGS iteration budget required")
+    if max_eval is not None and (type(max_eval) is not int or not 1 <= max_eval <= 1000):
+        raise ValueError("bounded L-BFGS function-evaluation budget required")
+    if type(learning_rate) is not float or not 0.0 < learning_rate <= 1.0:
+        raise ValueError("bounded positive L-BFGS learning rate required")
+    if type(require_fit) is not bool:
+        raise ValueError("require_fit must be bool")
+    if (head.coefficients.dtype != torch.float64 or
+            head.coefficients.device.type != "cpu" or
+            tuple(head.coefficients.shape) != (OPS,4) or
+            sum(p.numel() for p in head.parameters()) != OPS*4):
+        raise ValueError("L-BFGS research requires 12 CPU float64 coefficients")
+    ops,x,y,labels=_checked_supervision_tensors(head,examples,torch)
+    with torch.no_grad():
+        initial=head.coefficients.detach().clone()
+        initial_loss=float(((head.raw(ops,x,y)/64.0-labels)**2).mean().item())
+        design=torch.stack((torch.ones_like(x),x/8.0,y/8.0,x*y/64.0),dim=-1)
+        ranks=[int(torch.linalg.matrix_rank(design[ops==op]).item()) for op in range(OPS)]
+    optimizer=torch.optim.LBFGS(
+        head.parameters(),lr=learning_rate,max_iter=max_iter,history_size=100,
+        max_eval=max_eval,
+        tolerance_grad=1e-15,tolerance_change=1e-16,
+        line_search_fn="strong_wolfe",
+    )
+    calls=0
+
+    def closure():
+        nonlocal calls
+        optimizer.zero_grad(set_to_none=True)
+        prediction=head.raw(ops,x,y)/64.0
+        loss=(prediction-labels).square().mean()
+        if not bool(torch.isfinite(loss)):
+            raise RuntimeError("nonfinite L-BFGS objective")
+        loss.backward()
+        if head.coefficients.grad is None or not bool(torch.isfinite(head.coefficients.grad).all()):
+            raise RuntimeError("nonfinite L-BFGS gradient")
+        # Never clip L-BFGS gradients: Wolfe requires the actual derivative.
+        calls+=1
+        return loss
+
+    head.train()
+    try:
+        optimizer.step(closure)
+        with torch.no_grad():
+            final_loss=float(((head.raw(ops,x,y)/64.0-labels)**2).mean().item())
+            parameter_delta_l2=float(torch.linalg.vector_norm(
+                head.coefficients-initial).item())
+        if not torch.isfinite(torch.tensor(final_loss)) or not torch.isfinite(torch.tensor(parameter_delta_l2)):
+            raise RuntimeError("nonfinite L-BFGS result")
+        state=optimizer.state.get(head.coefficients,{})
+        iterations=int(state.get("n_iter",0))
+        fitted=final_loss <= 1e-12
+        result={"optimizer":"LBFGS_strong_wolfe",
+                "max_iter":max_iter,
+                "max_eval":int(optimizer.param_groups[0]["max_eval"]),
+                "learning_rate":learning_rate,
+                "optimizer_iterations":iterations,"closure_evaluations":calls,
+                "initial_loss":initial_loss,"final_loss":final_loss,
+                "parameter_delta_l2":parameter_delta_l2,
+                "design_rank_by_operation":ranks,
+                "identifiable_all_operations":all(rank==4 for rank in ranks),
+                "training_fit":fitted,"qualification":"NOT_ESTABLISHED"}
+        if require_fit and not fitted:
+            raise RuntimeError(f"L-BFGS did not fit supervised examples: mse={final_loss:.6g}")
+        return result
+    except Exception:
+        # A failed fit or optimizer error must not leave a partially updated
+        # research head available for accidental inference.
+        with torch.no_grad():
+            head.coefficients.copy_(initial)
+        raise
+    finally:
+        head.eval()
 
 
 def all_atom_accuracy(head: Any, torch: Any) -> dict[str,int]:
