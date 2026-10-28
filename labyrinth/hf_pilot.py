@@ -32,6 +32,7 @@ from .runner import _source_state, load_json
 LEGACY_SCHEMA = "labyrinth.hf-lora-pilot.v2"
 SCHEMA = "labyrinth.hf-lora-pilot.v3"
 EVAL_SCHEMA = "labyrinth.hf-lora-reload-eval.v2"
+CALIBRATION_SCHEMA = "labyrinth.hf-frozen-prompt-calibration.v1"
 EVAL_SEED_XOR = 0x5C18A7
 # No quantization/CPU offload in v1: bound pre-existing weights to a small size.
 MAX_LOCAL_WEIGHTS = 1_073_741_824
@@ -55,15 +56,28 @@ class PilotConfig:
     answer_only: bool = False
 
 
+@dataclass(frozen=True)
+class CalibrationConfig:
+    """Public development-set comparison; never reads the held-out eval split."""
+
+    model_path: str
+    seed: int = 0
+    dev_count: int = 8
+    tiers: tuple[int, ...] = (1,)
+    max_tokens: int = 512
+    max_new_tokens: int = 64
+    device: str = "cpu"
+
+
 def _check_int(value: object, label: str, lower: int, upper: int) -> None:
     if type(value) is not int or not lower <= value <= upper:
         raise ValueError(f"{label} must be an integer in [{lower}, {upper}]")
 
 
-def _paths(config: PilotConfig, *, output_must_be_new: bool) -> tuple[Path, Path, list[Path]]:
-    if not isinstance(config.model_path, str) or not isinstance(config.output_dir, str):
-        raise ValueError("model_path and output_dir must be strings")
-    model = Path(config.model_path).expanduser().resolve(strict=True)
+def _model_paths(model_path: str) -> tuple[Path, list[Path]]:
+    if not isinstance(model_path, str):
+        raise ValueError("model_path must be a string")
+    model = Path(model_path).expanduser().resolve(strict=True)
     if not model.is_dir() or not (model / "config.json").is_file() or (model / "config.json").is_symlink():
         raise ValueError("model_path must be an existing local HF model directory")
     weights = sorted(model.glob("*.safetensors"))
@@ -73,6 +87,13 @@ def _paths(config: PilotConfig, *, output_must_be_new: bool) -> tuple[Path, Path
     if not 0 < total <= MAX_LOCAL_WEIGHTS:
         raise ValueError("checkpoint exceeds the 1 GiB no-quantization pilot limit")
     _validate_sharded_index(model, weights)
+    return model, weights
+
+
+def _paths(config: PilotConfig, *, output_must_be_new: bool) -> tuple[Path, Path, list[Path]]:
+    if not isinstance(config.output_dir, str):
+        raise ValueError("output_dir must be a string")
+    model, weights = _model_paths(config.model_path)
     raw_output = Path(config.output_dir).expanduser()
     if raw_output.is_symlink():
         raise ValueError("output path must not be a symlink")
@@ -135,6 +156,28 @@ def validate_config(config: PilotConfig, *, output_must_be_new: bool = True) -> 
     resolved = _paths(config, output_must_be_new=output_must_be_new)
     _metadata_digest(resolved[0])
     return resolved
+
+
+def validate_calibration(config: CalibrationConfig) -> tuple[Path, list[Path]]:
+    """Preflight a frozen, public TRAIN-split calibration without making files."""
+    if not isinstance(config, CalibrationConfig):
+        raise TypeError("expected CalibrationConfig")
+    _check_int(config.seed, "seed", 0, 2**31 - 1)
+    _check_int(config.dev_count, "dev_count", 2, 32)
+    _check_int(config.max_tokens, "max_tokens", 32, 1024)
+    _check_int(config.max_new_tokens, "max_new_tokens", 1, 128)
+    if config.max_new_tokens >= config.max_tokens:
+        raise ValueError("generation budget must be smaller than context budget")
+    if type(config.tiers) is not tuple or not config.tiers or any(type(t) is not int for t in config.tiers):
+        raise ValueError("tiers must be a non-empty tuple of integers")
+    generate_maze(seed=config.seed, count=1, tiers=config.tiers, split="train")
+    if len(config.tiers) * config.dev_count > 64:
+        raise ValueError("development set limited to 64 public examples")
+    if config.device not in ("cpu", "cuda"):
+        raise ValueError("device must be cpu or cuda")
+    model, weights = _model_paths(config.model_path)
+    _metadata_digest(model)
+    return model, weights
 
 
 def training_cases(config: PilotConfig) -> tuple[list[Challenge], list[Challenge]]:
@@ -313,15 +356,37 @@ def _encode_pair(tokenizer: Any, prompt: str, answer: str, max_tokens: int, *,
     return prefix + suffix, [-100] * len(prefix) + suffix
 
 
+def _encode_scoring_prompt(tokenizer: Any, prompt: str, *,
+                           prompt_style: str, answer_only: bool) -> Any:
+    """Tokenize the raw historic format or the model's own chat template."""
+    if prompt_style == "raw":
+        raw = f"Task:\n{prompt}\nAssistant:\n" + ("ANSWER:" if answer_only else "")
+        return tokenizer(raw, add_special_tokens=True, return_tensors="pt")
+    if prompt_style != "chat":
+        raise ValueError("unsupported scoring prompt style")
+    if answer_only:
+        raise ValueError("chat calibration does not use assistant answer prefill")
+    template = getattr(tokenizer, "chat_template", None)
+    formatter = getattr(tokenizer, "apply_chat_template", None)
+    if not template or not callable(formatter):
+        raise ValueError("checkpoint tokenizer has no usable chat template")
+    # tokenize=True avoids re-tokenizing a rendered template and adding a
+    # second set of BOS/EOS tokens. The tokenizer owns all role markers.
+    return formatter([{"role": "user", "content": f"Task:\n{prompt}"}],
+                     tokenize=True, add_generation_prompt=True,
+                     return_tensors="pt", return_dict=True)
+
+
 def _score_model(model: Any, tokenizer: Any, torch: Any, cases: list[Challenge],
                  *, device: str, max_tokens: int, max_new_tokens: int,
-                 answer_only: bool = False) -> dict[str, Any]:
+                 answer_only: bool = False, prompt_style: str = "raw") -> dict[str, Any]:
     model.eval()
     trials: list[dict[str, Any]] = []
     with torch.no_grad():
         for challenge in cases:
-            prompt = f"Task:\n{challenge.prompt}\nAssistant:\n" + ("ANSWER:" if answer_only else "")
-            encoded = tokenizer(prompt, add_special_tokens=True, return_tensors="pt")
+            encoded = _encode_scoring_prompt(tokenizer, challenge.prompt,
+                                             prompt_style=prompt_style,
+                                             answer_only=answer_only)
             ids = encoded["input_ids"]
             mask = encoded.get("attention_mask")
             if mask is None or mask.shape != ids.shape:
@@ -444,6 +509,18 @@ def _deps(device: str) -> tuple[Any, Any, Any, Any, Any]:
     return torch, AutoModelForCausalLM, AutoTokenizer, (LoraConfig, PeftModel, get_peft_model), device
 
 
+def _calibration_deps(device: str) -> tuple[Any, Any, Any]:
+    """Frozen calibration needs no PEFT or optimizer installation."""
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except ImportError as exc:
+        raise RuntimeError("optional torch and transformers are required; nothing was installed") from exc
+    if device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA calibration unavailable; no CPU fallback")
+    return torch, AutoModelForCausalLM, AutoTokenizer
+
+
 def _device_headroom(torch: Any, device: str, weights: list[Path]) -> dict[str, int] | None:
     """Conservative CUDA preflight; not a memory-use guarantee for any model."""
     if device != "cuda":
@@ -472,6 +549,59 @@ def _load_base(model_path: Path, device: str, *, torch: Any,
     model.to(device)
     model.config.use_cache = False
     return model, tokenizer
+
+
+def run_calibration(config: CalibrationConfig) -> dict[str, Any]:
+    """Compare two prompt encodings on public development cases, with no SGD.
+
+    This deliberately never calls ``training_cases`` or creates an eval split.
+    Scores are calibration diagnostics, not a model-qualification result.
+    """
+    model_path, weights = validate_calibration(config)
+    manifest = _checkpoint_manifest(model_path, weights)
+    cases = generate_maze(seed=config.seed, count=config.dev_count,
+                          tiers=config.tiers, split="train")
+    if any(case.split != "train" for case in cases):
+        raise ValueError("calibration must use only public train-split cases")
+    torch, auto_model, auto_tokenizer = _calibration_deps(config.device)
+    _device_headroom(torch, config.device, weights)
+    if config.device == "cpu":
+        torch.set_num_threads(min(torch.get_num_threads(), 4))
+    torch.manual_seed(config.seed)
+    if config.device == "cuda":
+        torch.cuda.manual_seed_all(config.seed)
+    torch.use_deterministic_algorithms(True)
+    model, tokenizer = _load_base(model_path, config.device, torch=torch,
+                                  auto_model=auto_model, auto_tokenizer=auto_tokenizer)
+    _assert_checkpoint_unchanged(model_path, weights, manifest)
+    before_buffers = _buffer_digest(model, torch)
+    scores = {}
+    for prompt_style in ("raw", "chat"):
+        scores[prompt_style] = _score_model(
+            model, tokenizer, torch, cases, device=config.device,
+            max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
+            prompt_style=prompt_style,
+        )
+        if _buffer_digest(model, torch) != before_buffers:
+            raise RuntimeError("frozen model buffers mutated during calibration")
+        _assert_checkpoint_unchanged(model_path, weights, manifest)
+    if [t["id"] for t in scores["raw"]["trials"]] != [t["id"] for t in scores["chat"]["trials"]]:
+        raise RuntimeError("calibration prompt styles used different development cases")
+    return {
+        "schema": CALIBRATION_SCHEMA,
+        "config": {**asdict(config), "tiers": list(config.tiers)},
+        "model_weights_sha256": manifest["weights"],
+        "model_metadata_sha256": manifest["metadata"],
+        "public_dev_prompt_sha256": _prompt_commitment(cases),
+        "public_dev_case_ids": [case.id for case in cases],
+        "model_updated": False,
+        "prompt_styles": scores,
+        "limitations": [
+            "Only public train-split development cases; no private or held-out evaluation.",
+            "Template, max_new_tokens and model choice are calibrated before any sealed trial.",
+            "This result cannot establish training gains or transferable reasoning.",
+        ],
+    }
 
 
 def run_pilot(config: PilotConfig) -> dict[str, Any]:
@@ -727,9 +857,35 @@ def main(argv: list[str] | None = None) -> int:
     evaluate = commands.add_parser("eval", help="Reload saved adapter in a new Python process")
     evaluate.add_argument("--run-dir", required=True)
     evaluate.add_argument("--report", required=True)
+    calibrate = commands.add_parser(
+        "calibrate", help="Frozen raw-vs-chat comparison on public train-split development cases")
+    calibrate.add_argument("--model-path", required=True)
+    calibrate.add_argument("--seed", type=int, default=0)
+    calibrate.add_argument("--dev-count", type=int, default=8)
+    calibrate.add_argument("--tiers", default="1")
+    calibrate.add_argument("--max-tokens", type=int, default=512)
+    calibrate.add_argument("--max-new-tokens", type=int, default=64)
+    calibrate.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    calibrate.add_argument("--report", help="Optional NEW JSON report path, never overwritten")
     args = parser.parse_args(argv)
     try:
-        if args.command == "train":
+        if args.command == "calibrate":
+            parsed = {key: value for key, value in vars(args).items()
+                      if key not in ("command", "report")}
+            parsed["tiers"] = tuple(int(t) for t in args.tiers.split(",")) if args.tiers else ()
+            result = run_calibration(CalibrationConfig(**parsed))
+            if args.report:
+                model_path = Path(args.model_path).expanduser().resolve(strict=True)
+                destination = Path(args.report).expanduser().resolve(strict=False)
+                if destination == model_path or model_path in destination.parents:
+                    raise ValueError("calibration report must not modify the model directory")
+                _save_new(destination, result)
+            print(json.dumps({"schema": result["schema"], "train_split_only": True,
+                              "raw_correct": result["prompt_styles"]["raw"]["correct"],
+                              "chat_correct": result["prompt_styles"]["chat"]["correct"],
+                              "cases": len(result["public_dev_case_ids"]),
+                              "report": str(destination) if args.report else None}))
+        elif args.command == "train":
             config_dict = {key: value for key, value in vars(args).items() if key != "command"}
             config_dict["tiers"] = tuple(int(t) for t in args.tiers.split(",")) if args.tiers else ()
             result = run_pilot(PilotConfig(**config_dict))
