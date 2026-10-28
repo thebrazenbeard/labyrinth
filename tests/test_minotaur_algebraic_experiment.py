@@ -43,6 +43,16 @@ class AlgebraicExperimentTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 run_experiment(Path(temp)/"output",torch,seed=47)
 
+    def test_max_valid_training_seed_records_bounded_corruption_seed(self):
+        from labyrinth.minotaur_algebraic_experiment import run_experiment,reload_experiment
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp)/"max-seed"
+            report=run_experiment(folder,torch,seed=2**31-1,
+                                  training_per_op=24,steps=1)
+            self.assertEqual(report["seed"],2**31-1)
+            self.assertEqual(report["corruption_seed"],11)
+            self.assertTrue(reload_experiment(folder,torch)["matches_original"])
+
     def test_rejects_report_tampering_and_source_drift(self):
         import json
         from unittest.mock import patch

@@ -142,7 +142,8 @@ def run_experiment(
     if type(training_per_op) is not int or not 5 <= training_per_op <= 24:
         raise ValueError("invalid partial dataset size")
     examples=incomplete_training_atoms(seed,training_per_op)
-    randomized=corrupt_labels_within_op(examples,seed+12)
+    corruption_seed=(seed+12) % (2**31)
+    randomized=corrupt_labels_within_op(examples,corruption_seed)
     torch.set_num_threads(min(torch.get_num_threads(),2))
     torch.use_deterministic_algorithms(True)
     torch.manual_seed(19)
@@ -196,7 +197,8 @@ def run_experiment(
         "train_process_id":os.getpid(),
         "donor":"scratch algebraically biased neural rule head, no pretrained model",
         "model_architecture":"learned_coefficients[3,4] over [1,x/8,y/8,xy/64]",
-        "modulus":MOD,"seed":seed,"train_examples":len(examples),
+        "modulus":MOD,"seed":seed,"corruption_seed":corruption_seed,
+        "train_examples":len(examples),
         "train_examples_by_operation":training_per_op,
         "training_atoms_sha256":hashlib.sha256(json.dumps(examples).encode()).hexdigest(),
         "corrupted_atoms_sha256":hashlib.sha256(json.dumps(randomized).encode()).hexdigest(),
@@ -256,6 +258,8 @@ def reload_experiment(output_dir: Path, torch: Any) -> dict[str, Any]:
             or report.get("deployed") is not False
             or report.get("parameter_count") != 12
             or type(report.get("seed")) is not int
+            or type(report.get("corruption_seed")) is not int
+            or report["corruption_seed"] != (report["seed"]+12) % (2**31)
             or type(report.get("train_examples_by_operation")) is not int):
         raise ValueError("report qualification and training fields invalid")
     if _sha(checkpoint)!=report.get("checkpoint_sha256"):
