@@ -1,0 +1,13 @@
+# V7 numeric multiplication study (2026-10-28)
+
+**Research only; NO model promotion or graduation.** Source branch based on Labyrinth V6 Draft PR #44 exact head `c53c901bdd4138cb6ad3bb13bb654e10a02df98e`.
+
+Two authenticated fresh Codex CLI specialists were started through connected **Executor Lappy** in isolated worktrees: numeric neural architecture session `01a182e3-3e8d-7732-b3a4-b65bfdc6ab67` and independent challenge data session `01a182e3-7389-7383-9358-1206ab6fe586`. Both reached a Codex account usage limit before finishing. Each left useful standalone **test scaffolding but no qualified implementation or source commit**; the BT2 integrator corrected the benchmark test's false duplicate-group rejection, then independently implemented the source, reran tests, and reviewed it. No work is falsely credited as a completed agent deliverable.
+
+`labyrinth/minotaur_v7_benchmark.py` defines pure-Python, SHA-bound public paired train/dev/test splits over full modulo-97; all 97 output-class-absent challenges; union of absent input/output label 53; explicit zero, copy, random and train-only majority baselines; and evaluation-only modulus 101. No training code imports or consumes output targets as neural input. Canonical (a,b)/(b,a) pairs remain together; their rows are not independent statistical units.
+
+`labyrinth/minotaur_v7_numeric.py` is a randomly initialized, shared, symmetric PyTorch numeric-output regressor: it uses normalized operands and Fourier features, learned operand towers and a scalar output head. Its *structural symmetry and Fourier periodicity are supplied priors*, not independently discovered arithmetic laws. No numeric product, modulo product, output class embedding, trained pair lookup, modular log table or double-and-add algorithm occurs in forward. The offline teacher generates labels for optimizer targets **only**. All training pairs with input value 53 or target value 53 are removed, plus a separately grouped 10% holdout of remaining pairs. Evaluation includes absent-output 53, absent-input 53, grouped holdout and all modulus-101 pairs (zero mod-101 training). Test metrics and frozen/constant controls remain distinct. The heldout label 53 may occur as the target for input-53 tests, but no positive label 53 occurs in training.
+
+The primary acceptance criterion is demonstrated successful prediction of absent-output label 53 and quantitative transfer to modulus 101 under multiple seeds, with a private external examiner still required for promotion. A source-first negative result is valuable; do not describe passing test code as learned competence. No weights are to be deployed as a result of this study.
+
+**All claims of exact-source training, tests and hosted CI must be filled only after live readback.**

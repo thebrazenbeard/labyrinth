@@ -77,3 +77,9 @@ jobs:
           MKL_NUM_THREADS: "2"
         run: |
           timeout 90s python -m unittest tests.test_minotaur_v6_spectral tests.test_minotaur_v6_latent tests.test_minotaur_v6_holdouts tests.test_minotaur_v6_mul_eval tests.test_minotaur_v6_multiseed tests.test_minotaur_v6_group_audit tests.test_minotaur_v6_group -q
+      - name: Exercise V7 absent-output and cross-modulus neural contracts
+        env:
+          OMP_NUM_THREADS: "2"
+          MKL_NUM_THREADS: "2"
+        run: |
+          timeout 90s python -m unittest tests.test_minotaur_v7_numeric tests.test_minotaur_v7_benchmark -q
