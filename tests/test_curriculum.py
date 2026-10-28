@@ -9,6 +9,7 @@ from labyrinth.curriculum import (
     TrainingObservation,
     next_training_case,
     record_training_result,
+    schedule_training_cases,
 )
 from labyrinth.adapters import ReplayAdapter
 
@@ -99,6 +100,36 @@ class CurriculumTests(unittest.TestCase):
             next_training_case(self.spec, CurriculumState(), {"easy": ["only"]}, run_seed=2)
         with self.assertRaises(ValueError):
             CurriculumState.from_dict(None)
+
+    def test_ungraded_schedule_reproduces_each_cycle_without_grade_state(self):
+        spec = CurriculumSpec(levels=("persona",), distinct_challenges_required=3)
+        ids = ("contrast", "construct", "repair", "review")
+        first = schedule_training_cases(spec, {"persona": ids}, run_seed=74413, steps=9)
+        second = schedule_training_cases(spec, {"persona": tuple(reversed(ids))}, run_seed=74413, steps=9)
+        self.assertEqual(first, second)
+        self.assertEqual(first[0], next_training_case(spec, CurriculumState(), {"persona": ids}, run_seed=74413))
+        self.assertEqual({item.challenge_id for item in first[:4]}, set(ids))
+        self.assertEqual({item.challenge_id for item in first[4:8]}, set(ids))
+        self.assertEqual(len({(item.challenge_id, item.seed) for item in first}), 9)
+        self.assertTrue(all(item.level == "persona" and 0 <= item.seed < 2**31 for item in first))
+        self.assertNotEqual(first, schedule_training_cases(spec, {"persona": ids}, run_seed=74414, steps=9))
+
+    def test_ungraded_schedule_refuses_implicit_promotion_and_invalid_catalogs(self):
+        single = CurriculumSpec(levels=("persona",), distinct_challenges_required=3)
+        valid = {"persona": ["alpha", "beta", "gamma"]}
+        for bad in ({}, {"persona": []}, {"persona": ["x", "x", "y"]},
+                    {"persona": ["x", "y", 1]}, {"persona": "alpha"},
+                    {"persona": ["alpha", "beta", "gamma"], "holdout": ["sealed"]}):
+            with self.subTest(catalog=bad), self.assertRaises(ValueError):
+                schedule_training_cases(single, bad, run_seed=3, steps=3)
+        with self.assertRaisesRegex(ValueError, "single-level"):
+            schedule_training_cases(self.spec, self.catalog, run_seed=3, steps=3)
+        for bad_seed in (True, -1, "3"):
+            with self.subTest(seed=bad_seed), self.assertRaises(ValueError):
+                schedule_training_cases(single, valid, run_seed=bad_seed, steps=3)
+        for bad_steps in (True, 0, -2, 129, 2.0):
+            with self.subTest(steps=bad_steps), self.assertRaises(ValueError):
+                schedule_training_cases(single, valid, run_seed=3, steps=bad_steps)
 
 
 if __name__ == "__main__":
