@@ -43,6 +43,10 @@ class NeuralQualificationWorkflowContractTests(unittest.TestCase):
         self.assertIn("tests.test_minotaur_v6_group", workflow)
         self.assertIn("tests.test_minotaur_v7_numeric", workflow)
         self.assertIn("tests.test_minotaur_v7_benchmark", workflow)
+        self.assertIn("tests.test_minotaur_v7_intermediate", workflow)
+        self.assertIn("tests.test_minotaur_v7_blindish_eval", workflow)
+        self.assertIn("tests.test_minotaur_v7_intermediate_replay", workflow)
+        self.assertIn("tests.test_minotaur_v7_intermediate_audit", workflow)
 
         self.assertIn("tests.test_minotaur_transition_cli", workflow)
         self.assertIn("tests.test_minotaur_transition_v4", workflow)
