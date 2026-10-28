@@ -12,7 +12,10 @@ import re
 from typing import Any
 
 from .evaluation import score_response
-from .hf_pilot import EVAL_SEED_XOR, SCHEMA, _prompt_commitment, derange_answers
+from .hf_pilot import (
+    EVAL_SEED_XOR, LEGACY_SCHEMA, SCHEMA, _prompt_commitment,
+    _training_visit_indices, derange_answers,
+)
 from .maze import generate_maze
 from .runner import _source_state
 
@@ -22,6 +25,7 @@ CONFIG_FIELDS = frozenset({
     "model_path", "output_dir", "seed", "train_count", "eval_count", "tiers", "steps",
     "max_tokens", "max_new_tokens", "learning_rate", "lora_rank", "lora_alpha", "device",
 })
+MATCHED_CONFIG_FIELDS = CONFIG_FIELDS | {"answer_only"}
 PILOT_KIND = "local HF causal-LM PEFT LoRA supervised parameter update"
 RELOAD_NOTE = "NOT RUN: execute `python -m labyrinth.hf_pilot eval` separately"
 
@@ -73,9 +77,10 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
             ],
         }
 
-    if not isinstance(report, dict) or report.get("schema") != SCHEMA:
+    if not isinstance(report, dict) or report.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
         fail("invalid HF pilot report schema")
         return result()
+    matched = report["schema"] == SCHEMA
     source = report.get("source")
     if not isinstance(source, dict) or not _digest(source.get("source_tree_sha256")):
         fail("missing or malformed HF pilot source fingerprint")
@@ -106,7 +111,8 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
     if not isinstance(config, dict):
         fail("invalid pilot config")
         return result()
-    if (set(config) != CONFIG_FIELDS
+    if (set(config) != (MATCHED_CONFIG_FIELDS if matched else CONFIG_FIELDS)
+            or (matched and type(config.get("answer_only")) is not bool)
             or type(config.get("model_path")) is not str or not config["model_path"]
             or type(config.get("output_dir")) is not str or not config["output_dir"]
             or config.get("device") not in ("cpu", "cuda")
@@ -152,22 +158,51 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
     if report.get("heldout_public_prompt_sha256") != _prompt_commitment(heldout):
         fail("heldout prompt commitment mismatch")
     controls = report.get("control_data")
-    if not isinstance(controls, dict) or (
-        controls.get("corrupted_label_collisions") != sum(c.answer == label for c, label in zip(train, corrupted_labels))
-        or type(controls.get("corrupted_label_collisions")) is not int
-        or controls.get("sham_updates") != 0 or type(controls.get("sham_updates")) is not int
-        or controls.get("sham_train_case_visits") != 0 or type(controls.get("sham_train_case_visits")) is not int
-        or controls.get("sham_evaluation_before_updates") is not True
-        or controls.get("sham_is_compute_matched") is not False
-    ):
-        fail("control metadata inconsistent with declared unmatched-sham/corrupted protocol")
+    common_control = (
+        isinstance(controls, dict)
+        and controls.get("corrupted_label_collisions")
+            == sum(c.answer == label for c, label in zip(train, corrupted_labels))
+        and type(controls.get("corrupted_label_collisions")) is int
+        and controls.get("sham_updates") == 0
+        and type(controls.get("sham_updates")) is int
+    )
+    if matched:
+        control_valid = (
+            common_control
+            and controls.get("sham_optimizer_steps") == steps
+            and type(controls.get("sham_optimizer_steps")) is int
+            and controls.get("sham_train_case_visits") == steps
+            and type(controls.get("sham_train_case_visits")) is int
+            and controls.get("sham_evaluation_before_updates") is False
+            and controls.get("sham_is_compute_matched") is True
+            and controls.get("answer_scaffold_supplied") is config.get("answer_only")
+        )
+    else:
+        control_valid = (
+            common_control
+            and controls.get("sham_train_case_visits") == 0
+            and type(controls.get("sham_train_case_visits")) is int
+            and controls.get("sham_evaluation_before_updates") is True
+            and controls.get("sham_is_compute_matched") is False
+        )
+    if not control_valid:
+        fail("control metadata inconsistent with declared sham/corrupted protocol")
     training = report.get("training")
-    if not isinstance(training, dict) or set(training) != {"candidate", "corrupted"}:
+    arms = ("sham", "candidate", "corrupted") if matched else ("candidate", "corrupted")
+    if not isinstance(training, dict) or set(training) != set(arms):
         fail("training arms missing or mislabeled")
     else:
-        for arm in ("candidate", "corrupted"):
+        if matched:
+            try:
+                expected_indices = _training_visit_indices(train, seed=seed, steps=steps)
+            except ValueError as exc:
+                fail(f"invalid tier visit schedule: {exc}")
+                expected_indices = []
+        else:
+            expected_indices = [i % len(train) for i in range(steps)]
+        expected_visits = [train[i].id for i in expected_indices]
+        for arm in arms:
             record = training[arm]
-            expected_visits = [train[i % len(train)].id for i in range(steps)]
             if not isinstance(record, dict) or record.get("visited_case_ids") != expected_visits:
                 fail(f"{arm}: training visit order mismatch")
                 continue

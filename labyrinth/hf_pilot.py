@@ -29,7 +29,8 @@ from .maze import Challenge, generate_maze
 from .runner import _source_state, load_json
 
 
-SCHEMA = "labyrinth.hf-lora-pilot.v2"
+LEGACY_SCHEMA = "labyrinth.hf-lora-pilot.v2"
+SCHEMA = "labyrinth.hf-lora-pilot.v3"
 EVAL_SCHEMA = "labyrinth.hf-lora-reload-eval.v2"
 EVAL_SEED_XOR = 0x5C18A7
 # No quantization/CPU offload in v1: bound pre-existing weights to a small size.
@@ -51,6 +52,7 @@ class PilotConfig:
     lora_rank: int = 4
     lora_alpha: int = 8
     device: str = "cpu"
+    answer_only: bool = False
 
 
 def _check_int(value: object, label: str, lower: int, upper: int) -> None:
@@ -124,8 +126,12 @@ def validate_config(config: PilotConfig, *, output_must_be_new: bool = True) -> 
     generate_maze(seed=config.seed, count=1, tiers=config.tiers, split="train")
     if len(config.tiers) * config.train_count > 64:
         raise ValueError("training set limited to 64 examples")
+    if config.steps < len(config.tiers):
+        raise ValueError("steps insufficient for each training tier")
     if config.device not in ("cpu", "cuda"):
         raise ValueError("device must be cpu or cuda")
+    if type(config.answer_only) is not bool:
+        raise ValueError("answer_only must be a boolean")
     resolved = _paths(config, output_must_be_new=output_must_be_new)
     _metadata_digest(resolved[0])
     return resolved
@@ -256,9 +262,11 @@ def _lora_value_digest(model: Any, torch: Any) -> str:
     return _selected_parameter_digest(model, torch, include=lambda name, p: ".lora_" in name)
 
 
-def _encode_pair(tokenizer: Any, prompt: str, answer: str, max_tokens: int) -> tuple[list[int], list[int]]:
-    task = f"Task:\n{prompt}\nAssistant:\n"
-    completion = f"ANSWER: {answer}{tokenizer.eos_token or ''}"
+def _encode_pair(tokenizer: Any, prompt: str, answer: str, max_tokens: int, *,
+                 answer_only: bool = False) -> tuple[list[int], list[int]]:
+    # Pre-fill the constant ANSWER: scaffold, supervise only numerical output.
+    task = f"Task:\n{prompt}\nAssistant:\n" + ("ANSWER:" if answer_only else "")
+    completion = (f" {answer}" if answer_only else f"ANSWER: {answer}") + (tokenizer.eos_token or "")
     prefix = tokenizer(task, add_special_tokens=True)["input_ids"]
     suffix = tokenizer(completion, add_special_tokens=False)["input_ids"]
     if not suffix or not prefix or len(prefix) + len(suffix) > max_tokens:
@@ -267,12 +275,13 @@ def _encode_pair(tokenizer: Any, prompt: str, answer: str, max_tokens: int) -> t
 
 
 def _score_model(model: Any, tokenizer: Any, torch: Any, cases: list[Challenge],
-                 *, device: str, max_tokens: int, max_new_tokens: int) -> dict[str, Any]:
+                 *, device: str, max_tokens: int, max_new_tokens: int,
+                 answer_only: bool = False) -> dict[str, Any]:
     model.eval()
     trials: list[dict[str, Any]] = []
     with torch.no_grad():
         for challenge in cases:
-            prompt = f"Task:\n{challenge.prompt}\nAssistant:\n"
+            prompt = f"Task:\n{challenge.prompt}\nAssistant:\n" + ("ANSWER:" if answer_only else "")
             encoded = tokenizer(prompt, add_special_tokens=True, return_tensors="pt")
             ids = encoded["input_ids"]
             mask = encoded.get("attention_mask")
@@ -285,6 +294,9 @@ def _score_model(model: Any, tokenizer: Any, torch: Any, cases: list[Challenge],
                                     pad_token_id=tokenizer.pad_token_id,
                                     eos_token_id=tokenizer.eos_token_id)
             response = tokenizer.decode(output[0, ids.shape[1]:], skip_special_tokens=True).strip()
+            if answer_only:
+                # Evaluation does not reward generating the supplied scaffold.
+                response = f"ANSWER: {response}"
             result = score_response(challenge, response)
             trials.append({
                 "id": challenge.id, "correct": result.correct,
@@ -305,10 +317,47 @@ def _summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
             "trials": trials}
 
 
+def _training_visit_indices(train: list[Challenge], *, seed: int, steps: int) -> list[int]:
+    """Deterministic per-epoch, per-tier interleaving without silent tier omission.
+
+    A short run can skip some examples but never an entire requested tier.
+    Candidate, zero-LR sham and corrupted-label controls use identical visits.
+    """
+    if not train or type(seed) is not int or type(steps) is not int or steps < 1:
+        raise ValueError("training visitation requires cases, seed and positive steps")
+    tiers = tuple(dict.fromkeys(case.tier for case in train))
+    if steps < len(tiers):
+        raise ValueError("training steps insufficient for every tier")
+    indices: list[int] = []
+    epoch = 0
+    while len(indices) < steps:
+        pools: dict[int, list[int]] = {
+            tier: [i for i, case in enumerate(train) if case.tier == tier]
+            for tier in tiers
+        }
+        for tier in tiers:
+            random.Random(f"{seed}:epoch:{epoch}:tier:{tier}").shuffle(pools[tier])
+        for position in range(max(len(group) for group in pools.values())):
+            for tier in tiers:
+                if position < len(pools[tier]):
+                    indices.append(pools[tier][position])
+                    if len(indices) == steps:
+                        return indices
+        epoch += 1
+    return indices
+
+
 def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
-                 labels: list[str], config: PilotConfig) -> dict[str, Any]:
-    prepared = [_encode_pair(tokenizer, case.prompt, answer, config.max_tokens)
+                 labels: list[str], config: PilotConfig, *,
+                 learning_rate: float | None = None) -> dict[str, Any]:
+    if len(train) != len(labels) or not train:
+        raise ValueError("training supervision must match every training case")
+    indices = _training_visit_indices(train, seed=config.seed, steps=config.steps)
+    prepared = [_encode_pair(tokenizer, case.prompt, answer, config.max_tokens,
+                             answer_only=config.answer_only)
                 for case, answer in zip(train, labels)]
+    if learning_rate is not None and learning_rate != 0.0:
+        raise ValueError("control override only admits exact zero learning rate")
     # The candidate and corrupted-label arms must start their update loops with
     # the same RNG state, even when a local model contains stochastic layers.
     random.seed(config.seed)
@@ -317,11 +366,11 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
         torch.cuda.manual_seed_all(config.seed)
     model.train()
     optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
-                                  lr=config.learning_rate)
+                                  lr=config.learning_rate if learning_rate is None else learning_rate)
     token_total = 0
     losses: list[float] = []
     for step in range(config.steps):
-        inputs, target = prepared[step % len(prepared)]
+        inputs, target = prepared[indices[step]]
         ids = torch.tensor([inputs], dtype=torch.long, device=config.device)
         targets = torch.tensor([target], dtype=torch.long, device=config.device)
         optimizer.zero_grad(set_to_none=True)
@@ -338,7 +387,7 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
         losses.append(value)
         token_total += len(inputs)
     return {"steps": config.steps, "example_visits": config.steps,
-            "visited_case_ids": [train[step % len(train)].id for step in range(config.steps)],
+            "visited_case_ids": [train[index].id for index in indices],
             "input_tokens_seen": token_total, "losses": losses}
 
 
@@ -412,19 +461,32 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
     # Validate all token budgets before creating an output directory.
     for case in train:
-        _encode_pair(tokenizer, case.prompt, case.answer, config.max_tokens)
+        _encode_pair(tokenizer, case.prompt, case.answer, config.max_tokens,
+                     answer_only=config.answer_only)
     for case, answer in zip(train, corrupted_answers):
-        _encode_pair(tokenizer, case.prompt, answer, config.max_tokens)
+        _encode_pair(tokenizer, case.prompt, answer, config.max_tokens,
+                     answer_only=config.answer_only)
     baseline = _score_model(base, tokenizer, torch, heldout, device=device,
-                            max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
+                            max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
+                            answer_only=config.answer_only)
     model = get_peft_model(base, lora_config(r=config.lora_rank, lora_alpha=config.lora_alpha,
                                              lora_dropout=0, bias="none", task_type="CAUSAL_LM",
                                              target_modules="all-linear"))
     initial_digest = _parameter_digest(model, torch)
     initial_state = {name: parameter.detach().clone()
                      for name, parameter in model.named_parameters() if parameter.requires_grad}
+    # Compute/exposure-matched *zero-effective-update* control: same supervised
+    # examples and optimiser steps, but LR=0. Verify all trainable tensors are
+    # unchanged, then start the candidate from the same initialization.
+    sham_training = _train_steps(
+        model, tokenizer, torch, train, [c.answer for c in train], config,
+        learning_rate=0.0,
+    )
+    if _parameter_digest(model, torch) != initial_digest:
+        raise RuntimeError("zero-LR placebo changed trainable adapter parameters")
     sham = _score_model(model, tokenizer, torch, heldout, device=device,
-                        max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
+                        max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
+                            answer_only=config.answer_only)
     correct_training = _train_steps(model, tokenizer, torch, train, [c.answer for c in train], config)
     trained_digest = _parameter_digest(model, torch)
     if trained_digest == initial_digest:
@@ -433,7 +495,8 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     if trained_saved_digest != trained_digest:
         raise RuntimeError("trainable parameter selection differs from LoRA tensor selection")
     candidate = _score_model(model, tokenizer, torch, heldout, device=device,
-                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
+                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
+                            answer_only=config.answer_only)
     # A clean, newly created output directory is used; no existing run changes.
     output_dir.mkdir(mode=0o700, parents=False, exist_ok=False)
     candidate_dir = output_dir / "candidate_adapter"
@@ -451,7 +514,8 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     corrupted_training = _train_steps(model, tokenizer, torch, train, corrupted_answers, config)
     corrupted_digest = _parameter_digest(model, torch)
     corrupted = _score_model(model, tokenizer, torch, heldout, device=device,
-                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
+                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
+                            answer_only=config.answer_only)
     _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
     candidate_adapter_manifest = _adapter_manifest(candidate_dir)
     result: dict[str, Any] = {
@@ -474,16 +538,19 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
         "candidate_lora_tensor_value_sha256": trained_saved_digest,
         "corrupted_lora_parameter_sha256": corrupted_digest,
         "control_data": {"corrupted_label_collisions": sum(a.answer == b for a, b in zip(train, corrupted_answers)),
-                         "sham_updates": 0, "sham_train_case_visits": 0,
-                         "sham_evaluation_before_updates": True,
-                         "sham_is_compute_matched": False},
+                         "sham_updates": 0, "sham_optimizer_steps": config.steps,
+                         "sham_train_case_visits": config.steps,
+                         "sham_evaluation_before_updates": False,
+                         "sham_is_compute_matched": True,
+                         "answer_scaffold_supplied": config.answer_only},
         "cuda_preflight": cuda_headroom,
-        "training": {"candidate": correct_training, "corrupted": corrupted_training},
+        "training": {"sham": sham_training, "candidate": correct_training,
+                     "corrupted": corrupted_training},
         "evaluations": {"baseline": baseline, "sham": sham, "candidate": candidate, "corrupted": corrupted},
         "fresh_process_reload": "NOT RUN: execute `python -m labyrinth.hf_pilot eval` separately",
         "limitations": ["Finite public templates are not evidence of general reasoning transfer.",
                         "One-seed and small-N pilot; do not generalize accuracy deltas.",
-                        "The zero-update sham is NOT matched for optimizer steps or exposure.",
+                        "The zero-LR sham matches visits and optimizer steps but not guaranteed hardware timing.",
                         "Only the adapter was persisted; base weights remain unchanged.",
                         "Same-process scores do not qualify independent checkpoint reload."],
     }
@@ -508,7 +575,7 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     root = Path(run_dir).expanduser().resolve(strict=True)
     source = root / "pilot_report.json"
     report = load_json(source)
-    if report.get("schema") != SCHEMA:
+    if report.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
         raise ValueError("unknown training pilot report schema")
     source_state = report.get("source")
     if not isinstance(source_state, dict) or source_state.get("source_tree_sha256") != _source_state()["source_tree_sha256"]:
@@ -549,7 +616,8 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     if observed_adapter_digest != report.get("candidate_lora_tensor_value_sha256"):
         raise ValueError("reloaded LoRA tensor values differ from trained candidate")
     observed = _score_model(model, tokenizer, torch, heldout, device=device,
-                            max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens)
+                            max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
+                            answer_only=config.answer_only)
     _assert_adapter_unchanged(adapter_dir, actual_adapters)
     _assert_checkpoint_unchanged(model_path, weights, expected_manifest)
     value = {"schema": EVAL_SCHEMA, "training_report_sha256": _sha_file(source),
@@ -581,6 +649,8 @@ def main(argv: list[str] | None = None) -> int:
     train.add_argument("--lora-rank", type=int, default=4)
     train.add_argument("--lora-alpha", type=int, default=8)
     train.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    train.add_argument("--answer-only", action="store_true",
+                       help="Pre-fill ANSWER: and supervise only numerical completion + EOS")
     evaluate = commands.add_parser("eval", help="Reload saved adapter in a new Python process")
     evaluate.add_argument("--run-dir", required=True)
     evaluate.add_argument("--report", required=True)
