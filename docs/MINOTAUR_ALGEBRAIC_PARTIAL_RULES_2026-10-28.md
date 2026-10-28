@@ -33,9 +33,11 @@ With optional Torch and Safetensors, use:
 
 The training command refuses overwrite and saves a separate 12-coefficient
 checkpoint plus a source-bound report. The reload command verifies
-checkpoint file and tensor digests, a fresh process, all-atom scores
-and 128 previously seeded free-running programs. A green result is
-local reproducibility, NOT an independent trusted examiner.
+checkpoint file and tensor digests, all-atom scores and 128 previously
+seeded free-running programs. Run the commands in separate interpreters;
+numeric PID inequality does not verify process independence, and equal PIDs
+across namespaces do not invalidate an otherwise matching replay. A green
+result is local reproducibility, NOT an independent trusted examiner.
 
 The candidate is compared against frozen initialization, a same-step
 zero-learning-rate control, a wrong-label model trained with

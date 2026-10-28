@@ -88,6 +88,21 @@ class MainAlgebraicEvaluationTests(unittest.TestCase):
         self.assertEqual(report["reason"],"neural_inference_failed")
         self.assertEqual(self.head.training,original)
 
+    def test_malformed_scalar_outputs_never_become_exact_scores(self):
+        from unittest.mock import patch
+        from labyrinth.minotaur_public_evidence import evaluate_compact_public
+        atomic=[AtomicEvaluationCase("safe","ADD",95,5,3,"heldout")]
+        for bad in (3.75,3.0,-0.1,True,float("nan"),float("inf"),-1,97):
+            with self.subTest(output=bad):
+                with patch.object(self.head,"predict",return_value=torch.tensor(bad)):
+                    report=evaluate_compact_public(self.head,atomic,[],self.train,torch)
+                self.assertEqual(report["disposition"],"REFUSED")
+                self.assertEqual(report["reason"],"neural_inference_failed")
+                self.assertEqual(report["qualification"],"NOT_ESTABLISHED")
+        with patch.object(self.head,"predict",return_value=torch.tensor([3])):
+            report=evaluate_compact_public(self.head,atomic,[],self.train,torch)
+        self.assertEqual(report["disposition"],"REFUSED")
+
 
 if __name__=="__main__":
     unittest.main()

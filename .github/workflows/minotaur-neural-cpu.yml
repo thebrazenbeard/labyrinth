@@ -5,6 +5,9 @@ on:
     paths:
       - "labyrinth/minotaur_*.py"
       - "tests/test_minotaur_*.py"
+      - "tests/minotaur_required_tests.txt"
+      - "tests/test_ci_membership.py"
+      - "scripts/minotaur_ci.py"
       - "pyproject.toml"
       - ".github/workflows/minotaur-neural-cpu.yml"
   workflow_dispatch:
@@ -55,18 +58,5 @@ jobs:
           PY
       - name: Minotaur tests with neural dependencies present
         run: |
-          python - <<'PY'
-          import sys
-          import unittest
-
-          suite = unittest.defaultTestLoader.discover(
-              start_dir="tests", pattern="test_minotaur_*.py"
-          )
-          if suite.countTestCases() == 0:
-              sys.exit("No Minotaur tests discovered")
-          result = unittest.TextTestRunner(verbosity=2).run(suite)
-          if result.skipped:
-              sys.exit(f"Skipped Minotaur tests are not allowed: {result.skipped!r}")
-          if not result.wasSuccessful():
-              sys.exit(1)
-          PY
+          python -m unittest discover -s tests -p 'test_ci_membership.py' -v
+          python -m scripts.minotaur_ci
