@@ -737,8 +737,17 @@ def main(argv: list[str] | None = None) -> int:
                               "changed": result["initial_lora_parameter_sha256"] != result["candidate_lora_parameter_sha256"]}))
         else:
             result = reload_evaluate(args.run_dir, args.report)
+            # The diagnostic report was persisted by reload_evaluate even on
+            # mismatch; the CLI must not represent mismatch as successful
+            # qualification by returning zero status.
+            if result["matches_original_candidate_trials"] is not True:
+                raise RuntimeError("reloaded candidate did not reproduce training trials")
+            if result["process_id_differs"] is not True:
+                raise RuntimeError("reload was not observed in a different process")
             print(json.dumps({"schema": result["schema"],
-                              "matches_original_candidate_trials": result["matches_original_candidate_trials"]}))
+                              "matches_original_candidate_trials": True,
+                              "process_id_differs": True,
+                              "independent_executor_attestation": False}))
     except (ValueError, FileExistsError, FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
     return 0
