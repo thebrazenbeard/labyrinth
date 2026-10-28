@@ -1,0 +1,97 @@
+{
+  "by_seed": [
+    {
+      "report": {
+        "audit": {
+          "audited_cases": 128,
+          "failures": [],
+          "total_cases": 128
+        },
+        "checkpoint_sha256": "ae92b4e847a8c952d6672a14d9064d0e73df185822da2a042e98c3ce59f55c57",
+        "confidence_intervals": "not_computed_grouped_or_paired_dependence",
+        "disposition": "SCORED",
+        "graduation_authority": "none",
+        "limitations": [
+          "Callback output is evaluated, not trusted as an arithmetic oracle.",
+          "Groups and paired traces may be dependent; no IID confidence is claimed."
+        ],
+        "metrics": {
+          "abstentions": 0,
+          "coverage": 1.0,
+          "exact_accuracy": 1.0,
+          "exact_correct": 128,
+          "exact_first_error_accuracy": 1.0,
+          "exact_first_error_correct": 128,
+          "false_approval_rate": 0.0,
+          "false_approvals": 0,
+          "false_rejection_rate": 0.0,
+          "false_rejections": 0,
+          "non_abstentions": 128,
+          "selective_exact_accuracy": 1.0,
+          "total": 128
+        },
+        "model_provenance": "learned ADD + supplied binary multiplication and modular inversion",
+        "oracle": "independent_public_program_replay",
+        "pair_structures": 64,
+        "program_split_commitment": "89aef465e2654c83b5cba21444a37f1edd1027303405df3e878aace549b83dad",
+        "qualification": "NOT_ESTABLISHED",
+        "schema": "labyrinth.minotaur-algebraic-eval.v5",
+        "trace_composition": {
+          "clean": 64,
+          "corrupted": 64
+        }
+      },
+      "seed": 818
+    },
+    {
+      "report": {
+        "audit": {
+          "audited_cases": 128,
+          "failures": [],
+          "total_cases": 128
+        },
+        "checkpoint_sha256": "ae92b4e847a8c952d6672a14d9064d0e73df185822da2a042e98c3ce59f55c57",
+        "confidence_intervals": "not_computed_grouped_or_paired_dependence",
+        "disposition": "SCORED",
+        "graduation_authority": "none",
+        "limitations": [
+          "Callback output is evaluated, not trusted as an arithmetic oracle.",
+          "Groups and paired traces may be dependent; no IID confidence is claimed."
+        ],
+        "metrics": {
+          "abstentions": 0,
+          "coverage": 1.0,
+          "exact_accuracy": 1.0,
+          "exact_correct": 128,
+          "exact_first_error_accuracy": 1.0,
+          "exact_first_error_correct": 128,
+          "false_approval_rate": 0.0,
+          "false_approvals": 0,
+          "false_rejection_rate": 0.0,
+          "false_rejections": 0,
+          "non_abstentions": 128,
+          "selective_exact_accuracy": 1.0,
+          "total": 128
+        },
+        "model_provenance": "learned ADD + supplied binary multiplication and modular inversion",
+        "oracle": "independent_public_program_replay",
+        "pair_structures": 64,
+        "program_split_commitment": "b0b236e7ef703be480741993a4f368111358b7ccaa2d3b81a8015d307cb08574",
+        "qualification": "NOT_ESTABLISHED",
+        "schema": "labyrinth.minotaur-algebraic-eval.v5",
+        "trace_composition": {
+          "clean": 64,
+          "corrupted": 64
+        }
+      },
+      "seed": 819
+    }
+  ],
+  "checkpoint_sha256": "ae92b4e847a8c952d6672a14d9064d0e73df185822da2a042e98c3ce59f55c57",
+  "graduation_authority": "none",
+  "limitations": "Public seeded paired traces; only half as many independent program structures as cases; supplied SUB/MUL algorithms, learned ADD only.",
+  "qualification": "NOT_ESTABLISHED",
+  "schema": "labyrinth.minotaur-v5-public-program-rollout.v1",
+  "source_clean_at_run": true,
+  "source_head": "5966de837447fc2201845a51691b8053e39807d8"
+}

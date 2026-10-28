@@ -64,3 +64,10 @@ The read-only red team confirmed the original V4's exhaustive-table limitation, 
 ## Next falsifiable scientific objective
 
 Train a parameter-sharing algebraic latent model to discover multiplication and subtraction *without* given inverse/binary-double-and-add control flow, then independently qualify its accuracy on reserved residue-value families, new prime moduli and held-out grammar changes. The earlier direct-neural negative results remain the baseline.
+
+
+## Source-bound public program rollout
+
+After the checkpoint and inference code were committed at `5966de837447fc2201845a51691b8053e39807d8`, a fresh independent CPU process loaded the exact SHA-pinned trained model and evaluated **128 clean/faulty traces for seed 818** and **128 for seed 819**. The scorer reported **128/128 exact earliest-error decisions and zero observed false approvals in each seed**. These 256 traces correspond to 128 distinct paired program structures. The model callback received only its current state and instruction; the public arithmetic replayer independently checked claimed labels and outcomes. No truth states were passed to the model.
+
+Evidence: `docs/evidence/MINOTAUR_V5_PROGRAM_ROLLOUT_2026-10-28.json`, SHA-256 `34fb2bb8ab1b8e620de787539e4f51aa39e5733a4b0a573ac14303a5c65b68ce`. Public seeded examples, correlated clean/fault pairs, supplied SUB/MUL algorithms, and no external examiner custody remain explicit limitations.
