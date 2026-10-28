@@ -23,6 +23,7 @@ from labyrinth.hf_pilot import (
     run_pilot,
     training_cases,
     validate_config,
+    validate_tokenized_answer_discrimination,
 )
 from labyrinth.maze import Challenge
 
@@ -105,6 +106,26 @@ class HfPilotContractTests(unittest.TestCase):
         self.assertEqual(labels[visible:], ids[visible:])
         with self.assertRaisesRegex(ValueError, "token budget"):
             _encode_pair(tokenizer, "X" * 200, "2", 64)
+
+    def test_semantic_preflight_refuses_collapsed_numeric_labels(self):
+        cases = [Challenge("case1", "Compute 1+2", 1, "train", "add", "3"),
+                 Challenge("case2", "Compute 2+2", 1, "train", "add", "4")]
+        wrong = ["4", "3"]
+        tokenizer = DummyTokenizer()
+        self.assertEqual(validate_tokenized_answer_discrimination(
+            tokenizer, cases, wrong, 256), 2)
+
+        class NumericCollapse(DummyTokenizer):
+            def __call__(self, text, *, add_special_tokens):
+                return {"input_ids": ([1] if add_special_tokens else [])
+                        + [ord("0") if c.isascii() and c.isdigit() else ord(c)
+                           for c in text]}
+
+        with self.assertRaisesRegex(ValueError, "tokenized.*collide"):
+            validate_tokenized_answer_discrimination(NumericCollapse(), cases, wrong, 256)
+
+        with self.assertRaisesRegex(ValueError, "mismatched"):
+            validate_tokenized_answer_discrimination(tokenizer, cases, wrong[:1], 256)
 
     def test_no_torch_import_neither_creates_nor_changes_run_dir(self):
         with patch("labyrinth.hf_pilot._deps", side_effect=RuntimeError("optional deps unavailable")):
