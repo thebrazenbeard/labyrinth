@@ -8,6 +8,7 @@ on:
       - "tests/minotaur_required_tests.txt"
       - "tests/test_ci_membership.py"
       - "scripts/minotaur_ci.py"
+      - "scripts/minotaur_prospective_public.py"
       - "pyproject.toml"
       - ".github/workflows/minotaur-neural-cpu.yml"
   workflow_dispatch:
