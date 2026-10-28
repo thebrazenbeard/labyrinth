@@ -214,19 +214,45 @@ def zero_trainable_gradients(parameters) -> None:
             gradient.zero_()
 
 
-def training_visit_plan(examples: list[dict[str, str]], steps: int) -> tuple[list[dict[str, str]], dict]:
+def training_visit_plan(examples: list[dict[str, str]], steps: int, *,
+                        selection_policy: str = "ordered-round-robin-v1"
+                        ) -> tuple[list[dict[str, str]], dict]:
     """Return the exact ordered examples visited and receipt-visible coverage.
 
     Keep this plan shared by the optimizer and its receipt.  The pilot's
     historical selection policy is ordered round robin, *not* a seeded random
-    draw.  When steps < available examples, unvisited examples must not count
-    as learned-from training cases.
+    draw. Tier interleaving is a deterministic order control for a balanced
+    graduated v2 corpus, not a feedback-driven adaptive curriculum. When
+    steps < available examples, unvisited examples must not count as learned
+    from training cases.
     """
     if not examples or type(steps) is not int or steps < 1:
         raise ValueError("training visit plan requires examples and positive steps")
-    visits = [examples[step % len(examples)] for step in range(steps)]
+    if selection_policy == "ordered-round-robin-v1":
+        indices = list(range(len(examples)))
+    elif selection_policy == "tier-interleaved-v2":
+        count = len(examples)
+        if count < 4 or count % 4:
+            raise ValueError("tier interleaving requires a balanced four-tier corpus")
+        if steps % count:
+            raise ValueError("tier interleaving requires complete passes over matched cases")
+        per_tier = count // 4
+        for index, item in enumerate(examples):
+            expected_tier = 1 + index // per_tier
+            if (item.get("split") != "train" or not isinstance(item.get("case_id"), str)
+                    or not item["case_id"].startswith(f"train-gv2-t{expected_tier}-")):
+                raise ValueError("tier interleaving requires contiguous graduated v2 tiers")
+        indices = [tier * per_tier + offset
+                   for offset in range(per_tier) for tier in range(4)]
+    else:
+        raise ValueError("unknown training selection policy")
+    visits = [examples[indices[step % len(indices)]] for step in range(steps)]
     ids = [item["case_id"] for item in visits]
     unique = len(set(ids))
+    schedule_bytes = json.dumps(
+        {"selection_policy": selection_policy, "visited_case_ids": ids},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
     metrics = {
         "case_visits": len(visits),
         "available_training_cases": len(examples),
@@ -234,7 +260,8 @@ def training_visit_plan(examples: list[dict[str, str]], steps: int) -> tuple[lis
         # Retain this historical field for consumers but correct its semantics.
         "unique_training_cases": unique,
         "visited_case_ids": ids,
-        "training_selection_policy": "ordered-round-robin-v1",
+        "training_selection_policy": selection_policy,
+        "training_schedule_sha256": hashlib.sha256(schedule_bytes).hexdigest(),
     }
     return visits, metrics
 
@@ -257,7 +284,8 @@ def train(args) -> None:
     examples = attest_generated_train_only(
         read_training(data), generator_seed=args.train_generator_seed,
         generator_version=args.train_generator_version)
-    training_visits, visit_metrics = training_visit_plan(examples, args.steps)
+    training_visits, visit_metrics = training_visit_plan(
+        examples, args.steps, selection_policy=args.visit_policy)
     torch.set_num_threads(args.threads)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -388,6 +416,10 @@ def main(argv=None) -> int:
     ptrain.add_argument("--seed", type=int, default=1701)
     ptrain.add_argument("--lr", type=float, default=0.0001)
     ptrain.add_argument("--steps", type=int, default=2)
+    ptrain.add_argument("--visit-policy",
+                        choices=("ordered-round-robin-v1", "tier-interleaved-v2"),
+                        default="ordered-round-robin-v1",
+                        help="Deterministic optimizer visit order; interleaved requires equal v2 tiers")
     ptrain.add_argument("--threads", type=int, default=4)
     pverify = sub.add_parser("verify")
     pverify.add_argument("--checkpoint", required=True)

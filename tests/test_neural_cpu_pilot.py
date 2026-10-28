@@ -143,6 +143,22 @@ class NeuralCpuPilotTests(unittest.TestCase):
         self.assertEqual([sum("-t" + str(t) + "-" in c["case_id"] for c in cases)
                           for t in range(1, 5)], [32, 32, 32, 32])
 
+    def test_committed_balanced_64_fixture_matches_reconstruction(self):
+        from labyrinth.neural_cpu_pilot import attest_generated_train_only
+
+        fixture = (Path(__file__).resolve().parents[1] / "experiments" / "data"
+                   / "train_graduated_seed2801_64.json")
+        self.assertEqual(file_digest(fixture),
+                         "845c1a835ba5ed774ba4343b318236100c2961821921e001eab686e50fc1c74a")
+        records = read_training(fixture)
+        self.assertEqual(len(attest_generated_train_only(
+            records, generator_seed=2801, generator_version="v2")), 64)
+        graduated, meta = training_visit_plan(records, 64)
+        self.assertEqual(graduated, records)
+        self.assertEqual(meta["unique_cases_seen"], 64)
+        self.assertEqual([sum(f"-t{tier}-" in r["case_id"] for r in graduated)
+                          for tier in range(1, 5)], [16, 16, 16, 16])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -179,6 +195,48 @@ class NeuralCpuPilotTests(unittest.TestCase):
             training_visit_plan([], 1)
         with self.assertRaises(ValueError):
             training_visit_plan(examples, 0)
+
+    def test_balanced_64_case_v2_corpus_and_matched_tier_schedules(self):
+        cases = generate_graduated_train_challenges(2801, 64)
+        records = [{"case_id": c.id, "split": c.split, "prompt": c.prompt,
+                    "answer": c.answer} for c in cases]
+        self.assertEqual([sum(f"-t{tier}-" in x["case_id"] for x in records)
+                          for tier in range(1, 5)], [16, 16, 16, 16])
+        graduated, gmeta = training_visit_plan(records, 64)
+        interleaved, imeta = training_visit_plan(
+            records, 64, selection_policy="tier-interleaved-v2")
+        self.assertEqual(graduated, records)
+        self.assertEqual([records[index] for index in (0, 16, 32, 48)],
+                         interleaved[:4])
+        self.assertEqual([item["case_id"] for item in interleaved],
+                         [records[index]["case_id"]
+                          for pos in range(16) for index in
+                          (pos, 16 + pos, 32 + pos, 48 + pos)])
+        self.assertEqual({i["case_id"] for i in graduated},
+                         {i["case_id"] for i in interleaved})
+        self.assertEqual(gmeta["unique_cases_seen"], 64)
+        self.assertEqual(imeta["unique_cases_seen"], 64)
+        self.assertEqual(imeta["training_selection_policy"], "tier-interleaved-v2")
+        self.assertNotEqual(gmeta["training_schedule_sha256"],
+                            imeta["training_schedule_sha256"])
+        self.assertEqual(imeta["training_schedule_sha256"],
+                         training_visit_plan(records, 64, selection_policy="tier-interleaved-v2")
+                         [1]["training_schedule_sha256"])
+
+    def test_interleaved_refuses_non_v2_or_unbalanced_corpus(self):
+        raw = [{"case_id": f"train-{i}", "split": "train"} for i in range(64)]
+        with self.assertRaisesRegex(ValueError, "graduated v2"):
+            training_visit_plan(raw, 64, selection_policy="tier-interleaved-v2")
+        cases = generate_graduated_train_challenges(2801, 64)
+        records = [{"case_id": c.id, "split": c.split} for c in cases]
+        with self.assertRaisesRegex(ValueError, "balanced"):
+            training_visit_plan(records[:-1], 63,
+                                selection_policy="tier-interleaved-v2")
+        with self.assertRaisesRegex(ValueError, "complete passes"):
+            training_visit_plan(records, 32,
+                                selection_policy="tier-interleaved-v2")
+        with self.assertRaisesRegex(ValueError, "unknown"):
+            training_visit_plan(records, 64, selection_policy="shuffle")
 
     def test_valid_train_only_data_and_digest(self):
         self.write(self.sample)

@@ -42,7 +42,6 @@ def fixture():
               "base_model_sha256": _sha("base"),
               "base_tokenizer_sha256": _sha("tokenizer"),
               "generation_config_sha256": _sha("greedy-fixed-128"),
-              "eval_manifest_sha256": _hash(manifest),
               "arms": {
                   "baseline": arm(["ANSWER: 6", "ANSWER: 12"], "base", steps=0, visits=0),
                   "trained": arm(["ANSWER: 7", "ANSWER: 12"], "trained"),
@@ -53,6 +52,59 @@ def fixture():
 
 
 class PairedAnalysisTests(unittest.TestCase):
+    def test_final_requires_independent_custodian(self):
+        manifest, trials = fixture()
+        manifest["split"] = "final"
+        with self.assertRaisesRegex(ValueError, "independent one-shot custodian"):
+            analyze(manifest, trials)
+
+        # A valid final set, including singleton groups, must never release
+        # per-slice or per-template correctness statistics.
+        expanded = []
+        for index in range(32):
+            case = copy.deepcopy(manifest["cases"][index % 2])
+            case["case_id"] = f"held-{index}"
+            case["prompt_sha256"] = _sha(f"held-prompt-{index}")
+            case["template_id"] = f"held-template-{index}"
+            expanded.append(case)
+        manifest["cases"] = expanded
+        for arm in trials["arms"].values():
+            originals = arm["trials"]
+            arm["trials"] = [
+                {**copy.deepcopy(originals[index % 2]),
+                 "case_id": case["case_id"],
+                 "prompt_sha256": case["prompt_sha256"],
+                 "generation_seed": index + 300}
+                for index, case in enumerate(expanded)
+            ]
+        with self.assertRaisesRegex(ValueError, "independent one-shot custodian"):
+            analyze(manifest, trials)
+
+        # One aggregate report would be an oracle if only one case differs
+        # between arms; ensure the 32-case minimum never enables that leak.
+        trials["arms"]["trained"]["trials"][0]["response"] = "ANSWER: 8"
+        with self.assertRaisesRegex(ValueError, "independent one-shot custodian"):
+            analyze(manifest, trials)
+        # Invalid responses can isolate a single case just as easily.
+        trials["arms"]["trained"]["trials"][0]["response"] = "ANSWER: 7"
+        for item in trials["arms"]["trained"]["trials"][1:]:
+            item["response"] = "not an answer"
+        with self.assertRaisesRegex(ValueError, "independent one-shot custodian"):
+            analyze(manifest, trials)
+
+    def test_public_gold_manifest_hash_is_not_an_acceptable_trial_contract(self):
+        manifest, trials = fixture()
+        self.assertNotIn("eval_manifest_sha256", analyze(manifest, trials))
+        trials["eval_manifest_sha256"] = _hash(manifest)
+        with self.assertRaisesRegex(ValueError, "gold-bearing manifest commitments"):
+            analyze(manifest, trials)
+
+    def test_legacy_v1_trials_rejected(self):
+        manifest, trials = fixture()
+        trials["schema"] = "labyrinth.neural-trials.v1"
+        with self.assertRaisesRegex(ValueError, "unsupported model trial schema"):
+            analyze(manifest, trials)
+
     def test_paired_results_are_independent_of_gold_in_report(self):
         manifest, trials = fixture()
         result = analyze(manifest, trials)
@@ -97,7 +149,7 @@ class PairedAnalysisTests(unittest.TestCase):
 
     def test_split_contamination_and_sham_mutation_fail_closed(self):
         for mutation in ("id-overlap", "prompt-overlap", "structure-overlap", "changed-sham",
-                         "unchanged-trained", "changed-manifest"):
+                         "unchanged-trained"):
             with self.subTest(mutation=mutation):
                 manifest, trials = fixture()
                 if mutation == "id-overlap":
@@ -110,10 +162,6 @@ class PairedAnalysisTests(unittest.TestCase):
                     trials["arms"]["sham"]["parameter_sha256"] = _sha("not-base")
                 elif mutation == "unchanged-trained":
                     trials["arms"]["trained"]["parameter_sha256"] = trials["arms"]["baseline"]["parameter_sha256"]
-                else:
-                    manifest["cases"][0]["answer"] = "8"
-                if mutation in ("id-overlap", "prompt-overlap", "structure-overlap"):
-                    trials["eval_manifest_sha256"] = _hash(manifest)
                 with self.assertRaises(ValueError):
                     analyze(manifest, trials)
 
@@ -123,26 +171,22 @@ class PairedAnalysisTests(unittest.TestCase):
         # an overlapping train/eval structure fingerprint.
         manifest["cases"][1]["slice"] = "novel_structure"
         manifest["cases"][1]["structure_fingerprint"] = _sha("S1")
-        trials["eval_manifest_sha256"] = _hash(manifest)
         with self.assertRaisesRegex(ValueError, "invalid evaluation slice"):
             analyze(manifest, trials)
 
         manifest["cases"][1]["slice"] = "length_shift"
-        trials["eval_manifest_sha256"] = _hash(manifest)
         with self.assertRaisesRegex(ValueError, "overlaps training"):
             analyze(manifest, trials)
 
     def test_gold_tainted_template_id_never_echoed(self):
         manifest, trials = fixture()
         manifest["cases"][1]["template_id"] = "ANSWER: 12"
-        trials["eval_manifest_sha256"] = _hash(manifest)
         with self.assertRaisesRegex(ValueError, "template ID"):
             analyze(manifest, trials)
 
         # Even valid opaque IDs may encode a private answer; use only generated
         # group indexes in the report, never the caller's raw labels.
         manifest["cases"][1]["template_id"] = "GOLDANSWER12"
-        trials["eval_manifest_sha256"] = _hash(manifest)
         report = analyze(manifest, trials)
         self.assertNotIn("GOLDANSWER12", json.dumps(report))
         self.assertIn("group_0002", report["by"]["template_group"])
@@ -183,6 +227,18 @@ class PairedAnalysisTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 main(["--private-manifest", str(mp), "--trials", str(tp), "--report", str(rp)])
             self.assertEqual(before, rp.read_bytes())
+
+    def test_cli_denies_final_without_writing_any_report(self):
+        manifest, trials = fixture()
+        manifest["split"] = "final"
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            mp, tp, rp = [directory / name for name in ("private.json", "trials.json", "report.json")]
+            mp.write_text(json.dumps(manifest), encoding="utf-8")
+            tp.write_text(json.dumps(trials), encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                main(["--private-manifest", str(mp), "--trials", str(tp), "--report", str(rp)])
+            self.assertFalse(rp.exists())
 
 
 if __name__ == "__main__":
