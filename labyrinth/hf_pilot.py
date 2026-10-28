@@ -257,6 +257,22 @@ def _parameter_digest(model: Any, torch: Any) -> str:
     return _selected_parameter_digest(model, torch, include=lambda name, p: p.requires_grad)
 
 
+def _buffer_digest(model: Any, torch: Any) -> str:
+    """Value-hash persistent model buffers, including non-trainable state.
+
+    Optimizer LR=0 does not guarantee training forwards preserve mutable
+    running-statistics buffers. Reject changed state rather than treating
+    a parameter-only digest as proof of identical starting conditions.
+    """
+    digest = hashlib.sha256()
+    for name, buffer in sorted(model.named_buffers()):
+        metadata = json.dumps([name, list(buffer.shape), str(buffer.dtype)],
+                              separators=(",", ":")).encode("utf-8")
+        raw = buffer.detach().cpu().contiguous().flatten().view(torch.uint8).numpy().tobytes()
+        digest.update(metadata + b"\x00" + raw)
+    return digest.hexdigest()
+
+
 def _lora_value_digest(model: Any, torch: Any) -> str:
     """Hash LoRA tensor values regardless of frozen `requires_grad` on reload."""
     return _selected_parameter_digest(model, torch, include=lambda name, p: ".lora_" in name)
@@ -473,6 +489,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
                                              lora_dropout=0, bias="none", task_type="CAUSAL_LM",
                                              target_modules="all-linear"))
     initial_digest = _parameter_digest(model, torch)
+    initial_buffer_digest = _buffer_digest(model, torch)
     initial_state = {name: parameter.detach().clone()
                      for name, parameter in model.named_parameters() if parameter.requires_grad}
     # Compute/exposure-matched *zero-effective-update* control: same supervised
@@ -484,6 +501,8 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     )
     if _parameter_digest(model, torch) != initial_digest:
         raise RuntimeError("zero-LR placebo changed trainable adapter parameters")
+    if _buffer_digest(model, torch) != initial_buffer_digest:
+        raise RuntimeError("zero-LR placebo changed persistent model buffers")
     sham = _score_model(model, tokenizer, torch, heldout, device=device,
                         max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
@@ -494,6 +513,8 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     trained_saved_digest = _lora_value_digest(model, torch)
     if trained_saved_digest != trained_digest:
         raise RuntimeError("trainable parameter selection differs from LoRA tensor selection")
+    if _buffer_digest(model, torch) != initial_buffer_digest:
+        raise RuntimeError("correct-label training changed persistent model buffers")
     candidate = _score_model(model, tokenizer, torch, heldout, device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
@@ -513,6 +534,8 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
         raise RuntimeError("failed to restore LoRA initialization for corrupted-label control")
     corrupted_training = _train_steps(model, tokenizer, torch, train, corrupted_answers, config)
     corrupted_digest = _parameter_digest(model, torch)
+    if _buffer_digest(model, torch) != initial_buffer_digest:
+        raise RuntimeError("corrupted-label training changed persistent model buffers")
     corrupted = _score_model(model, tokenizer, torch, heldout, device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
@@ -534,6 +557,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
         "heldout_case_ids": [c.id for c in heldout],
         "heldout_public_prompt_sha256": _prompt_commitment(heldout),
         "initial_lora_parameter_sha256": initial_digest,
+        "initial_persistent_buffers_sha256": initial_buffer_digest,
         "candidate_lora_parameter_sha256": trained_digest,
         "candidate_lora_tensor_value_sha256": trained_saved_digest,
         "corrupted_lora_parameter_sha256": corrupted_digest,

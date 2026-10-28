@@ -82,7 +82,9 @@ python -m labyrinth audit-hf-report --input NEW_EMPTY_PARENT/RUN_001/pilot_repor
 This path never downloads weights, installs packages, runs arbitrary model text, or replaces the base checkpoint. It rejects existing output directories and checkpoints exceeding its strict 1 GiB no-quantization limit; therefore the existing ~6.15 GB 3B-class local checkpoint on Lappy is **not eligible** for this initial pilot. Its default two steps consume only two of eight default generated training examples. The public finite mazes are a mechanism smoke test, **not** a qualified learning effect. New runs from the v3 pilot use a **zero-learning-rate, same-exposure placebo**
 that executes the same number of forward/backward and optimizer steps and the
 same deterministic tier-balanced training-case order. The source verifies its
-LoRA tensors are unchanged. This is better matched for training operations and
+LoRA tensors **and persistent model buffers** are unchanged, failing closed
+rather than claiming matched initial conditions if stateful model buffers
+change during any arm. This is better matched for training operations and
 example visits but is *not* proof of identical kernel timing, private test
 independence, or semantic learning. Historical v2 reports retain the original
 unmatched sham meaning. The opt-in --answer-only mode moves the fixed

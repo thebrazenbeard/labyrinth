@@ -32,6 +32,30 @@ class MatchedControlsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tier"):
             _training_visit_indices(train, seed=cfg.seed, steps=cfg.steps)
 
+    def test_buffer_digest_tracks_nonparameter_state(self):
+        from labyrinth.hf_pilot import _buffer_digest
+        class FakeBytes:
+            def __init__(self, content):
+                self.content = content
+                self.shape = (len(content),)
+                self.dtype = "float32"
+            def detach(self): return self
+            def cpu(self): return self
+            def contiguous(self): return self
+            def flatten(self): return self
+            def view(self, token): return self
+            def numpy(self): return self
+            def tobytes(self): return self.content
+        class FakeModel:
+            def __init__(self): self.buf = FakeBytes(b"initial-buffer")
+            def named_buffers(self): return [("layer.running_mean", self.buf)]
+        class FakeTorch:
+            uint8 = "bytes"
+        model = FakeModel()
+        old = _buffer_digest(model, FakeTorch)
+        model.buf = FakeBytes(b"modified-buffer")
+        self.assertNotEqual(old, _buffer_digest(model, FakeTorch))
+
     def test_v3_audit_requires_matched_sham_and_original_v2_stays_valid(self):
         old = pilot_fixture()
         old["schema"] = "labyrinth.hf-lora-pilot.v2"
@@ -39,6 +63,7 @@ class MatchedControlsTests(unittest.TestCase):
         import labyrinth.hf_pilot as pilot
         newer = pilot_fixture()
         newer["schema"] = pilot.SCHEMA
+        newer["initial_persistent_buffers_sha256"] = "c" * 64
         newer["config"]["answer_only"] = True
         newer["control_data"].update({
             "answer_scaffold_supplied": True,
