@@ -55,11 +55,16 @@ private blind test.
 
 ## Evidence integrity and hostile-review limits
 
-The experiment report includes hashes of the exact executed source files,
-the serialized coefficient tensors, the saved checkpoint and ordered atomic
+The experiment report includes hashes of relevant source files observed at
+module import and report creation (not independent attestation of the exact
+bytecode executed), the serialized coefficient tensors, saved checkpoint and ordered atomic
 and program predictions. A sibling report.sha256 detects unaccompanied
 report modifications. Reload bounds local report/checkpoint sizes and rejects
 changed source, missing/truncated state vectors and mismatched trial digests.
+The module refuses ordinary disk changes after import, but an already-stale
+dependency imported before the experiment module cannot be proven fresh by
+disk hashes alone. For source-provenance claims, use a fresh Python process
+in a stable, reviewed checkout; hostile concurrent mutation is not covered.
 
 These are local **consistency checks**, not signatures or trustworthy
 third-party custody: an operator able to rewrite both a report and its
