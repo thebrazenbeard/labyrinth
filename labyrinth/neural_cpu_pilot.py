@@ -61,7 +61,8 @@ def read_training(path: Path) -> list[dict[str, str]]:
 
 
 def attest_generated_train_only(records: list[dict[str, str]], *,
-                                generator_seed: int) -> list[dict[str, str]]:
+                                generator_seed: int,
+                                generator_version: str = "v1") -> list[dict[str, str]]:
     """Authenticate ordered SFT inputs against the source-bound train generator.
 
     The ``split`` field alone is user-controlled: a held-out record can be
@@ -69,13 +70,19 @@ def attest_generated_train_only(records: list[dict[str, str]], *,
     then compare all fields before a model or optimizer is loaded.  Do not
     silently downgrade to split-field-only checking if source is unavailable.
     """
-    if type(generator_seed) is not int or not isinstance(records, list) or not 1 <= len(records) <= 256:
+    if (type(generator_seed) is not int or generator_version not in ("v1", "v2")
+            or not isinstance(records, list) or not 1 <= len(records) <= 256):
         raise ValueError("invalid train generator attestation arguments")
     try:
-        from labyrinth.program_maze import generate_program_challenges
+        from labyrinth.program_maze import (
+            generate_graduated_train_challenges, generate_program_challenges,
+        )
     except ImportError as exc:
         raise ValueError("train generator source unavailable for attestation") from exc
-    expected = generate_program_challenges(generator_seed, len(records), "train")
+    if generator_version == "v1":
+        expected = generate_program_challenges(generator_seed, len(records), "train")
+    else:
+        expected = generate_graduated_train_challenges(generator_seed, len(records), "train")
     for index, (record, challenge) in enumerate(zip(records, expected)):
         required = {"case_id": challenge.id, "split": "train",
                     "prompt": challenge.prompt, "answer": challenge.answer}
@@ -248,7 +255,8 @@ def train(args) -> None:
     if output.exists():
         raise FileExistsError("pilot refuses to overwrite an existing run")
     examples = attest_generated_train_only(
-        read_training(data), generator_seed=args.train_generator_seed)
+        read_training(data), generator_seed=args.train_generator_seed,
+        generator_version=args.train_generator_version)
     training_visits, visit_metrics = training_visit_plan(examples, args.steps)
     torch.set_num_threads(args.threads)
     random.seed(args.seed)
@@ -326,7 +334,9 @@ def train(args) -> None:
         "zeroed_grad_steps": args.steps if args.arm == "sham" else 0,
         **visit_metrics,
         "training_data_sha256": file_digest(data),
-        "train_generator": "labyrinth-program-v1", "train_generator_seed": args.train_generator_seed,
+        "train_generator": ("labyrinth-program-v1" if args.train_generator_version == "v1"
+                            else "labyrinth-program-graduated-v2"),
+        "train_generator_seed": args.train_generator_seed,
         "base_model_sha256": file_digest(base / "model.safetensors"),
         "base_tokenizer_sha256": file_digest(base / "tokenizer.json"),
         "model_parameters": parameter_count, "trainable_parameters": trainable_count,
@@ -368,6 +378,8 @@ def main(argv=None) -> int:
     ptrain.add_argument("--train-data", required=True)
     ptrain.add_argument("--train-generator-seed", required=True, type=int,
                         help="Source-bound train-generator seed; checked before neural loading")
+    ptrain.add_argument("--train-generator-version", choices=("v1", "v2"), default="v1",
+                        help="v1 historical data or train-only graduated v2; fail-closed attestation")
     ptrain.add_argument("--output", required=True)
     ptrain.add_argument("--arm", choices=("trained", "sham", "corrupted"), required=True)
     ptrain.add_argument("--target-policy", choices=("answer", "trace"), default="answer")

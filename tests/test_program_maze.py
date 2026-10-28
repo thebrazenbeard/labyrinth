@@ -2,7 +2,9 @@ import hashlib
 import re
 import unittest
 
-from labyrinth.program_maze import generate_program_challenges
+from labyrinth.program_maze import (
+    generate_graduated_train_challenges, generate_program_challenges,
+)
 
 
 def oracle(prompt):
@@ -26,6 +28,39 @@ def oracle(prompt):
 
 
 class ProgramMazeTests(unittest.TestCase):
+    def test_graduated_train_only_four_tiers_and_independent_oracle(self):
+        cases = generate_graduated_train_challenges(2801, 128)
+        self.assertEqual(cases, generate_graduated_train_challenges(2801, 128))
+        self.assertNotEqual(cases, generate_graduated_train_challenges(2802, 128))
+        self.assertEqual(len({c.id for c in cases}), 128)
+        self.assertEqual([sum(c.tier == t for c in cases) for t in range(1, 5)],
+                         [32, 32, 32, 32])
+        self.assertEqual({c.tier for c in cases[:64]}, {1, 2})
+        self.assertEqual({dict(c.metadata)["representation"] for c in cases},
+                         {"expanded", "compact"})
+        self.assertEqual({len(dict(c.metadata)["structure"].split(";")) for c in cases},
+                         {1, 2, 3, 4})
+        self.assertTrue(all(c.split == "train" for c in cases))
+        for c in cases:
+            metadata = dict(c.metadata)
+            self.assertEqual(int(c.answer), oracle(c.prompt))
+            self.assertEqual(metadata["generator"], "labyrinth-program-graduated-v2")
+            self.assertEqual(metadata["structure_fingerprint"],
+                             hashlib.sha256(metadata["structure"].encode()).hexdigest())
+
+    def test_graduated_training_structures_exclude_v1_holdout(self):
+        grad = generate_graduated_train_challenges(2801, 128)
+        holdout = generate_program_challenges(17, 1000, "eval")
+        self.assertTrue(
+            {dict(c.metadata)["structure"] for c in grad}.isdisjoint(
+                {dict(c.metadata)["structure"] for c in holdout}))
+
+    def test_graduated_generator_rejects_nontraining_and_invalid_bounds(self):
+        for args in ((True, 2, "train"), (2, True, "train"), (0, 0, "train"),
+                     (0, 257, "train"), (0, 1, "dev"), (0, 1, "final")):
+            with self.subTest(args=args), self.assertRaises(ValueError):
+                generate_graduated_train_challenges(*args)
+
     def test_determinism_and_independent_oracle(self):
         for split in ("train", "eval", "holdout"):
             challenges = generate_program_challenges(27, 100, split)
