@@ -11,3 +11,21 @@ Two authenticated fresh Codex CLI specialists were started through connected **E
 The primary acceptance criterion is demonstrated successful prediction of absent-output label 53 and quantitative transfer to modulus 101 under multiple seeds, with a private external examiner still required for promotion. A source-first negative result is valuable; do not describe passing test code as learned competence. No weights are to be deployed as a result of this study.
 
 **All claims of exact-source training, tests and hosted CI must be filled only after live readback.**
+
+
+## Actual source-frozen two-seed experiment
+
+The implementation and TDD tests were committed at `c52d56225e43612add05f181a5323522e7a6c627` **before training**. Executor on Lappy then ran two genuine CPU PyTorch random-initialized experiments, 30 epochs and 510 AdamW updates per seed. Both neural parameter SHA digests changed. The model used train-only labels and never saw output residue 53 or input value 53 in train. The external modulus-101 dataset was evaluation only. No checkpoint was promoted.
+
+| Public challenge | Seed 20261028 | Seed 20261029 |
+| --- | ---: | ---: |
+| Independent paired heldout within permitted training values | 26/910 (2.86%) | 16/910 (1.76%) |
+| Label 53 entirely absent from training | **0/94 (0%)** | **0/94 (0%)** |
+| Operand value 53 absent from training | 2/193 (1.04%) | 4/193 (2.07%) |
+| Modulus 101, entirely untrained | 202/10201 (1.98%) | 192/10201 (1.88%) |
+
+The numeric regression head avoids the per-output-class positive-example trap in principle, but these results prove it **still fails** the intended arithmetic generalization. This is not a successful neural multiplication model. The output-label-53 test excludes two cases that belong to the separately scored withheld-operand-53 group; therefore it contains 94, not 96, directed rows.
+
+Evidence JSON: `docs/evidence/MINOTAUR_V7_NUMERIC_2026-10-28.json` SHA-256 `34e731a1c8699166eb78add7380053c30107c4ee587b7a61ea0ae22b64c6e27b`. The frozen executable commit, exact module and benchmark SHA-256, model/optimizer counts and all per-challenge measurements are in the evidence file. **DO_NOT_PROMOTE**; no external private qualification, no model install, no trainee graduation.
+
+The strongest next hypothesis is explicit intermediate arithmetic representation learning with independently masked transfer tasks and a separate private examiner. Merely enlarging this symmetric regression MLP has no demonstrated path to modular multiplication; the architecture must be evaluated for rule learning, not retuned against this public holdout.
