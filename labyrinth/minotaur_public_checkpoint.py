@@ -17,6 +17,7 @@ import sys
 import tempfile
 from typing import Any
 
+from .toy_backend import _open_checkpoint_readonly
 from .minotaur_algebraic_eval_v5 import (
     AtomicEvaluationCase, ProgramRolloutCase,
     evaluate_atomic_predictions, evaluate_program_rollouts,
@@ -46,6 +47,8 @@ def _safe_path(path: Path, *, must_exist: bool) -> None:
         current = current / part
         if current.is_symlink():
             raise ValueError("symlink_path")
+        if getattr(current, "is_junction", lambda: False)():
+            raise ValueError("junction_path")
         if not current.exists():
             if must_exist or current != absolute:
                 raise ValueError("missing_path")
@@ -58,16 +61,21 @@ def _read_regular(path: Path, maximum: int) -> bytes:
     observed = path.lstat()
     if not stat.S_ISREG(observed.st_mode) or not 0 < observed.st_size <= maximum:
         raise ValueError("invalid_file_size_or_type")
-    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-             | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
-    fd = os.open(path, flags)
+    # Use the same no-follow native HANDLE acquisition as toy checkpoints.
+    # Windows os.open ignores O_NOFOLLOW, so path-only checks are insufficient.
+    fd = _open_checkpoint_readonly(path)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= maximum:
             raise ValueError("invalid_file_size_or_type")
+        if (info.st_dev, info.st_ino) != (observed.st_dev, observed.st_ino):
+            raise ValueError("file_changed_during_open")
         with os.fdopen(os.dup(fd), "rb") as stream:
             data = stream.read(maximum + 1)
-        if len(data) != info.st_size:
+        after = os.fstat(fd)
+        if (len(data) != info.st_size
+                or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                    != (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)):
             raise ValueError("file_changed_during_read")
         return data
     finally:
@@ -139,7 +147,7 @@ def _parse_challenges(raw: bytes) -> tuple[list[AtomicEvaluationCase], list[Prog
 def _source_manifest() -> dict[str, str]:
     folder = Path(__file__).resolve().parent
     names = ("minotaur_public_checkpoint.py", "minotaur_public_evidence.py",
-             "minotaur_algebraic_eval_v5.py")
+             "minotaur_algebraic_eval_v5.py", "toy_backend.py")
     return {name: hashlib.sha256(_read_regular(folder / name, 128_000)).hexdigest()
             for name in names}
 
@@ -195,9 +203,6 @@ def evaluate_checkpoint_public(
         return _refusal("invalid_artifact_or_challenge_input")
 
     try:
-        replay = reload_experiment(artifact_dir, torch)
-        if replay.get("matches_original") is not True:
-            return _refusal("checkpoint_replay_mismatch")
         report_bytes = _read_regular(artifact_dir / "report.json", 128_000)
         checksum = _read_regular(artifact_dir / "report.sha256", 100).decode("ascii").strip()
         if hashlib.sha256(report_bytes).hexdigest() != checksum:
@@ -222,6 +227,15 @@ def evaluate_checkpoint_public(
         checkpoint_bytes = _read_regular(artifact_dir / "candidate.safetensors", 100_000)
         if hashlib.sha256(checkpoint_bytes).hexdigest() != report.get("checkpoint_sha256"):
             return _refusal("checkpoint_changed_during_read")
+        replay = reload_experiment(artifact_dir, torch)
+        if replay.get("matches_original") is not True:
+            return _refusal("checkpoint_replay_mismatch")
+        # Re-open every externally mutable artifact after the independent
+        # replay. Never combine claims from two different on-disk generations.
+        if (_read_regular(artifact_dir / "report.json", 128_000) != report_bytes
+                or _read_regular(artifact_dir / "report.sha256", 100).decode("ascii").strip() != checksum
+                or _read_regular(artifact_dir / "candidate.safetensors", 100_000) != checkpoint_bytes):
+            return _refusal("artifact_changed_during_replay")
         state = load(checkpoint_bytes)
         if (set(state) != {"coefficients"} or state["coefficients"].shape != (3, 4)
                 or state["coefficients"].dtype != torch.float64
