@@ -118,6 +118,38 @@ class PublicCheckpointTests(unittest.TestCase):
             '"claimed_output":1}],"program_cases":[]}', encoding="utf8")
         self.assertEqual(self.evaluate()["reason"], "invalid_artifact_or_challenge_input")
 
+    def test_overflow_exponents_refuse_in_challenge_and_report(self):
+        from labyrinth.minotaur_public_checkpoint import _strict_json
+        for raw in (b'{"v":1e999}', b'{"v":-1e999}', b'{"v":[1e999]}'):
+            with self.subTest(raw=raw):
+                with self.assertRaisesRegex(ValueError, "nonfinite_json_number"):
+                    _strict_json(raw)
+
+        self.challenge.write_text(
+            '{"schema":"labyrinth.minotaur-public-challenge.v1",'
+            '"atomic_cases":[{"case_id":"bad","op":"ADD",'
+            '"x":1e999,"y":1,"claimed_output":1}],"program_cases":[]}',
+            encoding="utf8",
+        )
+        self.assertEqual(self.evaluate()["reason"], "invalid_artifact_or_challenge_input")
+        self.write_challenge()
+
+        copied = self.work / "overflow-report"
+        shutil.copytree(self.artifact, copied)
+        report_path = copied / "report.json"
+        original = report_path.read_text(encoding="utf8")
+        self.assertTrue(original.endswith("}\n"))
+        modified = original[:-2] + ',\n  "overflow_probe": 1e999\n}\n'
+        report_path.write_text(modified, encoding="utf8")
+        (copied / "report.sha256").write_text(
+            hashlib.sha256(modified.encode("utf8")).hexdigest() + "\n",
+            encoding="utf8",
+        )
+        result = self.evaluate(artifact=copied)
+        self.assertEqual(result["disposition"], "REFUSED")
+        self.assertEqual(result["reason"], "checkpoint_or_public_evaluation_failed")
+        self.assertEqual(result["qualification"], "NOT_ESTABLISHED")
+
     def test_tampered_report_and_checkpoint_refuse(self):
         copied = self.work / "copy"
         shutil.copytree(self.artifact, copied)
