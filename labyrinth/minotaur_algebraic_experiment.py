@@ -21,6 +21,7 @@ from .minotaur_algebraic_rules import (
 )
 from .minotaur_transition_v4 import (
     MAX_STEPS, TransitionConfig, TransitionFeatures, build_transition_model,
+    predict_transition_inference,
 )
 
 SCHEMA = "labyrinth.minotaur-algebraic-partial-study.v1"
@@ -105,8 +106,7 @@ def evaluate_programs(
     model=build_transition_model(config)
     model.algebraic_head.load_state_dict(head.state_dict(),strict=True)
     model.eval()
-    with torch.no_grad():
-        output=model(features)["predicted_states"]
+    output=predict_transition_inference(model,features)["predicted_states"]
     if tuple(output.shape) != (count,MAX_STEPS,2):
         raise ValueError("prediction length or tensor shape mismatched")
     predicted=output.tolist()

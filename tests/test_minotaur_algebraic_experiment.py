@@ -70,9 +70,16 @@ class AlgebraicExperimentTests(unittest.TestCase):
         from labyrinth.minotaur_algebraic_experiment import evaluate_programs
         from labyrinth.minotaur_algebraic_rules import build_algebraic_head
         class MalformedModel:
-            def __init__(self): self.algebraic_head=self
+            def __init__(self):
+                self.algebraic_head=self
+                self.training=True
             def load_state_dict(self, state, strict=True): pass
-            def eval(self): return self
+            def eval(self):
+                self.training=False
+                return self
+            def train(self, mode=True):
+                self.training=mode
+                return self
             def __call__(self, features):
                 return {"predicted_states":torch.empty((features.mask.shape[0],0,2),dtype=torch.long)}
         with patch("labyrinth.minotaur_algebraic_experiment.build_transition_model",

@@ -169,7 +169,10 @@ def build_transition_model(config: TransitionConfig = TransitionConfig()) -> Any
         import torch
     except ImportError as e:
         raise RuntimeError("Transition V4 neural model requires PyTorch") from e
-    torch.manual_seed(config.seed)
+    if config.architecture != "algebraic_rule":
+        # Historical MLP/table RNG behavior is retained; the algebraic head
+        # uses its own local Generator and must not alter global Torch RNG.
+        torch.manual_seed(config.seed)
     nn = torch.nn
     fourier_width = 9
     input_width = 3 * config.width + 2 * fourier_width + 2
@@ -262,3 +265,23 @@ def build_transition_model(config: TransitionConfig = TransitionConfig()) -> Any
                     "mask": features.mask}
 
     return TransitionNet()
+
+
+
+def predict_transition_inference(model: Any, features: TransitionFeatures) -> dict[str, Any]:
+    """Oracle-free, forced-evaluation entry point.
+
+    Accepts no teacher targets, temporarily switches to eval/no-grad and
+    restores the caller's training state even on a failed prediction.
+    """
+    try:
+        import torch
+    except ImportError as error:
+        raise RuntimeError("PyTorch is required for neural inference") from error
+    was_training=model.training
+    try:
+        model.eval()
+        with torch.no_grad():
+            return model(features)
+    finally:
+        model.train(was_training)
