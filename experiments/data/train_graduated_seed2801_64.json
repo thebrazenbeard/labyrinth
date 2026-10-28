@@ -1,0 +1,386 @@
+[
+  {
+    "answer": "80",
+    "case_id": "train-gv2-t1-0-fe25b10b3686319a",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=24, B=41\n1. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "34",
+    "case_id": "train-gv2-t1-1-b08d1e3953af595a",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=2, B=65\n1. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "53",
+    "case_id": "train-gv2-t1-2-1d2b09cba4ba33e2",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=30, B=23\n1. MUL A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "24",
+    "case_id": "train-gv2-t1-3-75fef8e6df0a291e",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=19, B=52\n1. ADD A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "25",
+    "case_id": "train-gv2-t1-4-df5a285a7ccf703d",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=87, B=62\n1. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "33",
+    "case_id": "train-gv2-t1-5-a6f00a22672835fb",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=87, B=54\n1. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "42",
+    "case_id": "train-gv2-t1-6-81929ba6616fcdbc",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=35, B=57\n1. ADD A 7\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "31",
+    "case_id": "train-gv2-t1-7-e279b4a93aa76714",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=29, B=45\n1. ADD A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "82",
+    "case_id": "train-gv2-t1-8-3e32b6b272db695f",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=81, B=31\n1. MUL A 7\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "77",
+    "case_id": "train-gv2-t1-9-cfa2d59a3c07ef2f",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=69, B=27\n1. ADD A 8\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "11",
+    "case_id": "train-gv2-t1-10-ff93b6f97599c2fd",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=7, B=54\n1. ADD A 4\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "42",
+    "case_id": "train-gv2-t1-11-5c933be8ed50f377",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=86, B=3\n1. MUL A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "40",
+    "case_id": "train-gv2-t1-12-f0e606d4dcf9977f",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=5, B=57\n1. MUL A 8\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "7",
+    "case_id": "train-gv2-t1-13-6d54a41221115ef3",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=5, B=88\n1. ADD A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "85",
+    "case_id": "train-gv2-t1-14-0ed51743b2a61ff2",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=81, B=93\n1. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "27",
+    "case_id": "train-gv2-t1-15-c6ea6325d53f98e4",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=18, B=60\n1. ADD A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "55",
+    "case_id": "train-gv2-t2-16-3bb55d49096eb05f",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=78, B=5\n1. ADD A 5\n2. MUL A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "24",
+    "case_id": "train-gv2-t2-17-13245a3cb2cd6925",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=63, B=68\n1. MUL B 2\n2. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "20",
+    "case_id": "train-gv2-t2-18-7ef17c23370ee190",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=73, B=86\n1. MUL B 4\n2. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "9",
+    "case_id": "train-gv2-t2-19-440f0db2bd8c1c66",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=91, B=53\n1. ADD A 9\n2. MUL A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "68",
+    "case_id": "train-gv2-t2-20-e42e296144735d01",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=91, B=77\n1. SUB B 3\n2. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "29",
+    "case_id": "train-gv2-t2-21-cc2a3cca927fa582",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=55, B=42\n1. ADD A 9\n2. MUL A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "52",
+    "case_id": "train-gv2-t2-22-0cfef9a4b80ff42f",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=26, B=33\n1. SUB B 7\n2. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "86",
+    "case_id": "train-gv2-t2-23-0a4fa36e648cd621",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=35, B=59\n1. SUB B 8\n2. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "72",
+    "case_id": "train-gv2-t2-24-37f4b702844af1d7",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=33, B=80\n1. ADD A 5\n2. MUL A 7\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "76",
+    "case_id": "train-gv2-t2-25-4ab103a5043a5c4a",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=5, B=55\n1. MUL B 4\n2. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "22",
+    "case_id": "train-gv2-t2-26-67783a480a36c9bc",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=67, B=12\n1. ADD A 5\n2. MUL A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "24",
+    "case_id": "train-gv2-t2-27-ceb11783416bfa02",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=6, B=56\n1. ADD A 6\n2. MUL A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "48",
+    "case_id": "train-gv2-t2-28-87f487694600c887",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=4, B=54\n1. ADD A 4\n2. MUL A 6\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "63",
+    "case_id": "train-gv2-t2-29-b3c8491711c4e308",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=15, B=95\n1. ADD A 6\n2. MUL A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "25",
+    "case_id": "train-gv2-t2-30-ce0af24dad073292",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=37, B=66\n1. MUL B 9\n2. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "23",
+    "case_id": "train-gv2-t2-31-aef543400c18bca4",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=17, B=13\n1. SUB B 7\n2. ADD A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "5",
+    "case_id": "train-gv2-t3-32-cc5a871328176244",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=68, B=12\n1. MUL A 3\n2. ADD B A\n3. SUB A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "48",
+    "case_id": "train-gv2-t3-33-382e1d8b71214297",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=89, B=69\n1. ADD A B\n2. MUL B 3\n3. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "91",
+    "case_id": "train-gv2-t3-34-d0b954fb491d0432",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=80, B=61\n1. ADD A B\n2. MUL B 4\n3. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "63",
+    "case_id": "train-gv2-t3-35-a38b74c890c1eaa0",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=72, B=19\n1. MUL A 9\n2. ADD B A\n3. SUB A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "37",
+    "case_id": "train-gv2-t3-36-d44e938d78951908",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=28, B=11\n1. ADD A B\n2. MUL B 9\n3. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "30",
+    "case_id": "train-gv2-t3-37-46286749cdf1775a",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=75, B=58\n1. ADD B 7\n2. SUB A B\n3. MUL A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "13",
+    "case_id": "train-gv2-t3-38-d0b47a5befb1d457",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=3, B=61\n1. MUL A 7\n2. ADD B A\n3. SUB A 8\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "61",
+    "case_id": "train-gv2-t3-39-23877aa06646926f",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=21, B=37\n1. MUL A 3\n2. ADD B A\n3. SUB A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "27",
+    "case_id": "train-gv2-t3-40-70f57e33ee61405d",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=13, B=90\n1. ADD A B\n2. MUL B 3\n3. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "74",
+    "case_id": "train-gv2-t3-41-cd803fe74112048a",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=91, B=44\n1. ADD A B\n2. MUL B 8\n3. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "96",
+    "case_id": "train-gv2-t3-42-1f4d36b1461ada84",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=96, B=0\n1. ADD A B\n2. MUL B 6\n3. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "40",
+    "case_id": "train-gv2-t3-43-06ec295efd2b6843",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=48, B=87\n1. MUL A 3\n2. ADD B A\n3. SUB A 7\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "1",
+    "case_id": "train-gv2-t3-44-1b441b1f7dd614aa",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=6, B=5\n1. ADD A B\n2. MUL B 2\n3. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "36",
+    "case_id": "train-gv2-t3-45-c22745f78d6bf2a9",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=15, B=54\n1. MUL A 3\n2. ADD B A\n3. SUB A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "48",
+    "case_id": "train-gv2-t3-46-4cdd3234a032d81c",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=37, B=58\n1. ADD B 6\n2. SUB A B\n3. MUL A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "24",
+    "case_id": "train-gv2-t3-47-187a9c147adb219b",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=32, B=57\n1. MUL A 4\n2. ADD B A\n3. SUB A 7\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "66",
+    "case_id": "train-gv2-t4-48-78617f5602e76938",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=68, B=15\n1. ADD A 7\n2. SUB B A\n3. MUL A B\n4. ADD A 7\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "15",
+    "case_id": "train-gv2-t4-49-b0df0342543b5c0f",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=43, B=44\n1. MUL B 2\n2. ADD A B\n3. SUB B 6\n4. MUL A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "63",
+    "case_id": "train-gv2-t4-50-f63084d7e3e1b092",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=49, B=83\n1. ADD A 3\n2. SUB B A\n3. MUL A B\n4. ADD A 3\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "83",
+    "case_id": "train-gv2-t4-51-2f2592cd0c716aec",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=70, B=45\n1. ADD A 5\n2. SUB B A\n3. MUL A B\n4. ADD A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "80",
+    "case_id": "train-gv2-t4-52-518b67d17d758608",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=68, B=17\n1. ADD A 2\n2. SUB B A\n3. MUL A B\n4. ADD A 7\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "55",
+    "case_id": "train-gv2-t4-53-b39f353b7702d9bb",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=27, B=76\n1. ADD A 5\n2. SUB B A\n3. MUL A B\n4. ADD A 5\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "86",
+    "case_id": "train-gv2-t4-54-b3121fc0633f1de5",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=3, B=38\n1. SUB A 8\n2. ADD B A\n3. MUL B 9\n4. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "1",
+    "case_id": "train-gv2-t4-55-3f41f93c503c4b01",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=37, B=88\n1. ADD A 5\n2. SUB B A\n3. MUL A B\n4. ADD A 9\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "8",
+    "case_id": "train-gv2-t4-56-1a8b358b95ee8ded",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=73, B=9\n1. ADD A 4\n2. SUB B A\n3. MUL A B\n4. ADD A 6\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "16",
+    "case_id": "train-gv2-t4-57-7e3d0d07ae3bed2c",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=44, B=22\n1. SUB A 7\n2. ADD B A\n3. MUL B 2\n4. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "73",
+    "case_id": "train-gv2-t4-58-482abcd0db3d0f02",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=62, B=25\n1. MUL B 9\n2. ADD A B\n3. SUB B 4\n4. MUL A 6\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "63",
+    "case_id": "train-gv2-t4-59-f2816028e300875a",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=41, B=76\n1. ADD A 2\n2. SUB B A\n3. MUL A B\n4. ADD A 2\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "83",
+    "case_id": "train-gv2-t4-60-1569663ff56d32c1",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=23, B=96\n1. SUB A 7\n2. ADD B A\n3. MUL B 2\n4. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "38",
+    "case_id": "train-gv2-t4-61-adb85535567ee49c",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=15, B=5\n1. SUB A 2\n2. ADD B A\n3. MUL B 4\n4. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "37",
+    "case_id": "train-gv2-t4-62-2537a5baa62db0cb",
+    "prompt": "Execute each register instruction in order. ADD adds, SUB subtracts, and MUL multiplies the target by the stated literal or current source register. After each instruction, reduce the changed register modulo 97; leave the other unchanged.\nInitial registers: A=57, B=83\n1. SUB A 6\n2. ADD B A\n3. MUL B 3\n4. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  },
+  {
+    "answer": "28",
+    "case_id": "train-gv2-t4-63-654fbfdb37a89549",
+    "prompt": "Two-register machine over nonnegative remainders modulo 97. Read each line as OP TARGET OPERAND, evaluating the operand before changing TARGET. ADD means plus, SUB minus, MUL times.\nInitial registers: A=93, B=38\n1. SUB A 3\n2. ADD B A\n3. MUL B 2\n4. SUB A B\nWhat is the final value of A? Respond with exactly one line: ANSWER: <integer>.",
+    "split": "train"
+  }
+]
