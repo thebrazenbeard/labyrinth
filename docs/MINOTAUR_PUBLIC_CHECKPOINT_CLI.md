@@ -70,3 +70,24 @@ and refusal retain `qualification=NOT_ESTABLISHED`,
 The numeric training/reload PID comparison is reported only as a diagnostic;
 PID reuse across process namespaces is possible, and this command does not
 claim independently trusted process or private-evaluator attestation.
+
+## Windows file-read and main CI qualification boundary (2026-10-28)
+
+The bounded report, checkpoint, challenge, and source reads now use a
+native non-following file handle on Windows, refuse directory junctions
+and final symlinks, and compare the opened object's identity with its
+pre-open metadata. The evaluator checks the report training-sample digest
+before spending resources on model replay and rereads report, checksum and
+checkpoint bytes after replay to reject observed generation changes.
+A transient adversarial replacement of an ancestor directory can still
+escape pathname checks, and a hostile actor able to swap files away and
+back between checks is outside this local custody model. Neither control
+is a cryptographic attestation or an independent private examiner.
+
+The pinned Minotaur neural CPU workflow runs on relevant pull requests
+**and pushes to main**, separately from the general Python workflow.
+On Windows the exact POSIX FIFO security test cannot execute; its one
+known platform-specific skip is recorded explicitly, while all other
+required-test omissions and skips fail qualification. Linux must run
+the FIFO test. The neural workflow is the definitive CPU-dependency
+qualification: a green general CI job without PyTorch is not equivalent.

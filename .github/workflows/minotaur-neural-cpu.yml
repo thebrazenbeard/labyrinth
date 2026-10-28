@@ -4,6 +4,18 @@ on:
   pull_request:
     paths:
       - "labyrinth/minotaur_*.py"
+      - "labyrinth/toy_backend.py"
+      - "tests/test_minotaur_*.py"
+      - "tests/minotaur_required_tests.txt"
+      - "tests/test_ci_membership.py"
+      - "scripts/minotaur_ci.py"
+      - "pyproject.toml"
+      - ".github/workflows/minotaur-neural-cpu.yml"
+  push:
+    branches: [main]
+    paths:
+      - "labyrinth/minotaur_*.py"
+      - "labyrinth/toy_backend.py"
       - "tests/test_minotaur_*.py"
       - "tests/minotaur_required_tests.txt"
       - "tests/test_ci_membership.py"

@@ -5,6 +5,7 @@ explicit, reviewable update to tests/minotaur_required_tests.txt.
 """
 
 from pathlib import Path
+import os
 import sys
 import unittest
 
@@ -23,6 +24,21 @@ def missing_required(required, discovered):
     return sorted(set(required) - set(discovered))
 
 
+def unexpected_skips(skipped, *, platform: str):
+    """Refuse every skipped neural case except an exact unsupported-OS probe.
+
+    Windows has no POSIX named FIFO to construct; all other skips still
+    invalidate qualification. This never exempts the same case on Linux.
+    """
+    allowed = {
+        ("test_minotaur_public_checkpoint.PublicCheckpointTests."
+         "test_fifo_challenge_refuses_without_blocking_open",
+         "named pipes unsupported")
+    } if platform == "nt" else set()
+    return [(test, why) for test, why in skipped
+            if (test.id(), why) not in allowed]
+
+
 def main():
     inventory = Path("tests/minotaur_required_tests.txt")
     required = [line.strip() for line in inventory.read_text().splitlines() if line.strip()]
@@ -32,8 +48,12 @@ def main():
     if missing:
         sys.exit("Required Minotaur tests missing:\n" + "\n".join(missing))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
+    unexpected = unexpected_skips(result.skipped, platform=os.name)
+    if unexpected:
+        sys.exit(f"Unexpected skipped Minotaur tests: {unexpected!r}")
     if result.skipped:
-        sys.exit(f"Skipped Minotaur tests are not allowed: {result.skipped!r}")
+        print("Minotaur: POSIX FIFO probe unavailable on Windows; qualified "
+              "platform-specific skip was recorded.", file=sys.stderr)
     if not result.wasSuccessful():
         sys.exit(1)
 

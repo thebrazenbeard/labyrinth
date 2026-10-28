@@ -160,7 +160,7 @@ class PublicCheckpointTests(unittest.TestCase):
         modified = original[:-2] + ',\n  "overflow_probe": 1e999\n}\n'
         report_path.write_text(modified, encoding="utf8")
         (copied / "report.sha256").write_text(
-            hashlib.sha256(modified.encode("utf8")).hexdigest() + "\n",
+            hashlib.sha256(report_path.read_bytes()).hexdigest() + "\n",
             encoding="utf8",
         )
         result = self.evaluate(artifact=copied)
@@ -176,14 +176,36 @@ class PublicCheckpointTests(unittest.TestCase):
         report["training_atoms_sha256"] = "0" * 64
         encoded = json.dumps(report, sort_keys=True, indent=2) + "\n"
         report_path.write_text(encoded)
-        (copied / "report.sha256").write_text(hashlib.sha256(encoded.encode()).hexdigest() + "\n")
+        (copied / "report.sha256").write_text(hashlib.sha256(report_path.read_bytes()).hexdigest() + "\n")
         self.assertEqual(self.evaluate(artifact=copied)["reason"], "training_identity_digest_mismatch")
         shutil.rmtree(copied)
         shutil.copytree(self.artifact, copied)
         with (copied / "candidate.safetensors").open("ab") as stream:
             stream.write(b"tamper")
         self.assertEqual(self.evaluate(artifact=copied)["reason"],
-                         "checkpoint_or_public_evaluation_failed")
+                         "checkpoint_changed_during_read")
+
+    def test_artifact_swap_between_preflight_and_replay_refuses(self):
+        from labyrinth import minotaur_algebraic_experiment as algebraic
+        copied = self.work / "swapped-during-replay"
+        shutil.copytree(self.artifact, copied)
+        report_path = copied / "report.json"
+
+        def change_evidence_while_replay_runs(_folder, _torch):
+            previous = json.loads(report_path.read_text(encoding="utf8"))
+            previous["seed"] = 987654321
+            report_path.write_text(json.dumps(previous, sort_keys=True) + "\\n",
+                                   encoding="utf8")
+            (copied / "report.sha256").write_text(
+                hashlib.sha256(report_path.read_bytes()).hexdigest() + "\\n",
+                encoding="utf8")
+            return {"matches_original": True, "process_id_differs": True}
+
+        with patch.object(algebraic, "reload_experiment",
+                          side_effect=change_evidence_while_replay_runs):
+            result = self.evaluate(artifact=copied)
+        self.assertEqual(result["disposition"], "REFUSED")
+        self.assertEqual(result["reason"], "artifact_changed_during_replay")
 
     def test_source_drift_expectations_and_symlink_refuse(self):
         result = self.evaluate(expected_source_commit="0" * 40)
