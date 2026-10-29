@@ -4,6 +4,7 @@ This development audit opens train and eval metadata, so it MUST NOT be used
 inside a model-training process. It returns aggregates, not example plaintext.
 """
 import collections
+from contextlib import closing
 import hashlib
 import json
 import operator
@@ -87,7 +88,7 @@ def audit_corpus(corpus_root):
     train_signatures = set()
     eval_signatures = collections.Counter()
     with tempfile.TemporaryDirectory(prefix="vera-trainingday-audit-") as tmp:
-        with sqlite3.connect(Path(tmp) / "ids.sqlite3") as db:
+        with closing(sqlite3.connect(Path(tmp) / "ids.sqlite3")) as db:
             db.execute("CREATE TABLE seen_ids (id TEXT PRIMARY KEY)")
             db.execute("CREATE TABLE seen_digest (digest TEXT PRIMARY KEY)")
             for shard in sorted(shards, key=lambda r: (r["split"], r["path"])):
