@@ -5,7 +5,7 @@ import hashlib
 
 from labyrinth.hf_pilot import (
     PilotConfig, SCHEMA, _prompt_commitment, _training_visit_indices,
-    derange_answers, training_cases,
+    _summarize_trials, derange_answers, training_cases,
 )
 from labyrinth.evaluation import score_response
 from labyrinth.hf_report_audit import audit_hf_report
@@ -35,6 +35,16 @@ class PairedMixedCurriculumTests(unittest.TestCase):
         self.assertTrue(train_structures)
         self.assertTrue(heldout_structures)
         self.assertFalse(train_structures & heldout_structures)
+        for cases in (train, evaluation):
+            sources = [case for case in cases if case.tier == 3]
+            self.assertEqual(8, len(sources))
+            for original, swapped in zip(sources[::2], sources[1::2]):
+                self.assertEqual(original.id + "-swap", swapped.id)
+                self.assertNotEqual(original.answer, swapped.answer)
+                self.assertEqual(
+                    [row for row in original.prompt.splitlines() if row.startswith("- source=")],
+                    [row for row in swapped.prompt.splitlines() if row.startswith("- source=")],
+                )
 
         visits = _training_visit_indices(train, seed=config.seed, steps=config.steps)
         self.assertEqual([8] * 4, [sum(train[i].tier == tier for i in visits) for tier in range(1, 5)])
@@ -61,6 +71,27 @@ class PairedMixedCurriculumTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tier 3"):
             from labyrinth.hf_pilot import validate_config
             validate_config(self._config(tiers=(1, 2, 4)))
+        with self.assertRaisesRegex(ValueError, "even eval_count"):
+            from labyrinth.hf_pilot import validate_config
+            validate_config(self._config(eval_count=7))
+
+    def test_paired_metric_requires_both_counterfactual_answers(self):
+        train, evaluation = training_cases(self._config(train_count=2, eval_count=2))
+        source_cases = [case for case in evaluation if case.tier == 3]
+        original, swapped = source_cases
+        self.assertNotEqual(original.answer, swapped.answer)
+        trials = [
+            {"id": case.id, "correct": case.id == original.id,
+             "score_reason": "correct" if case.id == original.id else "incorrect"}
+            for case in source_cases
+        ]
+        metric = _summarize_trials(trials)["source_priority_pair_consistency"]
+        self.assertEqual(metric, {
+            "both_correct": 0, "pairs_total": 1, "both_correct_rate": 0.0,
+        })
+        trials[1]["correct"] = True
+        trials[1]["score_reason"] = "correct"
+        self.assertEqual(_summarize_trials(trials)["source_priority_pair_consistency"]["both_correct"], 1)
 
     def test_report_auditor_reconstructs_paired_training_ids(self):
         config = self._config(train_count=2, eval_count=2, steps=8)
@@ -99,12 +130,12 @@ class PairedMixedCurriculumTests(unittest.TestCase):
                            "response_sha256": hashlib.sha256(response.encode()).hexdigest(),
                            "response_preview": response, "score_reason": score.reason})
         correct = sum(t["correct"] for t in trials)
-        summary = {"correct": correct, "total": len(trials),
-                   "accuracy": correct / len(trials), "format_valid": len(trials),
-                   "format_rate": 1.0, "trials": trials}
+        summary = _summarize_trials(trials)
         report["evaluations"] = {name: dict(summary) for name in
                                   ("baseline", "sham", "candidate", "corrupted")}
         self.assertEqual("PASS", audit_hf_report(report)["status"])
+        report["evaluations"]["candidate"]["source_priority_pair_consistency"]["both_correct"] = 99
+        self.assertEqual("FAIL", audit_hf_report(report)["status"])
 
 
 if __name__ == "__main__":

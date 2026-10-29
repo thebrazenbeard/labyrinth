@@ -137,6 +137,8 @@ def validate_config(config: PilotConfig, *, output_must_be_new: bool = True) -> 
         raise ValueError("source_counterfactual_pairs must be a boolean")
     if config.source_counterfactual_pairs and (3 not in config.tiers or config.train_count % 2):
         raise ValueError("paired source training requires tier 3 and even train_count")
+    if config.source_counterfactual_pairs and config.eval_count % 2:
+        raise ValueError("paired source evaluation requires even eval_count")
     resolved = _paths(config, output_must_be_new=output_must_be_new)
     _metadata_digest(resolved[0])
     return resolved
@@ -145,24 +147,28 @@ def validate_config(config: PilotConfig, *, output_must_be_new: bool = True) -> 
 def training_cases(config: PilotConfig) -> tuple[list[Challenge], list[Challenge]]:
     """Keep supervision entirely on the TRAIN split; eval gold never enters SGD."""
     train = generate_maze(seed=config.seed, count=config.train_count, tiers=config.tiers, split="train")
-    if config.source_counterfactual_pairs:
-        # Pair the *same* reports with different authoritative priorities.
-        # Replace, don't append: each requested tier retains train_count
-        # cases and existing balanced tier visitation remains meaningful.
-        from .source_priority_pairs import generate_priority_triplets
-
-        triplets = generate_priority_triplets(
-            seed=config.seed, count=config.train_count // 2, split="train",
-        )
-        replacements = [case for original, swapped, _ in triplets
-                        for case in (original, swapped)]
-        positions = [i for i, case in enumerate(train) if case.tier == 3]
-        if len(positions) != len(replacements):
-            raise ValueError("source-priority curriculum size mismatch")
-        for position, case in zip(positions, replacements):
-            train[position] = case
     heldout = generate_maze(seed=config.seed ^ EVAL_SEED_XOR, count=config.eval_count,
                             tiers=config.tiers, split="eval")
+    if config.source_counterfactual_pairs:
+        if config.train_count % 2 or config.eval_count % 2:
+            raise ValueError("paired source train/eval counts must be even")
+        # Pair the *same* reports with different authoritative priorities.
+        # Replace, don't append: each tier retains its declared case count.
+        # Heldout is evaluated separately; its gold never enters training.
+        from .source_priority_pairs import generate_priority_triplets
+
+        for cases, seed, count, split in (
+            (train, config.seed, config.train_count, "train"),
+            (heldout, config.seed ^ EVAL_SEED_XOR, config.eval_count, "eval"),
+        ):
+            triplets = generate_priority_triplets(seed=seed, count=count // 2, split=split)
+            replacements = [case for original, swapped, _ in triplets
+                            for case in (original, swapped)]
+            positions = [i for i, case in enumerate(cases) if case.tier == 3]
+            if len(positions) != len(replacements):
+                raise ValueError("source-priority curriculum size mismatch")
+            for position, case in zip(positions, replacements):
+                cases[position] = case
     if {c.id for c in train} & {c.id for c in heldout}:
         raise ValueError("training/held-out challenge IDs overlap")
     if {c.prompt for c in train} & {c.prompt for c in heldout}:
@@ -382,9 +388,24 @@ def _summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
         raise ValueError("cannot summarize an empty evaluation")
     correct = sum(bool(t["correct"]) for t in trials)
     format_valid = sum(t["score_reason"] in ("correct", "incorrect") for t in trials)
-    return {"correct": correct, "total": len(trials), "accuracy": correct / len(trials),
-            "format_valid": format_valid, "format_rate": format_valid / len(trials),
-            "trials": trials}
+    summary = {"correct": correct, "total": len(trials), "accuracy": correct / len(trials),
+               "format_valid": format_valid, "format_rate": format_valid / len(trials),
+               "trials": trials}
+    # Unit-level summaries can be built without challenge identities; only
+    # actual paired heldout evaluations carry IDs needed for this diagnostic.
+    by_id = {trial["id"]: trial for trial in trials if isinstance(trial.get("id"), str)}
+    swapped_ids = [challenge_id for challenge_id in by_id if challenge_id.endswith("-swap")]
+    if swapped_ids:
+        if any(challenge_id[:-5] not in by_id for challenge_id in swapped_ids):
+            raise ValueError("source-priority evaluation contains an orphaned swap")
+        both_correct = sum(bool(by_id[challenge_id]["correct"])
+                           and bool(by_id[challenge_id[:-5]]["correct"])
+                           for challenge_id in swapped_ids)
+        summary["source_priority_pair_consistency"] = {
+            "both_correct": both_correct, "pairs_total": len(swapped_ids),
+            "both_correct_rate": both_correct / len(swapped_ids),
+        }
+    return summary
 
 
 def _training_visit_indices(train: list[Challenge], *, seed: int, steps: int) -> list[int]:
