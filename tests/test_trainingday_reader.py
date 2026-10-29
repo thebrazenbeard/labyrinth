@@ -41,6 +41,16 @@ class TrainReaderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "checksum"):
             list(iter_training_rows(self.output))
 
+    def test_later_shard_tamper_is_rejected_before_first_training_row(self):
+        shards = sorted((self.output / "train").glob("*.jsonl"))
+        self.assertGreater(len(shards), 1)
+        last = shards[-1]
+        last.write_bytes(last.read_bytes() + b"\\n")
+        # Consumer may take only the first K rows. It must not receive any
+        # records from an unqualified corpus with a corrupt later shard.
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            next(iter_training_rows(self.output))
+
     def test_missing_shard_refused(self):
         target = sorted((self.output / "train").glob("*.jsonl"))[0]
         target.unlink()
