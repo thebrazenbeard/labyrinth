@@ -1,8 +1,12 @@
-# Vera local GPT-OSS 4.2B candidate — 2026-10-29
+# VERA-GPT-OSS4B Q4_K_M — 2026-10-29
 
 **State: prepared, not downloaded, not evaluated, not trained, not qualified.**
 
 This is an isolated candidate for Patrick's 32 GiB RAM / 4 GiB VRAM Lappy.
+**Canonical display name: `VERA-GPT-OSS4B Q4_K_M`.** The Hugging Face
+repository and GGUF filename below remain unchanged for provenance. A local
+runtime may require a lowercase, space-free alias; that alias is not a rename
+of the canonical display identity.
 It does **not** replace `vera-local:latest`, the Vera identity, or any service.
 The authoritative installation root is `D:\VERA`, not `C:\VERA`.
 
