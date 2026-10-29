@@ -13,8 +13,8 @@ from typing import Any
 
 from .evaluation import score_response
 from .hf_pilot import (
-    EVAL_SEED_XOR, LEGACY_SCHEMA, SCHEMA, _prompt_commitment,
-    _training_visit_indices, derange_answers,
+    EVAL_SEED_XOR, LEGACY_SCHEMA, SCHEMA, PilotConfig, _prompt_commitment,
+    _training_visit_indices, derange_answers, training_cases,
 )
 from .maze import generate_maze
 from .runner import _source_state
@@ -26,6 +26,7 @@ CONFIG_FIELDS = frozenset({
     "max_tokens", "max_new_tokens", "learning_rate", "lora_rank", "lora_alpha", "device",
 })
 MATCHED_CONFIG_FIELDS = CONFIG_FIELDS | {"answer_only"}
+PAIRED_CONFIG_FIELDS = MATCHED_CONFIG_FIELDS | {"source_counterfactual_pairs"}
 PILOT_KIND = "local HF causal-LM PEFT LoRA supervised parameter update"
 RELOAD_NOTE = "NOT RUN: execute `python -m labyrinth.hf_pilot eval` separately"
 
@@ -116,8 +117,12 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
     if not isinstance(config, dict):
         fail("invalid pilot config")
         return result()
-    if (set(config) != (MATCHED_CONFIG_FIELDS if matched else CONFIG_FIELDS)
+    config_fields_valid = (set(config) in (MATCHED_CONFIG_FIELDS, PAIRED_CONFIG_FIELDS)
+                           if matched else set(config) == CONFIG_FIELDS)
+    if (not config_fields_valid
             or (matched and type(config.get("answer_only")) is not bool)
+            or ("source_counterfactual_pairs" in config
+                and type(config["source_counterfactual_pairs"]) is not bool)
             or type(config.get("model_path")) is not str or not config["model_path"]
             or type(config.get("output_dir")) is not str or not config["output_dir"]
             or config.get("device") not in ("cpu", "cuda")
@@ -150,8 +155,13 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
         fail("invalid seed/count/steps/tiers in pilot config")
         return result()
     try:
-        train = generate_maze(seed=seed, count=ntrain, tiers=tuple(tiers), split="train")
-        heldout = generate_maze(seed=seed ^ EVAL_SEED_XOR, count=neval, tiers=tuple(tiers), split="eval")
+        if matched and "source_counterfactual_pairs" in config:
+            train, heldout = training_cases(PilotConfig(
+                **{**config, "tiers": tuple(tiers)},
+            ))
+        else:
+            train = generate_maze(seed=seed, count=ntrain, tiers=tuple(tiers), split="train")
+            heldout = generate_maze(seed=seed ^ EVAL_SEED_XOR, count=neval, tiers=tuple(tiers), split="eval")
         corrupted_labels = derange_answers(train)
     except (ValueError, TypeError) as exc:
         fail(f"cannot reproduce training/evaluation controls: {exc}")
