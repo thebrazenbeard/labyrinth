@@ -19,6 +19,7 @@ class Response(io.BytesIO):
 
 class AcquisitionTests(unittest.TestCase):
     def test_candidate_is_pinned_under_four_gb(self):
+        self.assertEqual(candidate.DISPLAY_NAME, "VERA-GPT-OSS4B Q4_K_M")
         self.assertEqual(len(candidate.REVISION), 40)
         self.assertEqual(candidate.EXPECTED_BYTES, 3_233_019_552)
         self.assertLess(candidate.EXPECTED_BYTES, candidate.MAX_BYTES)
@@ -35,6 +36,7 @@ class AcquisitionTests(unittest.TestCase):
                 max_bytes=100,
             )
             self.assertEqual(out["sha256_verified"], hashlib.sha256(body).hexdigest())
+            self.assertEqual(out["candidate"], "VERA-GPT-OSS4B Q4_K_M")
             self.assertEqual((root / candidate.FILENAME).read_bytes(), body)
             self.assertTrue((root / (candidate.FILENAME + ".receipt.json")).is_file())
             self.assertFalse((root / (candidate.FILENAME + ".part")).exists())
