@@ -77,6 +77,11 @@ python -m labyrinth train-hf --model-path LOCAL_HF_MODEL_DIR --output-dir NEW_EM
 python -m labyrinth eval-hf --run-dir NEW_EMPTY_PARENT/RUN_001 --report NEW_EMPTY_PARENT/reload.json
 # Offline check of a saved HF pilot report's internally reproducible fields:
 python -m labyrinth audit-hf-report --input NEW_EMPTY_PARENT/RUN_001/pilot_report.json
+# Opt-in mixed-task pilot: arithmetic, operation chains, counterfactual source
+# priority, and register programs (the latter have unseen eval structures).
+python -m labyrinth train-hf --model-path LOCAL_HF_MODEL_DIR --output-dir NEW_EMPTY_PARENT/MIXED_001 \
+  --device cpu --tiers 1,2,3,4 --train-count 8 --eval-count 8 --steps 32 \
+  --source-counterfactual-pairs --answer-only
 ```
 
 This path never downloads weights, installs packages, runs arbitrary model text, or replaces the base checkpoint. It rejects existing output directories and checkpoints exceeding its strict 1 GiB no-quantization limit; therefore the existing ~6.15 GB 3B-class local checkpoint on Lappy is **not eligible** for this initial pilot. Its default two steps consume only two of eight default generated training examples. The public finite mazes are a mechanism smoke test, **not** a qualified learning effect. New runs from the v3 pilot use a **zero-learning-rate, same-exposure placebo**
@@ -94,6 +99,13 @@ means the model emitted a parseable numeric suffix after an operator-provided
 scaffold, not that the model independently learned output formatting. This
 separates numeric correctness from the trivial constant format token but does
 not make public finite arithmetic templates an independent reasoning exam.
+The optional `--source-counterfactual-pairs` flag requires source-priority tier
+3 and an even per-tier training count; it substitutes original/priority-swapped
+prompt pairs while retaining equal case counts per tier. The mixed example
+above therefore visits eight examples from each of four categories over 32
+steps. The program tier uses disjoint train/evaluation instruction structures;
+this is still a public, small-task development experiment, **not** a sealed
+generalization benchmark or evidence of improved reasoning.
 
 `audit-hf-report` is dependency-free and re-generates the declared train/eval case IDs, held-out prompt commitment, control metadata, training visit order, and reported evaluation metrics. It verifies file/tensor **digest receipt syntax**, but does not open or authenticate the checkpoint files. For responses whose entire text is recoverable from the stored 128-character preview, it independently rechecks the response digest and answer score. Longer responses whose hashes differ from their preview yield `INCOMPLETE`, never an unqualified `PASS`. Inconsistent records yield `FAIL`; the command exits nonzero for both. Source fingerprints must match the auditor checkout, so older reports should be audited at their source revision. All receipts and model-origin claims are self-reported: even `PASS` is **not proof** that training actually occurred or improved reasoning. The original run's full generated text was not always retained; future run schemas should save auditable full text in a separately controlled evidence artifact.
 

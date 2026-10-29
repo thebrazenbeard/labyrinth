@@ -53,6 +53,7 @@ class PilotConfig:
     lora_alpha: int = 8
     device: str = "cpu"
     answer_only: bool = False
+    source_counterfactual_pairs: bool = False
 
 
 def _check_int(value: object, label: str, lower: int, upper: int) -> None:
@@ -132,6 +133,10 @@ def validate_config(config: PilotConfig, *, output_must_be_new: bool = True) -> 
         raise ValueError("device must be cpu or cuda")
     if type(config.answer_only) is not bool:
         raise ValueError("answer_only must be a boolean")
+    if type(config.source_counterfactual_pairs) is not bool:
+        raise ValueError("source_counterfactual_pairs must be a boolean")
+    if config.source_counterfactual_pairs and (3 not in config.tiers or config.train_count % 2):
+        raise ValueError("paired source training requires tier 3 and even train_count")
     resolved = _paths(config, output_must_be_new=output_must_be_new)
     _metadata_digest(resolved[0])
     return resolved
@@ -140,12 +145,38 @@ def validate_config(config: PilotConfig, *, output_must_be_new: bool = True) -> 
 def training_cases(config: PilotConfig) -> tuple[list[Challenge], list[Challenge]]:
     """Keep supervision entirely on the TRAIN split; eval gold never enters SGD."""
     train = generate_maze(seed=config.seed, count=config.train_count, tiers=config.tiers, split="train")
+    if config.source_counterfactual_pairs:
+        # Pair the *same* reports with different authoritative priorities.
+        # Replace, don't append: each requested tier retains train_count
+        # cases and existing balanced tier visitation remains meaningful.
+        from .source_priority_pairs import generate_priority_triplets
+
+        triplets = generate_priority_triplets(
+            seed=config.seed, count=config.train_count // 2, split="train",
+        )
+        replacements = [case for original, swapped, _ in triplets
+                        for case in (original, swapped)]
+        positions = [i for i, case in enumerate(train) if case.tier == 3]
+        if len(positions) != len(replacements):
+            raise ValueError("source-priority curriculum size mismatch")
+        for position, case in zip(positions, replacements):
+            train[position] = case
     heldout = generate_maze(seed=config.seed ^ EVAL_SEED_XOR, count=config.eval_count,
                             tiers=config.tiers, split="eval")
     if {c.id for c in train} & {c.id for c in heldout}:
         raise ValueError("training/held-out challenge IDs overlap")
     if {c.prompt for c in train} & {c.prompt for c in heldout}:
         raise ValueError("training/held-out prompt text overlaps")
+    train_program_structures = {
+        dict(c.metadata)["structure_fingerprint"]
+        for c in train if c.kind == "register_program"
+    }
+    eval_program_structures = {
+        dict(c.metadata)["structure_fingerprint"]
+        for c in heldout if c.kind == "register_program"
+    }
+    if train_program_structures & eval_program_structures:
+        raise ValueError("training/held-out program structures overlap")
     return train, heldout
 
 
@@ -724,6 +755,8 @@ def main(argv: list[str] | None = None) -> int:
     train.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     train.add_argument("--answer-only", action="store_true",
                        help="Pre-fill ANSWER: and supervise only numerical completion + EOS")
+    train.add_argument("--source-counterfactual-pairs", action="store_true",
+                       help="Replace half of tier 3 examples with priority-swapped pairs")
     evaluate = commands.add_parser("eval", help="Reload saved adapter in a new Python process")
     evaluate.add_argument("--run-dir", required=True)
     evaluate.add_argument("--report", required=True)
