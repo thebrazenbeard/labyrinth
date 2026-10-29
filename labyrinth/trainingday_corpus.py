@@ -204,6 +204,17 @@ def build_corpus(sources, output_dir, *, heldout_repo, reasoning_count=1000, see
     if stage.exists() or stage.is_symlink():
         raise FileExistsError("unfinished staging area exists; inspect instead of overwrite")
     stage.mkdir()
+    # Keep every required original notice with the corpus itself, not merely a
+    # reference to a source repository that might later disappear.
+    license_dir = stage / "licenses"
+    license_dir.mkdir()
+    licenses = []
+    for source in validated:
+        notice = (source["path"] / source["license_file"]).read_bytes()
+        relative = "licenses/" + source["repo"].replace("/", "__") + ".txt"
+        (stage / relative).write_bytes(notice)
+        licenses.append({"repo": source["repo"], "path": relative,
+                         "sha256": sha256(notice), "license": "MIT"})
     database = sqlite3.connect(stage / "dedup.sqlite3")
     try:
         database.execute("CREATE TABLE seen (digest TEXT PRIMARY KEY, split TEXT NOT NULL)")
@@ -231,6 +242,7 @@ def build_corpus(sources, output_dir, *, heldout_repo, reasoning_count=1000, see
                   "seed": seed, "requested_reasoning_cases": reasoning_count, "heldout_repo": heldout_repo,
                   "counts": writer.counts, "dropped": dropped,
                   "sources": [{k: v for k, v in s.items() if k != "path"} for s in validated],
+                  "licenses": licenses,
                   "shards": writer.shards,
                   "qualification": "LICENSING_AND_EXACT_ANSWER_REPLAY_ONLY_NOT_REASONING_GENERALIZATION"}
         (stage / "manifest.json").write_text(json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8")
