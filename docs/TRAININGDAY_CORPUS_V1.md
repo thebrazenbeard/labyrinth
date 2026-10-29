@@ -39,3 +39,21 @@ The first data-quality profile indicates the 3,023 train code files have median 
 Bus #404 records the second chat's separate `thebrazenbeard/model-training` training branch. It proposed `VERA_TRAININGDAY_ADMITTED_SHARDS_V1`, which is **not byte-compatible** with the actual `vera.trainingday.corpus.v1` manifest. The producer's rows retain provenance and `SOURCE_ONLY_NOT_FUNCTIONALLY_TESTED` vs `TWO_INTEGER_INTERPRETERS_MATCH` labels. The neural runner must adapt explicitly from the producer's verified schema, or create an auditable derived manifest outside the corpus-owner directory. Do not automatically claim a GitHub code file is `HUMAN_CROWDSOURCED`, `privacy_review=PASS`, or `rights_review=PASS` solely because a repository-level MIT license was observed.
 
 No GPT-OSS4B optimizer update, Vera 4B LoRA update, merge, model deployment, or measured reasoning gain was produced by this corpus work.
+
+## Optional structure-disjoint development corpus (2026-10-29)
+
+The v1 corpus exposed a major evaluation-ceiling limitation: all 19,995 v1 development arithmetic rows shared their exact operator-sequence structure with training. The read-only `labyrinth.trainingday_audit.audit_corpus` now independently checks the arithmetic oracle, original MIT notices, every train/eval shard byte digest and row count, cross-split exact-content identity, and counts operator-pattern overlap. It uses a disk-backed SQLite ID/digest index and returns aggregate measurements only, not examples. Rehashed wrong arithmetic answers, missing eval shards, later-shard tampering, and Windows SQLite cleanup all have executable regression coverage.
+
+**New v2 generation is opt-in**: `--reasoning-split-policy signature` uses SHA-256 of the seed and complete operator-name sequence to reserve whole arithmetic structures. The default index split and its published v1 output are unchanged. Use a different output path and seed; do not overwrite or retroactively relabel the v1 corpus.
+
+Verified local output: `D:\VERA\scratch\trainingday-corpus-20261029\corpus-v2-structural-100k`, generated at Labyrinth commit `d0f2d63863873cf60747383740cc87d8f4e075a4` with seed 29034, requested 100,000 independent generated arithmetic cases, Python/Java train code, Go held-out code. Output manifest SHA-256 `90b55cf8742f9222c91f88e5727dcd0113322e4721e4fd3d1bdcdf65f40d0836`. Audit receipt `D:\VERA\scratch\trainingday-corpus-20261029\quality-audit-v2-structural.json` SHA-256 `1b3a6e6770728f40a172aa2600f6c4f55a5b0e46232712fffc549d983b257149`. 22 JSONL shards and 103,496 admitted records: 78,346 train, 25,150 dev-eval. Of those, source-only code is 3,023 train/494 eval, and generated arithmetic 75,323 train/24,656 dev-eval. Audit replays all 99,979 admitted procedural answers. Distinct operator-sequence signatures: 283 train vs 77 dev-eval, **0 shared patterns and 0 dev examples using a training pattern**.
+
+This v2 check assesses transfer to held-out combinations of the *same three primitive operations and same general prompt template*. It remains `DEVELOPMENT_STRUCTURAL_HOLDOUT_NOT_BLIND`, not sealed custody or genuinely independent new tasks. Any tuning against its evaluation score invalidates its usefulness as a fresh transfer check. The actual neural-training owner should choose whether to freeze v2 as a separate development qualification lane, record the selection in Bus #404, and keep V10 independent final-bank controls separate. A result on v1 or v2 is not proof of real-world coding quality, general reasoning, or a GPT-6-equivalent model.
+
+Run v2 (with the exact pinned source manifest already checked):
+
+```powershell
+py -m labyrinth.trainingday_corpus --sources-json D:\VERA\scratch\trainingday-corpus-20261029\pinned-source-manifest.json --output D:\VERA\scratch\trainingday-corpus-20261029\corpus-v2-structural-100k --heldout-repo TheAlgorithms/Go --reasoning-count 100000 --seed 29034 --rows-per-shard 5000 --reasoning-split-policy signature
+```
+
+No neural optimizer steps, trained adapter, offline model promotion, or runtime activation were created by this corpus/audit change.
