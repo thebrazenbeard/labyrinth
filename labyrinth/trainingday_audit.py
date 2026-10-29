@@ -138,6 +138,15 @@ def audit_corpus(corpus_root):
         raise ValueError("train count mismatch")
     if sum(v for (split, _), v in count.items() if split == "eval") != manifest["counts"]["eval"]:
         raise ValueError("eval count mismatch")
+    policy = manifest.get("reasoning_split_policy")
+    if policy not in (None, "STRUCTURAL_SIGNATURE_HASH_V1"):
+        raise ValueError("unknown reasoning split policy")
+    common = train_signatures.intersection(eval_signatures)
+    if policy == "STRUCTURAL_SIGNATURE_HASH_V1" and common:
+        raise ValueError("structural holdout leakage")
+    eval_type = ("DEVELOPMENT_STRUCTURAL_HOLDOUT_NOT_BLIND"
+                 if policy == "STRUCTURAL_SIGNATURE_HASH_V1"
+                 else "DEVELOPMENT_IN_DISTRIBUTION_NOT_BLIND")
     return {
         "schema": "vera.trainingday.audit.v1",
         "status": "PASS_WITH_LIMITATIONS",
@@ -157,6 +166,6 @@ def audit_corpus(corpus_root):
             "eval_with_train_signature": sum(n for pattern, n in eval_signatures.items() if pattern in train_signatures),
             "eval_total": sum(eval_signatures.values()),
         },
-        "eval_type": "DEVELOPMENT_IN_DISTRIBUTION_NOT_BLIND",
+        "eval_type": eval_type,
         "claim_ceiling": "EXACT_ANSWER_AND_SHARD_INTEGRITY_ONLY_NO_REASONING_TRANSFER",
     }
