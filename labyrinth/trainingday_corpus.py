@@ -136,7 +136,7 @@ def code_rows(source):
                "content_sha256": digest, "text": text}
 
 
-def reasoning_rows(count, seed):
+def reasoning_rows(count, seed, split_policy="index"):
     rng = random.Random(seed)
     ops = ("add", "subtract", "multiply")
     for index in range(count):
@@ -165,7 +165,16 @@ def reasoning_rows(count, seed):
                   " What is the final integer?")
         text = f"Question: {prompt}\nAnswer: {value}"
         digest = sha256(text.encode("utf-8"))
-        yield "eval" if index % 5 == 0 else "train", {
+        if split_policy == "signature":
+            # Reserve entire operator-sequence grammars, not random examples
+            # of patterns also available in training. Source code and v1
+            # default output remain unchanged.
+            pattern = "|".join(name for name, operand in operations)
+            key = sha256(f"{seed}:{pattern}".encode("utf-8"))
+            split = "eval" if int(key[:8], 16) % 5 == 0 else "train"
+        else:
+            split = "eval" if index % 5 == 0 else "train"
+        yield split, {
             "id": "reasoning-" + digest, "kind": "verified_reasoning",
             "verification": "TWO_INTEGER_INTERPRETERS_MATCH", "license": "SYNTHETIC_ORIGINAL",
             "source_repo": "VERA_TRAININGDAY_GENERATOR", "source_revision": SCHEMA,
@@ -174,7 +183,7 @@ def reasoning_rows(count, seed):
             "content_sha256": digest, "text": text}
 
 
-def build_corpus(sources, output_dir, *, heldout_repo, reasoning_count=1000, seed=29033, rows_per_shard=1000):
+def build_corpus(sources, output_dir, *, heldout_repo, reasoning_count=1000, seed=29033, rows_per_shard=1000, reasoning_split_policy="index"):
     """Build deterministic JSONL shards + manifest without changing any source repo.
 
     Output must not exist. Held-out source code and every fifth reasoning prompt
@@ -186,6 +195,8 @@ def build_corpus(sources, output_dir, *, heldout_repo, reasoning_count=1000, see
         raise ValueError("seed must be a nonnegative 31-bit integer")
     if type(rows_per_shard) is not int or not (1 <= rows_per_shard <= 100_000):
         raise ValueError("rows_per_shard outside 1..100,000")
+    if reasoning_split_policy not in ("index", "signature"):
+        raise ValueError("reasoning_split_policy must be index or signature")
     output = Path(output_dir).resolve(strict=False)
     if output.exists() or output.is_symlink():
         raise FileExistsError("corpus output already exists")
@@ -229,7 +240,7 @@ def build_corpus(sources, output_dir, *, heldout_repo, reasoning_count=1000, see
                     dropped["code_duplicate"] += 1
                     continue
                 writer.write(split, row)
-        for split, row in reasoning_rows(reasoning_count, seed):
+        for split, row in reasoning_rows(reasoning_count, seed, reasoning_split_policy):
             before = database.total_changes
             database.execute("INSERT OR IGNORE INTO seen VALUES (?,?)", (row["content_sha256"], split))
             if database.total_changes == before:
@@ -245,6 +256,8 @@ def build_corpus(sources, output_dir, *, heldout_repo, reasoning_count=1000, see
                   "licenses": licenses,
                   "shards": writer.shards,
                   "qualification": "LICENSING_AND_EXACT_ANSWER_REPLAY_ONLY_NOT_REASONING_GENERALIZATION"}
+        if reasoning_split_policy == "signature":
+            report["reasoning_split_policy"] = "STRUCTURAL_SIGNATURE_HASH_V1"
         (stage / "manifest.json").write_text(json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     finally:
         database.close()
@@ -260,11 +273,12 @@ def main():
     parser.add_argument("--reasoning-count", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=29033)
     parser.add_argument("--rows-per-shard", type=int, default=1000)
+    parser.add_argument("--reasoning-split-policy", choices=("index", "signature"), default="index")
     args = parser.parse_args()
     specs = json.loads(args.sources_json.read_text(encoding="utf-8"))
     result = build_corpus(specs, args.output, heldout_repo=args.heldout_repo,
                           reasoning_count=args.reasoning_count, seed=args.seed,
-                          rows_per_shard=args.rows_per_shard)
+                          rows_per_shard=args.rows_per_shard, reasoning_split_policy=args.reasoning_split_policy)
     print(json.dumps({"state": result["state"], "counts": result["counts"],
                       "shards": len(result["shards"]), "heldout_repo": result["heldout_repo"]}))
 
