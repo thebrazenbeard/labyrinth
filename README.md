@@ -100,10 +100,14 @@ scaffold, not that the model independently learned output formatting. This
 separates numeric correctness from the trivial constant format token but does
 not make public finite arithmetic templates an independent reasoning exam.
 The optional `--source-counterfactual-pairs` flag requires source-priority tier
-3 and an even per-tier training count; it substitutes original/priority-swapped
-prompt pairs while retaining equal case counts per tier. The mixed example
-above therefore visits eight examples from each of four categories over 32
-steps. The program tier uses disjoint train/evaluation instruction structures;
+3 and even per-tier **training and evaluation** counts. It substitutes
+original/priority-swapped report pairs in both splits, with different split
+seeds and report values. Every arm reports `source_priority_pair_consistency`:
+the fraction of held-out source-priority pairs for which **both** changed-
+authority answers are correct. The offline auditor reconstructs this metric
+and rejects a mismatched claim; a format-only win cannot pass the pair metric.
+The mixed example visits eight examples from each category over 32 steps.
+The program tier uses disjoint train/evaluation instruction structures;
 this is still a public, small-task development experiment, **not** a sealed
 generalization benchmark or evidence of improved reasoning.
 
