@@ -1,4 +1,4 @@
-"""Opt-in acquisition of Vera's *inference-only* GPT-OSS 4.2B candidate.
+"""Opt-in acquisition of VERA-GPT-OSS4B Q4_K_M (inference-only).
 
 No neural training, model selection, or deployment is performed by this script.
 The URL is pinned to an immutable Hugging Face commit. It does not import or
@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 
 
 REPO = "cyberjunkee/gpt-oss-4.2b-specialized-all-pruned-moe-only-4-experts-Q4_K_M-GGUF"
+DISPLAY_NAME = "VERA-GPT-OSS4B Q4_K_M"
 REVISION = "d3825cfdc1c250b75a2485e9054162bf237fdd01"
 FILENAME = "gpt-oss-4.2b-specialized-all-pruned-moe-only-4-experts-q4_k_m.gguf"
 URL = f"https://huggingface.co/{REPO}/resolve/{REVISION}/{FILENAME}"
@@ -97,7 +98,7 @@ def download(directory: Path, *, opener=urlopen, expected_bytes: int = EXPECTED_
     if digest.lower() != expected_sha256.lower():
         raise ValueError("download SHA-256 disagrees with pinned Xet pointer; partial retained")
     record = {
-        "candidate": "gpt-oss-4.2b-Q4_K_M",
+        "candidate": DISPLAY_NAME,
         "source_repo": REPO,
         "source_revision": REVISION,
         "source_url": URL,
@@ -124,7 +125,7 @@ def main() -> int:
     args = parser.parse_args()
     target, partial, _ = _preflight(args.dest)
     if not args.download:
-        print(json.dumps({"stage": "preflight-only", "model": REPO,
+        print(json.dumps({"stage": "preflight-only", "name": DISPLAY_NAME, "model": REPO,
                           "revision": REVISION, "target": str(target),
                           "resumable_partial_bytes": partial.stat().st_size if partial.exists() else 0,
                           "training_started": False}, indent=2))
