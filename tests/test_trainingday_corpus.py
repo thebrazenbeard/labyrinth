@@ -98,6 +98,31 @@ class TrainingDayCorpusTests(unittest.TestCase):
         self.assertEqual([(s["split"], s["sha256"], s["count"]) for s in one["shards"]],
                          [(s["split"], s["sha256"], s["count"]) for s in two["shards"]])
 
+    def test_reasoning_signature_holdout_has_no_training_pattern_overlap(self):
+        specs = self.sources()
+        report = build_corpus(
+            specs, self.root / "structural", heldout_repo="TheAlgorithms/Go",
+            reasoning_count=2500, seed=29034, rows_per_shard=100,
+            reasoning_split_policy="signature",
+        )
+        train = [row for row in rows(self.root / "structural", "train")
+                 if row["kind"] == "verified_reasoning"]
+        heldout = [row for row in rows(self.root / "structural", "eval")
+                   if row["kind"] == "verified_reasoning"]
+        sig = lambda r: tuple(op for op, operand in r["operations"])
+        self.assertGreater(len(train), 300)
+        self.assertGreater(len(heldout), 50)
+        self.assertFalse({sig(r) for r in train} & {sig(r) for r in heldout})
+        self.assertEqual(report["reasoning_split_policy"], "STRUCTURAL_SIGNATURE_HASH_V1")
+
+    def test_invalid_reasoning_split_policy_rejected_without_creating_output(self):
+        specs = self.sources()
+        target = self.root / "bad_split"
+        with self.assertRaisesRegex(ValueError, "reasoning_split_policy"):
+            build_corpus(specs, target, heldout_repo="TheAlgorithms/Go",
+                         reasoning_count=200, reasoning_split_policy="unknown")
+        self.assertFalse(target.exists())
+
     def test_unlicensed_source_fails_before_any_dataset_emission(self):
         _, bad = make_repo(self.root, "Java", {"a.java": "class A { int add(int a) { return a + 1; } }\n" * 4},
                            license_text="GNU GENERAL PUBLIC LICENSE Version 3")
