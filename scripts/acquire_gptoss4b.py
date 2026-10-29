@@ -62,27 +62,30 @@ def download(directory: Path, *, opener=urlopen, expected_bytes: int = EXPECTED_
     """Resume only when server proves the requested offset; never overwrite."""
     target, partial, receipt = _preflight(directory)
     offset = partial.stat().st_size if partial.exists() else 0
-    headers = {"User-Agent": "Vera-Labyrinth-Candidate/1.0"}
-    if offset:
-        headers["Range"] = f"bytes={offset}-"
-    with opener(Request(URL, headers=headers), timeout=60) as response:
-        status = getattr(response, "status", None)
+    if offset > expected_bytes:
+        raise ValueError("partial already exceeds the pinned size; refusing resume")
+    if offset != expected_bytes:
+        headers = {"User-Agent": "Vera-Labyrinth-Candidate/1.0"}
         if offset:
-            content_range = response.headers.get("Content-Range", "")
-            if status != 206 or not content_range.startswith(f"bytes {offset}-"):
-                raise ValueError("server did not prove resumable range; partial retained")
-        elif status != 200:
-            raise ValueError(f"expected HTTP 200, got {status}")
-        with partial.open("ab" if partial.exists() else "xb") as stream:
-            total = offset
-            while True:
-                chunk = response.read(4 * 1024 * 1024)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > max_bytes:
-                    raise ValueError("model exceeds the 4 GB file ceiling; partial retained")
-                stream.write(chunk)
+            headers["Range"] = f"bytes={offset}-"
+        with opener(Request(URL, headers=headers), timeout=60) as response:
+            status = getattr(response, "status", None)
+            if offset:
+                content_range = response.headers.get("Content-Range", "")
+                if status != 206 or not content_range.startswith(f"bytes {offset}-"):
+                    raise ValueError("server did not prove resumable range; partial retained")
+            elif status != 200:
+                raise ValueError(f"expected HTTP 200, got {status}")
+            with partial.open("ab" if partial.exists() else "xb") as stream:
+                total = offset
+                while True:
+                    chunk = response.read(4 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError("model exceeds the 4 GB file ceiling; partial retained")
+                    stream.write(chunk)
 
     size = partial.stat().st_size
     if size != expected_bytes or size > max_bytes:
