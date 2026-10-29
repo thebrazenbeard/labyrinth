@@ -172,6 +172,12 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
         fail("heldout case ids differ from regenerated evaluation split")
     if report.get("heldout_public_prompt_sha256") != _prompt_commitment(heldout):
         fail("heldout prompt commitment mismatch")
+    paired_source_eval = bool(config.get("source_counterfactual_pairs", False))
+    paired_swaps = [c.id for c in heldout if c.tier == 3 and c.id.endswith("-swap")]
+    if paired_source_eval and (not paired_swaps or
+                               any(swapped[:-5] not in {c.id for c in heldout}
+                                   for swapped in paired_swaps)):
+        fail("paired source-priority holdout lacks complete counterfactual pairs")
     controls = report.get("control_data")
     common_control = (
         isinstance(controls, dict)
@@ -287,4 +293,22 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
             fail(f"{arm}: accuracy mismatch")
         if not _proportion(summary.get("format_rate"), reported_format / len(heldout)):
             fail(f"{arm}: format rate mismatch")
+        pair_metric = summary.get("source_priority_pair_consistency")
+        if paired_source_eval:
+            trial_correct = {trial.get("id"): trial.get("correct") for trial in summary["trials"]
+                             if isinstance(trial, dict) and isinstance(trial.get("id"), str)}
+            both_correct = sum(trial_correct.get(swapped) is True
+                               and trial_correct.get(swapped[:-5]) is True
+                               for swapped in paired_swaps)
+            if (not isinstance(pair_metric, dict)
+                    or set(pair_metric) != {"both_correct", "pairs_total", "both_correct_rate"}
+                    or type(pair_metric.get("both_correct")) is not int
+                    or pair_metric["both_correct"] != both_correct
+                    or type(pair_metric.get("pairs_total")) is not int
+                    or pair_metric["pairs_total"] != len(paired_swaps)
+                    or not _proportion(pair_metric.get("both_correct_rate"),
+                                       both_correct / len(paired_swaps))):
+                fail(f"{arm}: counterfactual pair-consistency metric mismatch")
+        elif pair_metric is not None:
+            fail(f"{arm}: unexpected counterfactual pair-consistency metric")
     return result()
