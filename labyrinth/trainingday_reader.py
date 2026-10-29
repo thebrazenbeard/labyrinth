@@ -57,6 +57,13 @@ def iter_training_rows(corpus_root):
         raise ValueError("missing or undeclared training shards")
     if not training:
         raise ValueError("train corpus empty")
+    # Phase 1: prevalidate the *entire* train source before exposing even a
+    # single row to a trainer that might stop after reading only K records.
+    # This is intentionally two-pass and disk-streaming, not an in-memory
+    # materialization of the full dataset.
+    if len(paths) != len(training):
+        raise ValueError("duplicate shard path")
+    verified = []
     total = 0
     for shard in training:
         relative = shard["path"]
@@ -74,9 +81,19 @@ def iter_training_rows(corpus_root):
                         or not isinstance(row.get("text"), str)):
                     raise ValueError("unsupported or leaked training row")
                 count += 1
-                total += 1
-                yield row
         if count != shard["count"]:
             raise ValueError("shard row count mismatch")
+        total += count
+        verified.append((file, shard))
     if total != manifest["counts"]["train"]:
         raise ValueError("manifest train count mismatch")
+
+    # Phase 2: stream only after all prior validation has succeeded. Recheck
+    # each file's checksum before consuming its contents. A separate runner
+    # must ensure the corpus is not concurrently modified by another actor.
+    for file, shard in verified:
+        if file.stat().st_size != shard["bytes"] or _digest(file) != shard["sha256"]:
+            raise ValueError("shard checksum mismatch on consumer read")
+        with file.open("r", encoding="utf-8") as stream:
+            for line in stream:
+                yield json.loads(line)
