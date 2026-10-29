@@ -21,6 +21,7 @@ class CorpusQualityAuditTests(unittest.TestCase):
         _, go = make_repo(root, "Go", {
             "hold.go": "package algorithms\nfunc Twice(x int) int { return x*2 }\n" * 4
         })
+        self.specs = [python, go]
         self.root = root / "output"
         self.report = build_corpus(
             [python, go], self.root, heldout_repo="TheAlgorithms/Go",
@@ -39,6 +40,19 @@ class CorpusQualityAuditTests(unittest.TestCase):
         self.assertGreater(audit["code"]["train_over_4096_characters"], 0)
         self.assertEqual(audit["code"]["eval_code"], 1)
         self.assertEqual(audit["verified_reasoning"]["total"], 300)
+
+    def test_structural_holdout_has_zero_operator_pattern_overlap(self):
+        target = self.root.parent / "structure_corpus"
+        report = build_corpus(
+            self.specs, target, heldout_repo="TheAlgorithms/Go",
+            reasoning_count=2500, seed=29034, rows_per_shard=100,
+            reasoning_split_policy="signature",
+        )
+        audit = audit_corpus(target)
+        self.assertEqual(audit["counts"], report["counts"])
+        self.assertEqual(audit["reasoning_structure_overlap"]["shared_signatures"], 0)
+        self.assertEqual(audit["reasoning_structure_overlap"]["eval_with_train_signature"], 0)
+        self.assertEqual(audit["eval_type"], "DEVELOPMENT_STRUCTURAL_HOLDOUT_NOT_BLIND")
 
     def test_rejects_corrupted_later_eval_shard(self):
         shards = sorted((self.root / "eval").glob("*.jsonl"))
