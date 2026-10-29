@@ -60,6 +60,19 @@ class AcquisitionTests(unittest.TestCase):
                                    max_bytes=100)
             self.assertEqual((root / (candidate.FILENAME + ".part")).read_bytes(), b"GGUF")
 
+    def test_complete_partial_is_verified_without_requesting_impossible_range(self):
+        body = b"GGUFcomplete-but-not-promoted"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / (candidate.FILENAME + ".part")).write_bytes(body)
+            out = candidate.download(
+                root, opener=lambda req, timeout: self.fail("unexpected HTTP request"),
+                expected_bytes=len(body), expected_sha256=hashlib.sha256(body).hexdigest(),
+                max_bytes=100,
+            )
+            self.assertEqual(out["bytes"], len(body))
+            self.assertEqual((root / candidate.FILENAME).read_bytes(), body)
+
     def test_refuses_existing_target(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
