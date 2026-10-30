@@ -13,7 +13,7 @@ from typing import Any
 
 from .evaluation import score_response
 from .hf_pilot import (
-    EVAL_SEED_XOR, LEGACY_SCHEMA, SCHEMA, _prompt_commitment,
+    EVAL_SEED_XOR, LEGACY_SCHEMA, SCHEMA, MEZO_SCHEMA, _prompt_commitment,
     _training_visit_indices, derange_answers,
 )
 from .maze import generate_maze
@@ -26,6 +26,7 @@ CONFIG_FIELDS = frozenset({
     "max_tokens", "max_new_tokens", "learning_rate", "lora_rank", "lora_alpha", "device",
 })
 MATCHED_CONFIG_FIELDS = CONFIG_FIELDS | {"answer_only"}
+MEZO_CONFIG_FIELDS = MATCHED_CONFIG_FIELDS | {"optimizer", "zo_epsilon"}
 PILOT_KIND = "local HF causal-LM PEFT LoRA supervised parameter update"
 RELOAD_NOTE = "NOT RUN: execute `python -m labyrinth.hf_pilot eval` separately"
 
@@ -77,10 +78,11 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
             ],
         }
 
-    if not isinstance(report, dict) or report.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
+    if not isinstance(report, dict) or report.get("schema") not in (SCHEMA, LEGACY_SCHEMA, MEZO_SCHEMA):
         fail("invalid HF pilot report schema")
         return result()
-    matched = report["schema"] == SCHEMA
+    mezo = report["schema"] == MEZO_SCHEMA
+    matched = report["schema"] in (SCHEMA, MEZO_SCHEMA)
     source = report.get("source")
     if not isinstance(source, dict) or not _digest(source.get("source_tree_sha256")):
         fail("missing or malformed HF pilot source fingerprint")
@@ -116,8 +118,12 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
     if not isinstance(config, dict):
         fail("invalid pilot config")
         return result()
-    if (set(config) != (MATCHED_CONFIG_FIELDS if matched else CONFIG_FIELDS)
+    if (set(config) != (MEZO_CONFIG_FIELDS if mezo else MATCHED_CONFIG_FIELDS if matched else CONFIG_FIELDS)
             or (matched and type(config.get("answer_only")) is not bool)
+            or (mezo and (config.get("optimizer") != "mezo"
+                          or type(config.get("zo_epsilon")) is not float
+                          or not math.isfinite(config["zo_epsilon"])
+                          or not 1e-6 <= config["zo_epsilon"] <= 0.1))
             or type(config.get("model_path")) is not str or not config["model_path"]
             or type(config.get("output_dir")) is not str or not config["output_dir"]
             or config.get("device") not in ("cpu", "cuda")
@@ -181,6 +187,11 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
             and controls.get("sham_evaluation_before_updates") is False
             and controls.get("sham_is_compute_matched") is True
             and controls.get("answer_scaffold_supplied") is config.get("answer_only")
+            and (not mezo or (
+                controls.get("mezo_loss_forward_evaluations_per_arm") == 2 * steps
+                and type(controls.get("mezo_loss_forward_evaluations_per_arm")) is int
+                and controls.get("mezo_snapshot_restoration") is True
+            ))
         )
     else:
         control_valid = (
@@ -219,6 +230,33 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
                     or any(type(v) not in (float, int) or v < 0 or v > 1e12 or not math.isfinite(v)
                            for v in record["losses"])):
                 fail(f"{arm}: invalid declared training steps/tokens/losses")
+            if mezo:
+                # The declared forward-query budget is independently checkable
+                # for internal consistency, not independent runtime proof.
+                positive, negative, means = (
+                    record.get("positive_losses"), record.get("negative_losses"), record.get("losses")
+                )
+                if (type(record.get("forward_evaluations")) is not int
+                        or record["forward_evaluations"] != 2 * steps
+                        or not isinstance(record.get("direction_seeds"), list)
+                        or len(record["direction_seeds"]) != steps
+                        or any(type(value) is not int or value != seed + i
+                               for i, value in enumerate(record["direction_seeds"]))
+                        or not isinstance(positive, list) or len(positive) != steps
+                        or not isinstance(negative, list) or len(negative) != steps
+                        or not isinstance(means, list) or len(means) != steps):
+                    fail(f"{arm}: invalid MeZO paired forward budget or direction seeds")
+                else:
+                    for plus, minus, mean in zip(positive, negative, means):
+                        if (type(plus) not in (int, float) or type(minus) not in (int, float)
+                                or type(mean) not in (int, float)
+                                or not 0 <= plus <= 1e12 or not 0 <= minus <= 1e12
+                                or not 0 <= mean <= 1e12
+                                or not math.isfinite(plus) or not math.isfinite(minus)
+                                or not math.isfinite(mean)
+                                or not math.isclose(mean, 0.5 * (plus + minus), rel_tol=1e-9, abs_tol=1e-9)):
+                            fail(f"{arm}: invalid MeZO paired loss arithmetic")
+                            break
     evaluations = report.get("evaluations")
     if not isinstance(evaluations, dict) or set(evaluations) != set(ARMS):
         fail("expected baseline/sham/candidate/corrupted evaluations")
