@@ -229,6 +229,43 @@ class MinotaurPolicyLearningTests(unittest.TestCase):
             learner.observe(duplicate_prompt)
         self.assertEqual(learner.model_hash, snapshot)
 
+    def test_histogram_tactic_totals_must_match_admitted_observations(self):
+        # A plain SHA-256 is an integrity check, not an operator signature.
+        # Even if a rewritten file carries a recomputed valid digest, the
+        # ledger must not attribute PRACTICE visits to CONTRAST and thereby
+        # invent evidence of progression into a harder training stage.
+        cases = (approval(0, tactic="practice"), approval(1, tactic="contrast"))
+        learner = MinotaurTrainingPolicy(scope=SCOPE, approved_training_cases=cases)
+        learner.observe(outcome(0, correct=True))
+        with tempfile.TemporaryDirectory() as tmp:
+            location = Path(tmp) / "checkpoint.json"
+            learner.save_policy(location)
+            payload = json.loads(location.read_text(encoding="utf-8"))
+            payload["counts"]["arithmetic"]["practice"]["correct"] = 0
+            payload["counts"]["arithmetic"]["contrast"]["correct"] = 1
+            unsigned = {key: value for key, value in payload.items()
+                        if key != "integrity_sha256"}
+            payload["integrity_sha256"] = hashlib.sha256(json.dumps(
+                unsigned, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=True, allow_nan=False,
+            ).encode("utf-8")).hexdigest()
+            forged = Path(tmp) / "relabelled-policy.json"
+            forged.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "histogram.*observed TRAIN"):
+                load_policy(forged, scope=SCOPE, approved_training_cases=cases)
+
+    def test_histogram_skill_totals_cannot_move_learning_between_skills(self):
+        multi_scope = replace(SCOPE, skills=("arithmetic", "program_reasoning"))
+        cases = (approval(0), replace(approval(1), skill="program_reasoning"))
+        learner = MinotaurTrainingPolicy(
+            scope=multi_scope, approved_training_cases=cases,
+        )
+        learner.observe(outcome(0, correct=True))
+        learner._counts["arithmetic"]["practice"]["correct"] = 0
+        learner._counts["program_reasoning"]["practice"]["correct"] = 1
+        with self.assertRaisesRegex(ValueError, "histogram.*observed TRAIN"):
+            _ = learner.model_hash
+
     def test_save_reload_in_new_process_preserves_policy_and_nonoverwrite(self):
         learner = model()
         for i in range(3):

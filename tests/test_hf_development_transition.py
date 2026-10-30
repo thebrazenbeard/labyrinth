@@ -9,13 +9,16 @@ from dataclasses import replace
 from unittest import TestCase, mock
 
 from labyrinth.hf_development_transition import (
-    SCHEMA, _DOMAIN, run_exam_bound_successor, verify_development_transition,
+    SCHEMA, _DOMAIN, DevelopmentCaseRef, development_case_commitment,
+    run_exam_bound_successor, run_journey_bound_successor, verify_development_transition,
 )
 from labyrinth.hf_resume_bridge import ResumeContext
 from labyrinth.hf_pilot import (
     PilotConfig, _authorized_development_resume, run_pilot,
 )
 from labyrinth.training_scope import TrainingScopeSpec
+from labyrinth.journey import JourneyAttempt, JourneyState, TRAINING
+from labyrinth.regenerative_maze import generate_maze_plan
 
 
 class SignedDevelopmentTransitionTests(TestCase):
@@ -29,6 +32,9 @@ class SignedDevelopmentTransitionTests(TestCase):
         )
         self.config = PilotConfig(model_path="unused-model", output_dir="unused-output")
         self.key = b"development-evaluator-secret-32-bytes!!"
+        self.public_roster = (
+            DevelopmentCaseRef("exam-case-0", "arithmetic", "f" * 64, "arithmetic-chain"),
+        )
         self.fields = {
             "schema": SCHEMA,
             "event_id": "dev-event-1",
@@ -43,7 +49,7 @@ class SignedDevelopmentTransitionTests(TestCase):
             "predecessor_lora_value_sha256": self.context.predecessor_lora_value_sha256,
             "resume_authority_ref": self.context.authority_ref,
             "weak_skills": ["arithmetic"],
-            "exam_case_commitment_sha256": "c" * 64,
+            "exam_case_commitment_sha256": development_case_commitment(self.public_roster),
         }
 
     def signed(self, changes: dict | None = None) -> tuple[bytes, str]:
@@ -57,6 +63,113 @@ class SignedDevelopmentTransitionTests(TestCase):
             self.scope, self.context, raw, sig,
             independent_development_key=self.key,
         )
+
+    def _regenerated_journey(self) -> JourneyState:
+        # This fixture adopts the LoRA-value digest as the Journey checkpoint
+        # identity. It is source-only data, not an attested neural model.
+        attempt = JourneyAttempt(
+            cycle_index=0, exam_id=self.fields["exam_id"],
+            checkpoint_before_sha256="d" * 64,
+            checkpoint_after_sha256=self.context.predecessor_lora_value_sha256,
+            training_case_ids=("train-case-0",),
+            training_prompt_sha256=("e" * 64,),
+            exam_case_ids=("exam-case-0",),
+            exam_prompt_sha256=("f" * 64,),
+            exam_status="FAIL", weak_skills=("arithmetic",),
+        )
+        return JourneyState(
+            scope=self.scope, baseline_checkpoint_sha256="d" * 64,
+            checkpoint_sha256=self.context.predecessor_lora_value_sha256,
+            maze=generate_maze_plan(self.scope, 1, weak_skills=("arithmetic",)),
+            phase=TRAINING, attempts=(attempt,),
+            used_training_case_ids=("train-case-0",),
+            used_training_prompt_sha256=("e" * 64,),
+            sealed_exam_ids=(self.fields["exam_id"],),
+            exam_event_statuses=("FAIL",),
+            sealed_exam_case_ids=("exam-case-0",),
+            sealed_exam_prompt_sha256=("f" * 64,),
+        )
+
+    def test_strict_journey_successor_matches_signed_development_evidence(self):
+        raw, sig = self.signed()
+        reserved = []
+        with (mock.patch("labyrinth.hf_development_transition.preflight_resume"),
+              mock.patch("labyrinth.hf_development_transition.run_pilot",
+                         return_value={"trained": True}) as runner):
+            result = run_journey_bound_successor(
+                self.config, self.scope, "prior-run", self.context, raw, sig,
+                journey=self._regenerated_journey(),
+                evaluator_precommitment_sha256=self.fields["exam_case_commitment_sha256"],
+                evaluator_public_roster=self.public_roster,
+                independent_development_key=self.key,
+                reserve_development_event=lambda event_id: reserved.append(event_id) or True,
+            )
+        self.assertEqual(result, {"trained": True})
+        self.assertEqual(reserved, [self.fields["event_id"]])
+        runner.assert_called_once()
+
+    def test_strict_journey_successor_rejects_mismatched_lineage_before_reservation(self):
+        raw, sig = self.signed()
+        state = self._regenerated_journey()
+        invalid_states = {
+            "wrong checkpoint": replace(state, checkpoint_sha256="9" * 64),
+            "wrong cycle": replace(state, maze=generate_maze_plan(self.scope, 0)),
+            "wrong exam": replace(state, attempts=(replace(state.attempts[-1], exam_id="other-exam"),)),
+            "wrong weaknesses": replace(state, attempts=(replace(state.attempts[-1], weak_skills=()),)),
+            "wrong decision": replace(state, attempts=(replace(state.attempts[-1], exam_status="PASS"),)),
+            "wrong sealed event": replace(state, sealed_exam_ids=("other-exam",)),
+            "missing sealed event": replace(state, sealed_exam_ids=(), exam_event_statuses=()),
+            "missing exam case": replace(state, attempts=(replace(state.attempts[-1], exam_case_ids=()),)),
+            "discontinuous learner": replace(state, attempts=(replace(state.attempts[-1], checkpoint_before_sha256="8" * 64),)),
+            "unrecorded train": replace(state, attempts=(replace(state.attempts[-1], training_case_ids=("unrecorded",)),)),
+        }
+        with (mock.patch("labyrinth.hf_development_transition.preflight_resume") as preflight,
+              mock.patch("labyrinth.hf_development_transition.run_pilot") as runner):
+            for label, bad_state in invalid_states.items():
+                with self.subTest(case=label), self.assertRaises(ValueError):
+                    run_journey_bound_successor(
+                        self.config, self.scope, "prior-run", self.context, raw, sig,
+                        journey=bad_state,
+                        evaluator_precommitment_sha256=self.fields["exam_case_commitment_sha256"],
+                        evaluator_public_roster=self.public_roster,
+                        independent_development_key=self.key,
+                        reserve_development_event=lambda _id: self.fail("event consumed"),
+                    )
+            with self.assertRaisesRegex(ValueError, "independently precommitted"):
+                run_journey_bound_successor(
+                    self.config, self.scope, "prior-run", self.context, raw, sig,
+                    journey=state, evaluator_precommitment_sha256="9" * 64,
+                    evaluator_public_roster=self.public_roster,
+                    independent_development_key=self.key,
+                    reserve_development_event=lambda _id: self.fail("event consumed"),
+                )
+            preflight.assert_not_called()
+            runner.assert_not_called()
+
+    def test_strict_journey_successor_rejects_forged_public_roster(self):
+        raw, sig = self.signed()
+        state = self._regenerated_journey()
+        forged_rosters = (
+            (replace(self.public_roster[0], case_id="forged-id"),),
+            (replace(self.public_roster[0], prompt_sha256="a" * 64),),
+            (replace(self.public_roster[0], skill="other-skill"),),
+            (replace(self.public_roster[0], structure_key="other-structure"),),
+            self.public_roster + (DevelopmentCaseRef("extra", "arithmetic", "a" * 64, "extra-structure"),),
+        )
+        with (mock.patch("labyrinth.hf_development_transition.preflight_resume") as preflight,
+              mock.patch("labyrinth.hf_development_transition.run_pilot") as runner):
+            for roster in forged_rosters:
+                with self.subTest(roster=roster), self.assertRaises(ValueError):
+                    run_journey_bound_successor(
+                        self.config, self.scope, "prior-run", self.context, raw, sig,
+                        journey=state,
+                        evaluator_precommitment_sha256=self.fields["exam_case_commitment_sha256"],
+                        evaluator_public_roster=roster,
+                        independent_development_key=self.key,
+                        reserve_development_event=lambda _id: self.fail("event consumed"),
+                    )
+            preflight.assert_not_called()
+            runner.assert_not_called()
 
     def test_signed_failure_controls_actual_successor_arguments(self):
         raw, sig = self.signed()

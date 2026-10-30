@@ -1,9 +1,14 @@
 """Declarations describe observable, bounded targets without executing them."""
 
 from dataclasses import FrozenInstanceError, asdict, replace
+import hashlib
 import json
 import unittest
 
+from labyrinth.journey import (
+    TRAINING, TrainingCompletionReceipt, begin_journey, complete_maze, face_minotaur,
+)
+from labyrinth.minotaur_exam import ExamCaseResult, MinotaurExamReceipt
 from labyrinth.objective_contract import (
     MAX_OBJECTIVE_JSON_BYTES,
     ObjectiveContract,
@@ -12,6 +17,7 @@ from labyrinth.objective_contract import (
     prepare_objective_program_room,
 )
 from labyrinth.regenerative_maze import generate_maze_plan
+from labyrinth.semantic_chambers import generate_semantic_program_challenge
 from labyrinth.training_scope import TrainingScopeSpec
 
 
@@ -47,6 +53,103 @@ def _contract(scope=None):
 
 
 class ObjectiveContractTests(unittest.TestCase):
+    def test_regenerated_objective_training_requires_journey_and_prior_exam_seals(self):
+        declared = TrainingScopeSpec(
+            objective_id="program-regeneration-custody", domain="reasoning",
+            skills=("program_reasoning",), specificity=3,
+            scale=1, max_cycles=2, seed=20261030,
+        )
+        contract = ObjectiveContract(
+            scope=declared, intention="Practice executable register reasoning.",
+            targets=(SkillTarget(
+                skill="program_reasoning",
+                focus_tags=("four_step_register_programs",),
+                observable_behaviors=("Computes register A after four instructions.",),
+                rubric_id="program_structure_v1", minimum_score_percent=75,
+                minimum_gain_percent=10,
+            ),),
+            excluded_scopes=("Private final examination material.",),
+            forbidden_claims=("Training alone proves graduation.",),
+        )
+        regenerated = generate_maze_plan(declared, 1, weak_skills=declared.skills)
+        future_room = regenerated.rooms[0]
+        future_case = generate_semantic_program_challenge(
+            declared, future_room, difficulty=2,
+        )
+        future_prompt = hashlib.sha256(future_case.prompt.encode()).hexdigest()
+
+        def failed_journey(*, overlap: str):
+            initial = begin_journey(declared, checkpoint_sha256="a" * 64)
+            completed = complete_maze(initial, TrainingCompletionReceipt(
+                objective_id=declared.objective_id, cycle_index=0,
+                checkpoint_before_sha256="a" * 64,
+                checkpoint_after_sha256="b" * 64,
+                room_case_ids=tuple(
+                    (room.room_id,
+                     future_case.id if overlap == "train_case" and index == 0
+                     else f"train-old-{index}",
+                     future_prompt if overlap == "train_prompt" and index == 0
+                     else f"{index + 1:064x}")
+                    for index, room in enumerate(initial.maze.rooms)
+                ),
+            ))
+            cases = tuple(
+                ExamCaseResult(
+                    case_id=(future_case.id if overlap == "exam_case" and index == 0
+                             else f"dev-{split}-{index}"),
+                    skill="program_reasoning", split=split,
+                    score=0, baseline_score=0,
+                    prompt_sha256=(future_prompt if overlap == "exam_prompt" and index == 0
+                                   else f"{index + 200:064x}"),
+                )
+                for index, split in enumerate(("heldout",) * 4 + ("transfer",) * 4)
+            )
+            return face_minotaur(completed, MinotaurExamReceipt(
+                exam_id="dev-cycle-zero", objective_id=declared.objective_id,
+                cycle_index=0, checkpoint_sha256="b" * 64,
+                baseline_sha256="a" * 64, evaluator_id="independent-development",
+                cases=cases,
+            ))
+
+        clean = failed_journey(overlap="none")
+        self.assertEqual(clean.phase, TRAINING)
+        self.assertEqual(clean.maze, regenerated)
+        with self.assertRaisesRegex(ValueError, "JourneyState"):
+            prepare_objective_program_room(contract, regenerated, future_room)
+        prepared = prepare_objective_program_room(
+            contract, regenerated, future_room, journey=clean,
+        )
+        self.assertEqual(prepared.challenge.split, "train")
+        self.assertEqual(prepared.trainee_view.prompt_sha256, future_prompt)
+
+        for overlap in ("train_case", "train_prompt", "exam_case", "exam_prompt"):
+            with self.subTest(overlap=overlap):
+                contaminated = failed_journey(overlap=overlap)
+                self.assertEqual(contaminated.maze, regenerated)
+                with self.assertRaisesRegex(ValueError, "prior training or development"):
+                    prepare_objective_program_room(
+                        contract, regenerated, future_room, journey=contaminated,
+                    )
+        with self.assertRaisesRegex(ValueError, "current training journey"):
+            prepare_objective_program_room(
+                contract, regenerated, future_room,
+                journey=begin_journey(declared, checkpoint_sha256="a" * 64),
+            )
+        awaiting_exam = complete_maze(clean, TrainingCompletionReceipt(
+            objective_id=declared.objective_id, cycle_index=1,
+            checkpoint_before_sha256="b" * 64,
+            checkpoint_after_sha256="c" * 64,
+            room_case_ids=tuple(
+                (room.room_id, f"train-new-{index}", f"{index + 500:064x}")
+                for index, room in enumerate(regenerated.rooms)
+            ),
+        ))
+        with self.assertRaisesRegex(ValueError, "current training journey"):
+            prepare_objective_program_room(
+                contract, regenerated, future_room,
+                journey=awaiting_exam,
+            )
+
     def test_approved_program_focus_changes_real_train_content(self):
         # Only the explicitly approved program focus changes. Keep declared
         # scope, room, and generator seed identical to rule out maze novelty.

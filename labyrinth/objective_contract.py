@@ -231,6 +231,7 @@ def parse_objective_json(raw: bytes) -> ObjectiveContract:
 
 def prepare_objective_program_room(
     contract: ObjectiveContract, plan: "MazePlan", room: "MazeRoom",
+    *, journey: "JourneyState | None" = None,
 ) -> "PreparedTrainingRoom":
     """Bind one *approved* program focus declaration to executable TRAIN content.
 
@@ -240,10 +241,13 @@ def prepare_objective_program_room(
     infer arbitrary goals, or handle private examination commitments.
 
     The returned PreparedTrainingRoom contains trainer-only gold; send only
-    ``prepared.trainee_view`` to a learner. The caller retains custody of the
-    plan, trainer output, and history/sealed-exam anti-reuse commitments.
+    ``prepared.trainee_view`` to a learner. Regenerated cycles require the
+    currently active, validated JourneyState; prior training and development
+    case/prompt commitments are checked *before* exposing a training room.
+    This source-level check is not independent evaluator attestation.
     """
     from .journey_challenges import PreparedTrainingRoom
+    from .journey import JourneyState, TRAINING, _validate_state as validate_journey
     from .regenerative_maze import MazePlan, MazeRoom
     from .semantic_chambers import (
         generate_semantic_program_challenge, semantic_focus_profile,
@@ -274,12 +278,29 @@ def prepare_objective_program_room(
             or room.skill != "program_reasoning" or room.purpose != "train"):
         raise ValueError("TRAIN room is outside the declared objective and maze")
 
+    if plan.cycle_index > 0 and journey is None:
+        raise ValueError("regenerated objective training requires a validated JourneyState")
+    if journey is not None:
+        if type(journey) is not JourneyState:
+            raise ValueError("expected a validated JourneyState")
+        validate_journey(journey)
+        if (journey.phase != TRAINING or journey.scope != scope
+                or journey.maze != plan):
+            raise ValueError("objective room requires the current training journey")
+
     challenge = generate_semantic_program_challenge(
         scope, room, difficulty=levels_by_profile[focus[0]],
     )
     if (challenge.split != "train"
             or dict(challenge.metadata).get("semantic_focus") != focus[0]):
         raise ValueError("trusted provider did not honor the approved TRAIN focus")
+    if journey is not None:
+        prior_cases = set(journey.used_training_case_ids) | set(journey.sealed_exam_case_ids)
+        prior_prompts = (set(journey.used_training_prompt_sha256)
+                         | set(journey.sealed_exam_prompt_sha256))
+        prompt_sha256 = hashlib.sha256(challenge.prompt.encode("utf-8")).hexdigest()
+        if challenge.id in prior_cases or prompt_sha256 in prior_prompts:
+            raise ValueError("objective challenge overlaps prior training or development evidence")
     challenge = replace(challenge, metadata=challenge.metadata + (
         ("objective_contract_sha256", contract.fingerprint),
         ("objective_focus_tag", focus[0]),

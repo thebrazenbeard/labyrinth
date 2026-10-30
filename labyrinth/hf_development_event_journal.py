@@ -10,6 +10,12 @@ Reservation is committed before returning ``True``. A crash after that point
 leaves the event consumed forever, even if no successor was started. An operator
 may attach one bounded, explicitly *unverified* reconciliation observation,
 but neither that observation nor any error releases the event for replay.
+
+An opt-in run-bound reservation can additionally fence recovery attempts to one
+immutable logical run and a committed checkpoint identity. This journal cannot
+inspect checkpoint bytes or prove optimizer/RNG restoration: the trusted host
+must validate complete checkpoint contents and enforce the returned fence at
+every worker/result boundary. Legacy event-only reservations cannot be upgraded.
 """
 
 from __future__ import annotations
@@ -36,6 +42,11 @@ _TABLE_SQL = """CREATE TABLE journal (
 _MAX_EVENTS = 4096
 _MAX_JSON_BYTES = 2 * 1024 * 1024
 _OBSERVATIONS = frozenset(("NOT_STARTED", "PARTIAL_ARTIFACT", "REPORTED_RESULT", "UNKNOWN"))
+_LEGACY_FIELDS = frozenset(("observation", "artifact_sha256", "review_ref"))
+_RUN_FIELDS = _LEGACY_FIELDS | frozenset((
+    "run_id", "run_commitment_sha256", "checkpoint_sha256", "fence",
+    "run_state", "result_sha256",
+))
 
 
 class DevelopmentJournalError(RuntimeError):
@@ -91,8 +102,7 @@ def _parse(serialized: str) -> dict[str, dict[str, Any]]:
             raise ValueError("invalid event registry")
         for event_id, record in events.items():
             _event_check(event_id)
-            if (type(record) is not dict or record.keys() !=
-                    {"observation", "artifact_sha256", "review_ref"}):
+            if type(record) is not dict or record.keys() not in (_LEGACY_FIELDS, _RUN_FIELDS):
                 raise ValueError("malformed event entry")
             observation = record["observation"]
             if observation is not None and observation not in _OBSERVATIONS:
@@ -105,6 +115,22 @@ def _parse(serialized: str) -> dict[str, dict[str, Any]]:
             elif (type(digest) is not str or not _DIGEST.fullmatch(digest)
                   or type(review) is not str or not _IDENTIFIER.fullmatch(review)):
                 raise ValueError("invalid reconciliation metadata")
+            if record.keys() == _RUN_FIELDS:
+                if (type(record["run_id"]) is not str
+                        or not _IDENTIFIER.fullmatch(record["run_id"])
+                        or type(record["run_commitment_sha256"]) is not str
+                        or not _DIGEST.fullmatch(record["run_commitment_sha256"])
+                        or type(record["checkpoint_sha256"]) is not str
+                        or not _DIGEST.fullmatch(record["checkpoint_sha256"])
+                        or type(record["fence"]) is not int
+                        or not 0 <= record["fence"] < 2**63 - 1
+                        or record["run_state"] not in ("ACTIVE", "COMPLETED")):
+                    raise ValueError("invalid run-bound reservation")
+                result = record["result_sha256"]
+                if ((record["run_state"] == "ACTIVE" and result is not None)
+                        or (record["run_state"] == "COMPLETED" and
+                            (type(result) is not str or not _DIGEST.fullmatch(result)))):
+                    raise ValueError("invalid run completion")
         return events
     except (ValueError, TypeError, OverflowError, json.JSONDecodeError) as exc:
         raise DevelopmentJournalError("journal state malformed or tampered") from exc
@@ -193,6 +219,164 @@ def reserve_development_event(db_path: Path, event_id: str, *, state_key: bytes)
             db.close()
 
 
+def _run_identity_check(run_id: str, run_commitment_sha256: str,
+                        checkpoint_sha256: str) -> None:
+    if (type(run_id) is not str or not _IDENTIFIER.fullmatch(run_id)
+            or type(run_commitment_sha256) is not str
+            or not _DIGEST.fullmatch(run_commitment_sha256)
+            or type(checkpoint_sha256) is not str
+            or not _DIGEST.fullmatch(checkpoint_sha256)):
+        raise ValueError("invalid run identity or checkpoint commitment")
+
+
+def reserve_development_run(
+    db_path: Path, event_id: str, *, state_key: bytes, run_id: str,
+    run_commitment_sha256: str, initial_checkpoint_sha256: str,
+) -> int:
+    """Consume once while binding an event to a precommitted logical run.
+
+    The host must first authenticate the signed FAIL and verify a *complete*
+    initial checkpoint (including optimizer, RNG and cursor) at this digest.
+    Return fence 0 on first reservation; duplicates, including the same run,
+    fail closed and require the separately fenced recovery operation.
+    """
+    _key_check(state_key)
+    path = _path_check(db_path)
+    _event_check(event_id)
+    _run_identity_check(run_id, run_commitment_sha256, initial_checkpoint_sha256)
+    if not path.is_file():
+        raise DevelopmentJournalError("journal not initialized")
+    db = None
+    try:
+        db = _connect(path)
+        db.execute("BEGIN IMMEDIATE")
+        version, events = _load(db, state_key)
+        if event_id in events:
+            raise DevelopmentJournalError("event already consumed; use fenced recovery")
+        if len(events) >= _MAX_EVENTS:
+            raise DevelopmentJournalError("journal event budget exhausted")
+        events[event_id] = {
+            "observation": None, "artifact_sha256": None, "review_ref": None,
+            "run_id": run_id, "run_commitment_sha256": run_commitment_sha256,
+            "checkpoint_sha256": initial_checkpoint_sha256, "fence": 0,
+            "run_state": "ACTIVE", "result_sha256": None,
+        }
+        _save(db, version, events, state_key)
+        db.commit()
+        return 0
+    except sqlite3.Error as exc:
+        if db is not None:
+            db.rollback()
+        raise DevelopmentJournalError("atomic run reservation unavailable") from exc
+    finally:
+        if db is not None:
+            db.close()
+
+
+def _mutate_development_run(
+    db_path: Path, event_id: str, *, state_key: bytes, run_id: str,
+    run_commitment_sha256: str, checkpoint_sha256: str, expected_fence: int,
+    action: str, next_sha256: str | None = None,
+) -> int:
+    _key_check(state_key)
+    path = _path_check(db_path)
+    _event_check(event_id)
+    _run_identity_check(run_id, run_commitment_sha256, checkpoint_sha256)
+    if type(expected_fence) is not int or not 0 <= expected_fence < 2**63 - 2:
+        raise ValueError("invalid expected run fence")
+    if action not in ("RESUME", "CHECKPOINT", "COMPLETE"):
+        raise ValueError("invalid run transition")
+    if action != "RESUME" and (type(next_sha256) is not str or
+                                   not _DIGEST.fullmatch(next_sha256)):
+        raise ValueError("invalid successor checkpoint or result digest")
+    if not path.is_file():
+        raise DevelopmentJournalError("journal not initialized")
+    db = None
+    try:
+        db = _connect(path)
+        db.execute("BEGIN IMMEDIATE")
+        version, events = _load(db, state_key)
+        record = events.get(event_id)
+        if record is None or record.keys() != _RUN_FIELDS:
+            raise DevelopmentJournalError("run reservation missing or legacy-only")
+        if (record["run_id"] != run_id or
+                record["run_commitment_sha256"] != run_commitment_sha256 or
+                record["checkpoint_sha256"] != checkpoint_sha256 or
+                record["fence"] != expected_fence):
+            raise DevelopmentJournalError("run identity, checkpoint or fence mismatch")
+        # An operator observation is explicitly unverified and cannot mutate
+        # run custody, fence state, or same-run recovery authority. Only a
+        # completed run is terminal. The event remains consumed throughout.
+        if record["run_state"] != "ACTIVE":
+            raise DevelopmentJournalError("run completed; recovery denied")
+        if action == "RESUME":
+            record["fence"] += 1
+        elif action == "CHECKPOINT":
+            if next_sha256 == checkpoint_sha256:
+                raise DevelopmentJournalError("checkpoint must advance")
+            record["checkpoint_sha256"] = next_sha256
+        else:
+            record["run_state"] = "COMPLETED"
+            record["result_sha256"] = next_sha256
+        _save(db, version, events, state_key)
+        db.commit()
+        return record["fence"]
+    except sqlite3.Error as exc:
+        if db is not None:
+            db.rollback()
+        raise DevelopmentJournalError("atomic run transition unavailable") from exc
+    finally:
+        if db is not None:
+            db.close()
+
+
+def claim_development_run_resume(
+    db_path: Path, event_id: str, *, state_key: bytes, run_id: str,
+    run_commitment_sha256: str, checkpoint_sha256: str, expected_fence: int,
+) -> int:
+    """Atomically increment the fence for this *same* run and checkpoint.
+
+    Only a trusted host may call this after verifying durable full checkpoint
+    bytes. Every worker write/result must be rejected unless its fence is the
+    current value; otherwise a paused former worker can race the resumed one.
+    A claim does not attest learning or release the signed event.
+    """
+    return _mutate_development_run(
+        db_path, event_id, state_key=state_key, run_id=run_id,
+        run_commitment_sha256=run_commitment_sha256,
+        checkpoint_sha256=checkpoint_sha256, expected_fence=expected_fence,
+        action="RESUME",
+    )
+
+
+def commit_development_run_checkpoint(
+    db_path: Path, event_id: str, *, state_key: bytes, run_id: str,
+    run_commitment_sha256: str, checkpoint_sha256: str, expected_fence: int,
+    next_checkpoint_sha256: str,
+) -> None:
+    """Commit one validated full checkpoint identity at the current fence."""
+    _mutate_development_run(
+        db_path, event_id, state_key=state_key, run_id=run_id,
+        run_commitment_sha256=run_commitment_sha256,
+        checkpoint_sha256=checkpoint_sha256, expected_fence=expected_fence,
+        action="CHECKPOINT", next_sha256=next_checkpoint_sha256,
+    )
+
+
+def complete_development_run(
+    db_path: Path, event_id: str, *, state_key: bytes, run_id: str,
+    run_commitment_sha256: str, checkpoint_sha256: str, expected_fence: int,
+    result_sha256: str,
+) -> None:
+    """Seal a reported run result, without claiming qualification/graduation."""
+    _mutate_development_run(
+        db_path, event_id, state_key=state_key, run_id=run_id,
+        run_commitment_sha256=run_commitment_sha256,
+        checkpoint_sha256=checkpoint_sha256, expected_fence=expected_fence,
+        action="COMPLETE", next_sha256=result_sha256,
+    )
+
+
 def inspect_development_event(db_path: Path, event_id: str, *, state_key: bytes) -> dict[str, Any]:
     """Read one event; operator observations are not attested model outcomes."""
     _key_check(state_key)
@@ -243,8 +427,13 @@ def reconcile_development_event(
             raise DevelopmentJournalError("cannot reconcile an unreserved event")
         if events[event_id]["observation"] is not None:
             raise DevelopmentJournalError("event already reconciled; never replace observation")
-        events[event_id] = {"observation": observation,
-                            "artifact_sha256": artifact_sha256, "review_ref": review_ref}
+        # Preserve the run-bound fields if present. Replacing the entire entry
+        # with the legacy three-field shape silently erased the immutable run
+        # and checkpoint commitments after a partial-artifact observation.
+        record = dict(events[event_id])
+        record.update({"observation": observation,
+                       "artifact_sha256": artifact_sha256, "review_ref": review_ref})
+        events[event_id] = record
         _save(db, version, events, state_key)
         db.commit()
     except sqlite3.Error as exc:

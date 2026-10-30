@@ -229,10 +229,17 @@ class MinotaurTrainingPolicy:
             _id(case_id, "case_id")
             if type(prompt) is not str or not _SHA256.fullmatch(prompt):
                 raise ValueError("invalid training prompt commitment")
-        registered = {case.case_id: case.prompt_sha256 for case in self._approved_cases}
-        if any(registered.get(case_id) != prompt for case_id, prompt in
-               zip(self._case_ids, self._prompt_sha256)):
-            raise ValueError("observation history is not bound to an approved TRAIN registry")
+        registered = {case.case_id: case for case in self._approved_cases}
+        observed_totals = {
+            (skill, tactic): 0 for skill in self.skills for tactic in TACTICS
+        }
+        for case_id, prompt in zip(self._case_ids, self._prompt_sha256):
+            admission = registered.get(case_id)
+            if admission is None or admission.prompt_sha256 != prompt:
+                raise ValueError("observation history is not bound to an approved TRAIN registry")
+            # The aggregate must agree with the approved case's real skill
+            # and tactic, not merely with the global number of observations.
+            observed_totals[(admission.skill, admission.tactic)] += 1
         total = 0
         for skill in self.skills:
             tactics = self._counts[skill]
@@ -247,6 +254,9 @@ class MinotaurTrainingPolicy:
                     if type(count) is not int or not 0 <= count <= MAX_TRAIN_OUTCOMES:
                         raise ValueError("invalid training count")
                     total += count
+                if (counts["correct"] + counts["incorrect"]
+                        != observed_totals[(skill, tactic)]):
+                    raise ValueError("histogram disagrees with observed TRAIN skill/tactic visits")
         if total != len(self._case_ids):
             raise ValueError("observed cases and histograms disagree")
         return {
