@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import hmac
 import json
@@ -96,16 +97,17 @@ class DevelopmentEventJournalTests(TestCase):
         self.reserve("event-one")
         with self.assertRaisesRegex(DevelopmentJournalError, "seal"):
             inspect_development_event(self.path, "event-one", state_key=b"x" * 32)
-        with sqlite3.connect(self.path) as db:
-            db.execute("UPDATE journal SET events_json=? WHERE id=1",
-                       ('{"events":{}}',))
+        with closing(sqlite3.connect(self.path)) as db:
+            with db:
+                db.execute("UPDATE journal SET events_json=? WHERE id=1",
+                           ('{"events":{}}',))
         with self.assertRaisesRegex(DevelopmentJournalError, "seal"):
             self.reserve("event-two")
 
     def test_transaction_abandoned_before_commit_is_not_consumed(self):
         # Simulated interruption BEFORE the reservation callback can return True.
         # SQLite rolls back the abandoned transaction and training must not launch.
-        with sqlite3.connect(self.path, isolation_level=None) as db:
+        with closing(sqlite3.connect(self.path, isolation_level=None)) as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("UPDATE journal SET version=version+1 WHERE id=1")
             db.rollback()

@@ -31,7 +31,7 @@ class QualificationBundleTests(unittest.TestCase):
         for name, contents in self.samples.items():
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(contents, encoding="utf-8")
+            path.write_bytes(contents.encode("utf-8"))
 
     def test_repeated_capture_is_stable_and_covers_drivers_tests_workflows(self):
         first = capture_qualification_bundle(self.root)
@@ -62,8 +62,8 @@ class QualificationBundleTests(unittest.TestCase):
         prior = capture_qualification_bundle(self.root)
         (self.root / "tests/test_example.py").unlink()
         self.assertFalse(verify_qualification_bundle(prior, self.root))
-        (self.root / "tests/test_example.py").write_text(
-            self.samples["tests/test_example.py"], encoding="utf-8")
+        (self.root / "tests/test_example.py").write_bytes(
+            self.samples["tests/test_example.py"].encode("utf-8"))
         self.assertTrue(verify_qualification_bundle(prior, self.root))
         (self.root / "tests/test_added.py").write_text("# new test\n")
         self.assertFalse(verify_qualification_bundle(prior, self.root))
