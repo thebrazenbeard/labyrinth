@@ -38,6 +38,57 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
 
 
 class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_l12_l14_neural_and_custody_boundaries_are_required_in_cpu_ci(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        boundaries = (
+            "labyrinth/monotonic_anchor_protocol.py",
+            "labyrinth/retention_family_registry.py",
+            "labyrinth/retention_entrypoint_guard.py",
+            "labyrinth/measured_weakness_feedback.py",
+            "labyrinth/atomic_artifact_publication.py",
+            "scripts/qualify_maze_conditioned_minilm_cpu.py",
+            "scripts/qualify_neural_journey_e2e_cpu.py",
+            "scripts/qualify_taskmaster_counterfactual_cpu.py",
+            "tests/test_monotonic_anchor_protocol.py",
+            "tests/test_retention_family_registry.py",
+            "tests/test_retention_entrypoint_guard.py",
+            "tests/test_measured_weakness_feedback.py",
+            "tests/test_atomic_artifact_publication.py",
+            "tests/test_qualify_maze_conditioned_minilm_cpu.py",
+            "tests/test_qualify_neural_journey_e2e_cpu.py",
+            "tests/test_qualify_taskmaster_counterfactual_cpu.py",
+        )
+        for path in boundaries:
+            with self.subTest(path=path, exists=True):
+                self.assertTrue((root / path).is_file())
+            for trigger, manifest in paths_by_trigger.items():
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', manifest)
+
+        step = workflow.split(
+            "      - name: Minotaur tests with neural dependencies present\n", 1)[1]
+        # The listed source tests are cheap and deterministic. They do not
+        # substitute for a physical pretrained training run or final exam.
+        for module in (
+            "tests.test_monotonic_anchor_protocol",
+            "tests.test_retention_family_registry",
+            "tests.test_retention_entrypoint_guard",
+            "tests.test_measured_weakness_feedback",
+            "tests.test_atomic_artifact_publication",
+            "tests.test_qualify_maze_conditioned_minilm_cpu",
+            "tests.test_qualify_neural_journey_e2e_cpu",
+            "tests.test_qualify_taskmaster_counterfactual_cpu",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(f'"{module}"', step)
+
     def test_neural_journey_transitive_source_changes_trigger_pinned_cpu_ci(self):
         # These modules are imported by the HF pilot, objective-conditioned
         # generator, report auditor or adaptive taskmaster. Editing only one

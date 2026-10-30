@@ -35,7 +35,15 @@ on:
       - "labyrinth/signed_exam_lineage.py"
       - "labyrinth/neural_run_binding.py"
       - "labyrinth/retention_qualification.py"
+      - "labyrinth/measured_weakness_feedback.py"
+      - "labyrinth/atomic_artifact_publication.py"
+      - "labyrinth/retention_family_registry.py"
+      - "labyrinth/retention_entrypoint_guard.py"
+      - "labyrinth/monotonic_anchor_protocol.py"
       - "scripts/qualify_hf_regenerative.py"
+      - "scripts/qualify_maze_conditioned_minilm_cpu.py"
+      - "scripts/qualify_neural_journey_e2e_cpu.py"
+      - "scripts/qualify_taskmaster_counterfactual_cpu.py"
       - "scripts/qualify_minilm*.py"
       - "scripts/qualify_model_bytes_provenance.py"
       - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
@@ -61,6 +69,14 @@ on:
       - "tests/test_neural_run_binding.py"
       - "tests/test_minotaur_policy_effectiveness_l8.py"
       - "tests/test_retention_qualification.py"
+      - "tests/test_measured_weakness_feedback.py"
+      - "tests/test_atomic_artifact_publication.py"
+      - "tests/test_retention_family_registry.py"
+      - "tests/test_retention_entrypoint_guard.py"
+      - "tests/test_monotonic_anchor_protocol.py"
+      - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
+      - "tests/test_qualify_neural_journey_e2e_cpu.py"
+      - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
       - "tests/test_qualify_minotaur_neural_taskmaster_cpu.py"
       - "tests/test_hf_report_audit.py"
       - "tests/test_hf_journey_resume_integration.py"
@@ -108,7 +124,15 @@ on:
       - "labyrinth/signed_exam_lineage.py"
       - "labyrinth/neural_run_binding.py"
       - "labyrinth/retention_qualification.py"
+      - "labyrinth/measured_weakness_feedback.py"
+      - "labyrinth/atomic_artifact_publication.py"
+      - "labyrinth/retention_family_registry.py"
+      - "labyrinth/retention_entrypoint_guard.py"
+      - "labyrinth/monotonic_anchor_protocol.py"
       - "scripts/qualify_hf_regenerative.py"
+      - "scripts/qualify_maze_conditioned_minilm_cpu.py"
+      - "scripts/qualify_neural_journey_e2e_cpu.py"
+      - "scripts/qualify_taskmaster_counterfactual_cpu.py"
       - "scripts/qualify_minilm*.py"
       - "scripts/qualify_model_bytes_provenance.py"
       - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
@@ -134,6 +158,14 @@ on:
       - "tests/test_neural_run_binding.py"
       - "tests/test_minotaur_policy_effectiveness_l8.py"
       - "tests/test_retention_qualification.py"
+      - "tests/test_measured_weakness_feedback.py"
+      - "tests/test_atomic_artifact_publication.py"
+      - "tests/test_retention_family_registry.py"
+      - "tests/test_retention_entrypoint_guard.py"
+      - "tests/test_monotonic_anchor_protocol.py"
+      - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
+      - "tests/test_qualify_neural_journey_e2e_cpu.py"
+      - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
       - "tests/test_qualify_minotaur_neural_taskmaster_cpu.py"
       - "tests/test_hf_report_audit.py"
       - "tests/test_hf_journey_resume_integration.py"
@@ -224,5 +256,25 @@ jobs:
           if (taskmaster_result.testsRun < 7 or not taskmaster_result.wasSuccessful()
                   or taskmaster_result.skipped):
               raise SystemExit("required neural taskmaster CPU tests failed or skipped")
+
+          # This checks deterministic source and custody boundaries under the
+          # pinned dependency-present runner. It is NOT a physical pretrained
+          # training run or an independent private final examination.
+          new_required = (
+              ("tests.test_monotonic_anchor_protocol", 10),
+              ("tests.test_retention_family_registry", 8),
+              ("tests.test_retention_entrypoint_guard", 9),
+              ("tests.test_qualify_maze_conditioned_minilm_cpu", 12),
+              ("tests.test_qualify_neural_journey_e2e_cpu", 13),
+              ("tests.test_qualify_taskmaster_counterfactual_cpu", 11),
+              ("tests.test_measured_weakness_feedback", 7),
+              ("tests.test_atomic_artifact_publication", 10),
+          )
+          for module_name, min_count in new_required:
+              suite = unittest.defaultTestLoader.loadTestsFromName(module_name)
+              result = unittest.TextTestRunner(verbosity=2).run(suite)
+              if (result.testsRun < min_count or not result.wasSuccessful()
+                      or result.skipped):
+                  raise SystemExit(f"required CPU source/custody tests failed or skipped: {module_name}")
           PY
           python -m unittest tests.test_hf_scoped_report_audit tests.test_hf_program_scope tests.test_objective_contract tests.test_reserved_structural_transfer -v

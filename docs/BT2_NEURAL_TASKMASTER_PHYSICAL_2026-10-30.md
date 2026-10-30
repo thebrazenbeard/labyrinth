@@ -54,6 +54,12 @@ new training cycle and rejects a reload mismatch. Six arm checkpoint files
 exist in the isolated run directory; the script's report includes individual
 file SHA-256 commitments.
 
+A separate PowerShell readback recomputed all **six** saved `.safetensors`
+file SHA-256 values and compared them with the report: **6/6 matched**. It
+also independently compared the three arms' initial tensor digests and the
+recorded training visits in both cycles: `SameInitial=true`,
+`MatchedVisitsCycle0=true`, `MatchedVisitsCycle1=true`.
+
 These results establish actual trainable head-weight change, persistence
 across regenerated public training cycles, and positive matched-input
 development comparisons. They do **not** demonstrate a trainable general
@@ -81,3 +87,41 @@ sets `graduation_authorized=false`, `independent_exam=NOT_RUN`, and
 Q3/Q4 may be marked **PASS only for this narrow pretrained-feature head
 update and persistence observation**. Q5/Q6 remain UNKNOWN for independent
 control/transfer/retention, Q7 NOT RUN, Q8 full FAIL/HOLD, and Q9 HOLD.
+
+## Adversarial public counterfactual follow-up (same day)
+
+I subsequently executed the **evaluation-only** source
+`scripts/qualify_taskmaster_counterfactual_cpu.py`, verified SHA-256
+`573be1e6717471e54b0510e99543e566cbbd844aad28928f12479914fb60309b`,
+against the original three saved Lappy taskmaster heads. It did not
+perform optimizer updates. A dry run first verified a 16-case, four-family
+public adversarial fixture and the expected original training-report digest.
+The physical run used the separately isolated destination
+`C:\Temp\bt2-minilm-q3-one-534e644-20261030\resume_lab\outputs\counterfactual01`.
+Lappy independently recomputed `report.json` SHA-256
+`cb0eb42df634dab22b1f6b44f3cdc09f51e518bd9009c14af0dfc166a53d0561`,
+matching the runner's output, with original training report commitment
+`9ec20b074fd1c13b8b40504cee2e53dc002bc85208dc9dd5538d731b06d99fec`.
+
+| Arm or simple lexical control | Adversarial public development |
+| --- | ---: |
+| Correct-label trained policy head | **4/16** |
+| Zero-update head | **4/16** |
+| Corrupted-label trained head | **4/16** |
+| Post-hoc keyword baseline | **4/16** |
+
+The learned head **does not outperform either neural control** on this
+counterfactual set, despite its earlier 12/16 held-out result. This is a
+substantive falsifier of broad learning-transfer claims. The source evaluator
+is not a privately controlled final exam; its prompts were authored after
+inspection of the exposed training examples. Source and report both forbid
+graduation, and runtime model-execution authentication remains false.
+Q5/Q6 are not qualified. There is no basis to merge on the strength of the
+earlier positive fixture scores.
+
+**Independent source-review correction:** the post-hoc keyword baseline is
+degenerate on this specific 16-case fixture: the first tested cue appears in
+every case, so it predicts the same class for all 16 and scores 4/16 only
+because the gold labels are balanced. It is **not** a competitive lexical
+baseline or independent matched control. The three neural arms' 4/16
+physical observations are unaffected by this defect.
