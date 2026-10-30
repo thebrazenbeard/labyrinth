@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from scripts.minotaur_ci import missing_required, test_ids, unexpected_skips
 
@@ -34,3 +35,41 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
         self.assertEqual(unexpected_skips([(other,"named pipes unsupported")],
                                           platform="nt"),
                          [(other,"named pipes unsupported")])
+
+
+class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_adaptive_training_integrations_trigger_and_run_under_cpu_dependencies(self):
+        # The generic Python workflow allows optional neural skips. This
+        # separate dependency-present job must cover the TRAIN-only
+        # Minotaur/Labyrinth integration when its source changes.
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        pull_request_paths = workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+            "  push:\n", 1)[0]
+        main_push_paths = workflow.split("  push:\n", 1)[1].split(
+            "  workflow_dispatch:\n", 1)[0]
+        for path in (
+            "labyrinth/adaptive_corridors.py",
+            "labyrinth/journey_policy_runner.py",
+            "labyrinth/journey_challenges.py",
+            "labyrinth/semantic_chambers.py",
+            "tests/test_adaptive_corridors.py",
+            "tests/test_journey_policy_runner.py",
+            "tests/test_journey_challenges.py",
+            "tests/test_semantic_chambers.py",
+        ):
+            for trigger, manifest in (("pull_request", pull_request_paths),
+                                      ("push/main", main_push_paths)):
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', manifest)
+        test_step = workflow.split(
+            "      - name: Minotaur tests with neural dependencies present\n", 1)[1]
+        for module in (
+            "tests.test_adaptive_corridors",
+            "tests.test_journey_policy_runner",
+            "tests.test_journey_challenges",
+            "tests.test_semantic_chambers",
+            "tests.test_minotaur_exam",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(module, test_step)

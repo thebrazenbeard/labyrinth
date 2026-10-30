@@ -5,7 +5,15 @@ on:
     paths:
       - "labyrinth/minotaur_*.py"
       - "labyrinth/toy_backend.py"
+      - "labyrinth/adaptive_corridors.py"
+      - "labyrinth/journey_policy_runner.py"
+      - "labyrinth/journey_challenges.py"
+      - "labyrinth/semantic_chambers.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_adaptive_corridors.py"
+      - "tests/test_journey_policy_runner.py"
+      - "tests/test_journey_challenges.py"
+      - "tests/test_semantic_chambers.py"
       - "tests/minotaur_required_tests.txt"
       - "tests/test_ci_membership.py"
       - "scripts/minotaur_ci.py"
@@ -16,7 +24,15 @@ on:
     paths:
       - "labyrinth/minotaur_*.py"
       - "labyrinth/toy_backend.py"
+      - "labyrinth/adaptive_corridors.py"
+      - "labyrinth/journey_policy_runner.py"
+      - "labyrinth/journey_challenges.py"
+      - "labyrinth/semantic_chambers.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_adaptive_corridors.py"
+      - "tests/test_journey_policy_runner.py"
+      - "tests/test_journey_challenges.py"
+      - "tests/test_semantic_chambers.py"
       - "tests/minotaur_required_tests.txt"
       - "tests/test_ci_membership.py"
       - "scripts/minotaur_ci.py"
@@ -72,3 +88,4 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_ci_membership.py' -v
           python -m scripts.minotaur_ci
+          python -m unittest tests.test_adaptive_corridors tests.test_journey_policy_runner tests.test_journey_challenges tests.test_semantic_chambers tests.test_minotaur_exam -v

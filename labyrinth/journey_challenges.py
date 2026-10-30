@@ -7,7 +7,7 @@ Only the prompt-only view is suitable for a trainee inference adapter.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 from typing import Callable, Mapping
 
@@ -120,3 +120,43 @@ def prepare_training_rooms(
         seen_prompts.add(prompt_hash)
         materialized.append(PreparedTrainingRoom(room.room_id, room.skill, challenge))
     return tuple(materialized)
+
+
+def prepare_pending_adaptive_program_room(walk: object) -> PreparedTrainingRoom:
+    """Materialize one feedback-conditioned TRAIN-only program chamber.
+
+    This narrow approved provider makes the adaptive corridor's suggested
+    difficulty change executable program structure. It does not infer an
+    arbitrary learning objective, train a model, authenticate feedback, or
+    authorize graduation. Private answers stay in PreparedTrainingRoom.
+
+    The caller must retain this object trainer-side and send only
+    ``trainee_view`` to the learner. Feedback records the exact prompt digest.
+    """
+    from .adaptive_corridors import AdaptiveWalkState, _validate_state, offer_next_chamber
+    from .semantic_chambers import generate_semantic_program_challenge
+
+    if type(walk) is not AdaptiveWalkState:
+        raise ValueError("expected an adaptive training walk")
+    _validate_state(walk)
+    pending = walk.pending
+    if pending is None:
+        raise ValueError("adaptive walk has no pending training chamber")
+    if pending != offer_next_chamber(replace(walk, pending=None)).pending:
+        raise ValueError("pending chamber does not match the deterministic train-only route")
+    if pending.skill != "program_reasoning":
+        raise ValueError("adaptive semantic provider supports only program_reasoning")
+    challenge = generate_semantic_program_challenge(
+        walk.scope, pending.room, difficulty=pending.difficulty,
+    )
+    if challenge.split != "train" or not challenge.id.startswith("train-"):
+        raise ValueError("adaptive provider returned a non-training challenge")
+    prior_cases = set(walk.forbidden_case_ids)
+    prior_prompts = set(walk.forbidden_prompt_sha256)
+    for event in walk.history:
+        prior_cases.add(event.feedback.case_id)
+        prior_prompts.add(event.feedback.prompt_sha256)
+    if (challenge.id in prior_cases
+            or hashlib.sha256(challenge.prompt.encode("utf-8")).hexdigest() in prior_prompts):
+        raise ValueError("adaptive challenge overlaps prior train or sealed exam evidence")
+    return PreparedTrainingRoom(pending.room_id, pending.skill, challenge)

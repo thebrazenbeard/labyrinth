@@ -92,6 +92,37 @@ class SemanticChambersTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             generate_semantic_program_challenge(forged, room)
 
+    def test_adaptive_difficulty_is_bounded_and_does_not_mutate_declared_scope(self):
+        scope = _scope(2)
+        room = generate_maze_plan(scope, 0).rooms[0]
+        focused = generate_semantic_program_challenge(scope, room, difficulty=3)
+        self.assertEqual(dict(focused.metadata)["adaptive_difficulty"], "3")
+        self.assertEqual(dict(focused.metadata)["specificity"], "3")
+        self.assertEqual(scope.specificity, 2)
+        self.assertEqual(focused.split, "train")
+        self.assertEqual(dict(generate_semantic_program_challenge(scope, room).metadata)["specificity"], "2")
+        for invalid in (0, 6, True, 2.0, "3"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                generate_semantic_program_challenge(scope, room, difficulty=invalid)
+
+    def test_same_train_room_difficulty_alters_executable_structure(self):
+        # Hold the scope, room, and seed fixed so novelty cannot explain
+        # the difference. Only difficulty changes the selected structure.
+        declared = TrainingScopeSpec(
+            objective_id="abc", domain="reasoning",
+            skills=("program_reasoning",), specificity=2, scale=2,
+            max_cycles=2, seed=123,
+        )
+        room = generate_maze_plan(declared, 0).rooms[0]
+        broad = generate_semantic_program_challenge(declared, room, difficulty=1)
+        focused = generate_semantic_program_challenge(declared, room, difficulty=3)
+        self.assertNotEqual(dict(broad.metadata)["structure"],
+                            dict(focused.metadata)["structure"])
+        self.assertEqual(_replay(broad.prompt)[0], int(broad.answer))
+        self.assertEqual(_replay(focused.prompt)[0], int(focused.answer))
+        self.assertEqual(_replay(broad.prompt)[1], 3)
+        self.assertEqual(_replay(focused.prompt)[1], 4)
+
     def test_unsupported_skill_fails_closed(self):
         scope = _scope(3, skill="cognitive_empathy")
         room = generate_maze_plan(scope, 0).rooms[0]

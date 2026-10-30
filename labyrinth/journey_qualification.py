@@ -6,8 +6,8 @@ This module has two deliberately separate entry points:
   produces **only** model/scope identity metadata, never hidden cases,
   development hints, credentials, or a claim of graduation.
 * :func:`decide_in_evaluator_custody` must run in the independently controlled
-  evaluator process with its *precommitted* GraduationPolicy, durable GateState,
-  and evaluator-only secret. It delegates every actual admission decision to
+  evaluator process with its *precommitted* GraduationPolicy and journey lineage,
+  durable GateState, and evaluator-only secret. It delegates admission decisions to
   the existing signed :func:`graduation_gate.decide_graduation`.
 
 No function rewrites JourneyState, creates a signing key, signs a receipt,
@@ -77,6 +77,34 @@ class PublicQualificationRequest:
         }
 
 
+@dataclass(frozen=True)
+class JourneyQualificationPrecommit:
+    """Evaluator-held expected lineage, frozen independently of the request.
+
+    This is a structural contract, not an authenticated record or storage
+    mechanism. The evaluator must independently obtain, protect and durably
+    precommit these values before accepting trainee-controlled requests.
+    Constructing this object by copying the submitted request defeats custody.
+    """
+
+    scope_fingerprint: str
+    development_exam_id: str
+    entrant_checkpoint_sha256: str
+    development_cycle_index: int
+
+    def __post_init__(self) -> None:
+        for field in ("scope_fingerprint", "entrant_checkpoint_sha256"):
+            value = getattr(self, field)
+            if type(value) is not str or _SHA256.fullmatch(value) is None:
+                raise ValueError(f"invalid trusted precommit {field}")
+        if (type(self.development_exam_id) is not str
+                or _IDENTIFIER.fullmatch(self.development_exam_id) is None):
+            raise ValueError("invalid trusted precommit development exam")
+        if (type(self.development_cycle_index) is not int
+                or not 0 <= self.development_cycle_index < 8):
+            raise ValueError("invalid trusted precommit development cycle")
+
+
 def prepare_public_qualification_request(journey: JourneyState) -> PublicQualificationRequest:
     """Start an *external* qualification campaign only after development PASS.
 
@@ -107,8 +135,7 @@ def decide_in_evaluator_custody(
     signed_receipt_bytes: bytes | None,
     receipt_signature_hex: str | None,
     *,
-    expected_scope_fingerprint: str,
-    expected_development_exam_id: str,
+    trusted_precommit: JourneyQualificationPrecommit,
     independent_evaluator_key: bytes | None,
 ) -> GateDecision:
     """Bind public developmental identity to the *existing* private gate.
@@ -117,9 +144,9 @@ def decide_in_evaluator_custody(
     entirely inside this call and never copied into JourneyState, its public
     request, or a development training receipt. The underlying gate requires
     true paired private evidence, fresh-case separation, pinned sources and
-    conditions. The `expected_scope_fingerprint` and
-    `expected_development_exam_id` must come from the evaluator's own frozen
-    precommit, **not** be uncritically copied from the submitted request.
+    conditions. `trusted_precommit` must be protected in evaluator custody,
+    with its values independently sourced and frozen before the public
+    request is submitted. Copying it from that request is not independent.
     An unsigned local Minotaur receipt always yields BLOCKED.
 
     `GraduationPolicy.base_sha256` identifies the pretrained *base* model,
@@ -133,18 +160,20 @@ def decide_in_evaluator_custody(
     if not isinstance(policy, GraduationPolicy) or not isinstance(trusted_gate_state, GateState):
         raise TypeError("expected frozen GraduationPolicy and evaluator-held GateState")
     GraduationPolicy.__post_init__(policy)
-    if (type(expected_scope_fingerprint) is not str
-            or _SHA256.fullmatch(expected_scope_fingerprint) is None):
-        return GateDecision("BLOCKED", ("missing trusted predeclared scope binding",), trusted_gate_state)
-    if (type(expected_development_exam_id) is not str
-            or _IDENTIFIER.fullmatch(expected_development_exam_id) is None):
-        return GateDecision("BLOCKED", ("missing trusted developmental exam binding",), trusted_gate_state)
-    if (request.scope_fingerprint != expected_scope_fingerprint
-            or request.development_exam_id != expected_development_exam_id
+    if type(trusted_precommit) is not JourneyQualificationPrecommit:
+        return GateDecision("BLOCKED", ("missing evaluator-held journey precommit",), trusted_gate_state)
+    try:
+        JourneyQualificationPrecommit.__post_init__(trusted_precommit)
+    except ValueError:
+        return GateDecision("BLOCKED", ("invalid evaluator-held journey precommit",), trusted_gate_state)
+    if (request.scope_fingerprint != trusted_precommit.scope_fingerprint
+            or request.development_exam_id != trusted_precommit.development_exam_id
+            or request.entrant_checkpoint_sha256 != trusted_precommit.entrant_checkpoint_sha256
+            or request.development_cycle_index != trusted_precommit.development_cycle_index
             or request.objective_id != policy.objective_id
             or request.candidate_checkpoint_sha256 != policy.trainee_sha256):
         return GateDecision(
-            "BLOCKED", ("qualification request does not match pinned scope, candidate and objective",),
+            "BLOCKED", ("qualification request does not match pinned journey lineage, candidate and objective",),
             trusted_gate_state,
         )
     # Do not inspect or leak the signed receipt. This gate already checks

@@ -19,13 +19,14 @@ def make_scope():
     )
 
 
-def make_cases(*, weak_skill=None):
+def make_cases(*, weak_skill=None, weak_heldout_skill=None):
     cases = []
     for skill in make_scope().skills:
         for split in ("heldout", "transfer"):
             for index in range(4):
                 text = f"{skill}:{split}:{index}"
-                candidate = 0.5 if weak_skill == skill and split == "transfer" else 1.0
+                candidate = 0.5 if ((weak_skill == skill and split == "transfer")
+                                    or (weak_heldout_skill == skill and split == "heldout")) else 1.0
                 cases.append(ExamCaseResult(
                     case_id=f"{skill}-{split}-{index}", skill=skill, split=split,
                     score=candidate, baseline_score=0.25,
@@ -58,6 +59,16 @@ class MinotaurExamTests(unittest.TestCase):
         )
         self.assertEqual(decision.status, "FAIL")
         self.assertEqual(decision.weak_skills, ("compassionate_empathy",))
+
+    def test_weak_heldout_cannot_be_hidden_by_perfect_transfer(self):
+        # Eight cases for this skill average 0.75, but heldout is only 0.50.
+        # Development mastery must pass BOTH independently covered splits.
+        decision = evaluate_minotaur(
+            make_scope(), make_receipt(cases=make_cases(weak_heldout_skill="cognitive_empathy"))
+        )
+        self.assertEqual(decision.status, "FAIL")
+        self.assertEqual(decision.weak_skills, ("cognitive_empathy",))
+        self.assertEqual(dict(decision.mean_accuracy_by_skill)["cognitive_empathy"], 0.75)
 
     def test_incomplete_transfer_coverage_never_passes(self):
         cases = tuple(case for case in make_cases()

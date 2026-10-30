@@ -338,8 +338,16 @@ class MinotaurTrainingPolicy:
             tactic = "contrast"
             if mastered(contrast):
                 tactic = "transfer"
-        wins = sum(value["correct"] for value in counts.values())
-        losses = sum(value["incorrect"] for value in counts.values())
+        # Difficulty must follow evidence for the *current* tactic. Otherwise
+        # many old practice wins can keep a failing contrast/transfer chamber
+        # maximally difficult. For a newly introduced tactic, use the mastered
+        # prerequisite only until that tactic produces its own observations.
+        active = counts[tactic]
+        if active["correct"] + active["incorrect"] == 0 and tactic != "practice":
+            prerequisite = "practice" if tactic == "contrast" else "contrast"
+            active = counts[prerequisite]
+        wins = active["correct"]
+        losses = active["incorrect"]
         difference = wins - losses
         adjustment = min(2, difference // 2) if difference >= 0 else -min(2, (-difference + 1) // 2)
         difficulty = max(1, min(5, context.specificity + adjustment))

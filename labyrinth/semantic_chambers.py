@@ -81,6 +81,8 @@ def _replay_program(case: Challenge) -> tuple[int, int, frozenset[str]]:
 def generate_semantic_program_challenge(
     scope: TrainingScopeSpec,
     room: MazeRoom,
+    *,
+    difficulty: int | None = None,
 ) -> Challenge:
     """Select a fresh TRAIN-only program case matching the declared focus.
 
@@ -88,7 +90,9 @@ def generate_semantic_program_challenge(
     MazePlan; this provider does not own maze provenance or score the trainee.
     Its returned Challenge includes the private gold and MUST stay trainer-side.
 
-    Specificity narrows along a documented nested path:
+    Specificity narrows along a documented nested path. An adaptive corridor
+    may instead supply its observed TRAIN-only difficulty (1..5), without
+    altering the learner's immutable declared scope or opening a holdout split:
       1: public training structures, 3 or 4 instructions;
       2: four instructions only;
       3: a cross-register dependency path, MUL A -> SUB B A -> ADD B -> ADD A B;
@@ -106,7 +110,8 @@ def generate_semantic_program_challenge(
     if room.skill != "program_reasoning" or room.skill not in scope.skills:
         raise ValueError("semantic provider supports only declared program_reasoning skill")
 
-    profile = semantic_focus_profile(scope.specificity)
+    target = scope.specificity if difficulty is None else difficulty
+    profile = semantic_focus_profile(target)
     tag = f"semantic-program-focus-v1\x1f{scope.fingerprint}\x1f{room.room_id}\x1f{room.case_seed}"
     source_seed = int.from_bytes(sha256(tag.encode("utf-8")).digest()[:8], "big") % (2**31)
     cases = generate_program_challenges(source_seed, MAX_CANDIDATES, "train")
@@ -118,11 +123,11 @@ def generate_semantic_program_challenge(
             raise ValueError("unexpected non-training challenge from approved generator")
         _answer, instruction_count, wrapped = _replay_program(case)
         structure = metadata["structure"]
-        if scope.specificity >= 2 and instruction_count != 4:
+        if target >= 2 and instruction_count != 4:
             continue
-        if scope.specificity >= 3 and structure != FOCAL_STRUCTURE:
+        if target >= 3 and structure != FOCAL_STRUCTURE:
             continue
-        if scope.specificity >= 4:
+        if target >= 4:
             # Source presents four operations. A wrap event is a modular
             # reduction that changes an intermediate arithmetic value.
             # The independent replay records which register was affected.
@@ -131,8 +136,16 @@ def generate_semantic_program_challenge(
                 continue
         else:
             wraps = 0
-        if scope.specificity == 5 and wrapped != frozenset(("A", "B")):
+        if target == 5 and wrapped != frozenset(("A", "B")):
             continue
+        selected_metadata = case.metadata + (
+            ("semantic_selector", "labyrinth.program-focus.v1"),
+            ("specificity", str(target)),
+            ("semantic_focus", profile),
+            ("wrap_events", str(wraps)),
+        )
+        if difficulty is not None:
+            selected_metadata += (("adaptive_difficulty", str(target)),)
         return Challenge(
             id=case.id,
             kind=case.kind,
@@ -140,12 +153,7 @@ def generate_semantic_program_challenge(
             split="train",
             prompt=case.prompt,
             answer=case.answer,
-            metadata=case.metadata + (
-                ("semantic_selector", "labyrinth.program-focus.v1"),
-                ("specificity", str(scope.specificity)),
-                ("semantic_focus", profile),
-                ("wrap_events", str(wraps)),
-            ),
+            metadata=selected_metadata,
         )
     raise ValueError("approved generator cannot satisfy declared semantic specificity within bounded budget")
 

@@ -232,6 +232,14 @@ def preflight_resume(
             or not adapter_files
             or sum(path.stat().st_size for path in adapter_files) > MAX_PREDECESSOR_ADAPTER_BYTES):
         raise ValueError("predecessor adapter exceeds bounded file-count or byte budget")
+    # run_pilot persists PeftModel.save_pretrained(..., safe_serialization=True).
+    # An interrupted save can leave a hashed directory with arbitrary files,
+    # or a zero-byte tensor file, but no PEFT-loadable candidate checkpoint.
+    # Reject this before importing the neural stack or accepting its lineage.
+    adapter_weights = adapter_dir / "adapter_model.safetensors"
+    if (adapter_weights.is_symlink() or not adapter_weights.is_file()
+            or adapter_weights.stat().st_size == 0):
+        raise ValueError("predecessor requires nonempty adapter_model.safetensors")
     actual_adapters = _adapter_manifest(adapter_dir)
     if actual_adapters != report.get("candidate_adapter_sha256"):
         raise ValueError("predecessor adapter files changed after the recorded training run")

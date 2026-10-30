@@ -78,6 +78,25 @@ class MinotaurPolicyLearningTests(unittest.TestCase):
         adjusted = learner.propose_room(context().public_metadata())
         self.assertEqual(adjusted, {"difficulty": 1, "tactic": "practice"})
 
+    def test_current_tactic_failures_are_not_hidden_by_old_practice_success(self):
+        # Practice mastery authorizes an attempt at contrast, but repeated
+        # contrast failures are evidence against keeping that stage difficult.
+        # Historical practice wins must not drown out current-stage failures.
+        cases = tuple(
+            approval(i, tactic="practice" if i < 8 else "contrast")
+            for i in range(12)
+        )
+        learner = MinotaurTrainingPolicy(scope=SCOPE, approved_training_cases=cases)
+        for i in range(8):
+            learner.observe(outcome(i, correct=True))
+        self.assertEqual(learner.propose_room(context().public_metadata())["tactic"], "contrast")
+        for i in range(8, 12):
+            learner.observe(outcome(i, tactic="contrast", correct=False))
+        self.assertEqual(
+            learner.propose_room(context().public_metadata()),
+            {"difficulty": 1, "tactic": "contrast"},
+        )
+
     def test_zero_update_and_corrupt_label_controls_are_distinguishable(self):
         correct, sham, corrupt = model(), model(), model()
         initial = correct.model_hash

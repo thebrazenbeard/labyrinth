@@ -227,6 +227,24 @@ class ResumeBridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "adapter files changed"):
             preflight_resume(self.config, self.prior, self.context)
 
+    def test_incomplete_adapter_checkpoint_refused_even_when_report_hashes_match(self):
+        # A failed/interrupted PEFT save can leave a nonempty directory and
+        # otherwise self-consistent hashes, yet no loadable model tensor file.
+        required = self.adapter / "adapter_model.safetensors"
+        displaced = self.adapter / "incomplete.safetensors"
+        required.rename(displaced)
+        self.prior_report["candidate_adapter_sha256"] = _adapter_manifest(self.adapter)
+        self._rewrite_report()
+        with self.assertRaisesRegex(ValueError, "nonempty adapter_model.safetensors"):
+            preflight_resume(self.config, self.prior, self.context)
+        displaced.rename(required)
+        required.write_bytes(b"")
+        self.prior_report["candidate_adapter_sha256"] = _adapter_manifest(self.adapter)
+        self._rewrite_report()
+        with self.assertRaisesRegex(ValueError, "nonempty adapter_model.safetensors"):
+            preflight_resume(self.config, self.prior, self.context)
+        self.assertFalse(Path(self.config.output_dir).exists())
+
     def test_existing_successor_root_is_refused_and_not_modified(self):
         successor = Path(self.config.output_dir)
         successor.mkdir()
