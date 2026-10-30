@@ -83,3 +83,38 @@ this evidence. Narrow physical weight-change/persistence observations can
 support Q3/Q4; Q5 failed to demonstrate a positive advantage in this run,
 Q6 remains UNKNOWN for independent retention/transfer, Q7 NOT RUN,
 Q8 full FAIL/HOLD, and Q9 HOLD.
+
+## Follow-up fixed-seed sixteen-step ablation
+
+To test whether the first run was underpowered, a fresh, isolated experiment
+used the **same source checksum, model ID, generated Maze, learner seed,
+training cases, operator-declared weakness, and three control arms**, with
+only `--steps-per-cycle 16` instead of 8 and the new destination
+`outputs\mazeconditioned16`. Lappy preflight again reported zero
+conflicting trainers, a nonexistent target directory, and approximately
+8.64 million KiB free RAM. The completed report independently hashed to
+`b23dc9fac4a97494d272909221246e2ee08eaf30ae63013cc4aa24025a321e21`.
+The same frozen pretrained base SHA-256
+`001fba634a5244f2d2e4dc914b9c4f72fcdd41fc36a281f9ce4040dd20de4525`
+was recorded, along with a fresh-instance final readback in each arm.
+
+| Arm | Final public development | Final public transfer | Optimizer updates/cycle |
+| --- | ---: | ---: | ---: |
+| Correct labels | **10/10** | **8/10** | 16 |
+| Zero update | **5/10** | **6/10** | 0 |
+| Inverted labels | **0/10** | **3/10** | 16 |
+
+All **12/12 saved adapter/head checkpoint file hashes** independently matched
+the report again. Correct/inverted arms changed trainable values in both
+cycles; zero-update remained unchanged; cycle-to-cycle trainable continuity
+and frozen weight identity matched for all three arms.
+
+This establishes a positive **matched-exposure public development advantage**
+after 16 steps. It does not retroactively change the eight-step negative
+result. The experiment was selected after observing that result, its public
+evaluation prompts are exposed and lexically related to training, and it uses
+one seed with a non-random inverted-label control. An independent preregistered
+multiseed examination remains necessary before any generalization, retention,
+or graduation claim. Q5 can be described as a **physical public-control
+comparison PASS for this exact 16-step case only**, not a fully independently
+qualified gate. Q6/Q7/Q8/Q9 remain unqualified.

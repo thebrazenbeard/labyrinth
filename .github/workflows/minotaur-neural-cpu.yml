@@ -37,6 +37,8 @@ on:
       - "labyrinth/retention_qualification.py"
       - "labyrinth/measured_weakness_feedback.py"
       - "labyrinth/atomic_artifact_publication.py"
+      - "labyrinth/preregistered_control_matrix.py"
+      - "labyrinth/arithmetic_semantic_case_key.py"
       - "labyrinth/retention_family_registry.py"
       - "labyrinth/retention_entrypoint_guard.py"
       - "labyrinth/monotonic_anchor_protocol.py"
@@ -71,6 +73,8 @@ on:
       - "tests/test_retention_qualification.py"
       - "tests/test_measured_weakness_feedback.py"
       - "tests/test_atomic_artifact_publication.py"
+      - "tests/test_preregistered_control_matrix.py"
+      - "tests/test_arithmetic_semantic_case_key.py"
       - "tests/test_retention_family_registry.py"
       - "tests/test_retention_entrypoint_guard.py"
       - "tests/test_monotonic_anchor_protocol.py"
@@ -126,6 +130,8 @@ on:
       - "labyrinth/retention_qualification.py"
       - "labyrinth/measured_weakness_feedback.py"
       - "labyrinth/atomic_artifact_publication.py"
+      - "labyrinth/preregistered_control_matrix.py"
+      - "labyrinth/arithmetic_semantic_case_key.py"
       - "labyrinth/retention_family_registry.py"
       - "labyrinth/retention_entrypoint_guard.py"
       - "labyrinth/monotonic_anchor_protocol.py"
@@ -160,6 +166,8 @@ on:
       - "tests/test_retention_qualification.py"
       - "tests/test_measured_weakness_feedback.py"
       - "tests/test_atomic_artifact_publication.py"
+      - "tests/test_preregistered_control_matrix.py"
+      - "tests/test_arithmetic_semantic_case_key.py"
       - "tests/test_retention_family_registry.py"
       - "tests/test_retention_entrypoint_guard.py"
       - "tests/test_monotonic_anchor_protocol.py"
@@ -269,6 +277,8 @@ jobs:
               ("tests.test_qualify_taskmaster_counterfactual_cpu", 11),
               ("tests.test_measured_weakness_feedback", 7),
               ("tests.test_atomic_artifact_publication", 10),
+              ("tests.test_preregistered_control_matrix", 18),
+              ("tests.test_arithmetic_semantic_case_key", 7),
           )
           for module_name, min_count in new_required:
               suite = unittest.defaultTestLoader.loadTestsFromName(module_name)
