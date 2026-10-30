@@ -73,3 +73,73 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         ):
             with self.subTest(module=module):
                 self.assertIn(module, test_step)
+
+    def test_hf_neural_transition_changes_trigger_dependency_present_checks(self):
+        # The signed development transition and opt-in two-cycle harness are
+        # new neural boundaries. They must not rely solely on the generic
+        # Python workflow, which permits optional neural dependencies to skip.
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        pull_request_paths = workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+            "  push:\n", 1)[0]
+        main_push_paths = workflow.split("  push:\n", 1)[1].split(
+            "  workflow_dispatch:\n", 1)[0]
+        for path in (
+            "labyrinth/hf_development_transition.py",
+            "labyrinth/hf_resume_bridge.py",
+            "scripts/qualify_hf_regenerative.py",
+            "tests/test_hf_development_transition.py",
+            "tests/test_hf_resume_bridge.py",
+            "tests/test_hf_regenerative_harness.py",
+        ):
+            for trigger, manifest in (("pull_request", pull_request_paths),
+                                      ("push/main", main_push_paths)):
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', manifest)
+        test_step = workflow.split(
+            "      - name: Minotaur tests with neural dependencies present\n", 1)[1]
+        for module in (
+            "tests.test_hf_development_transition",
+            "tests.test_hf_resume_bridge",
+            "tests.test_hf_regenerative_harness",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(module, test_step)
+
+    def test_scoped_hf_and_objective_changes_trigger_dependency_present_checks(self):
+        # Public diagnostic rotation, scoped report custody and objective
+        # TRAIN materialization are also part of the HF journey boundary.
+        # An edit confined to any of them must trigger the pinned CPU job.
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        pull_request_paths = workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+            "  push:\n", 1)[0]
+        main_push_paths = workflow.split("  push:\n", 1)[1].split(
+            "  workflow_dispatch:\n", 1)[0]
+        for path in (
+            "labyrinth/hf_pilot.py",
+            "labyrinth/hf_report_audit.py",
+            "labyrinth/objective_contract.py",
+            "tests/test_hf_pilot.py",
+            "tests/test_hf_report_audit.py",
+            "tests/test_hf_journey_resume_integration.py",
+            "tests/test_hf_scoped_report_audit.py",
+            "tests/test_objective_contract.py",
+            "tests/test_reserved_structural_transfer.py",
+        ):
+            for trigger, manifest in (("pull_request", pull_request_paths),
+                                      ("push/main", main_push_paths)):
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', manifest)
+        test_step = workflow.split(
+            "      - name: Minotaur tests with neural dependencies present\n", 1)[1]
+        for module in (
+            "tests.test_hf_pilot",
+            "tests.test_hf_report_audit",
+            "tests.test_hf_journey_resume_integration",
+            "tests.test_hf_scoped_report_audit",
+            "tests.test_objective_contract",
+            "tests.test_reserved_structural_transfer",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(module, test_step)

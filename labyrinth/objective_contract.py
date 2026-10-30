@@ -6,11 +6,15 @@ implementation, dataset, training authorization, or Minotaur graduation grant.
 Callers must separately bind operator-approved task generators and evaluators.
 The focus-selection helper informs a future curriculum provider; it does not
 itself alter challenge content or certify that a provider honored the target.
+
+An opt-in, TRAIN-only program-reasoning bridge below binds exactly one approved
+focus tag to the existing deterministic semantic program provider. All other
+objective contracts remain declarations, and no evaluator/rubric is synthesized.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import re
@@ -223,3 +227,62 @@ def parse_objective_json(raw: bytes) -> ObjectiveContract:
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError("invalid UTF-8 objective contract") from exc
     return ObjectiveContract.from_dict(data)
+
+
+def prepare_objective_program_room(
+    contract: ObjectiveContract, plan: "MazePlan", room: "MazeRoom",
+) -> "PreparedTrainingRoom":
+    """Bind one *approved* program focus declaration to executable TRAIN content.
+
+    Only the five public semantic program profiles and the explicit
+    ``program_structure_v1`` *training* rubric marker are recognized. This
+    helper does not execute that rubric, grade a learner, authorize graduation,
+    infer arbitrary goals, or handle private examination commitments.
+
+    The returned PreparedTrainingRoom contains trainer-only gold; send only
+    ``prepared.trainee_view`` to a learner. The caller retains custody of the
+    plan, trainer output, and history/sealed-exam anti-reuse commitments.
+    """
+    from .journey_challenges import PreparedTrainingRoom
+    from .regenerative_maze import MazePlan, MazeRoom
+    from .semantic_chambers import (
+        generate_semantic_program_challenge, semantic_focus_profile,
+    )
+
+    if type(contract) is not ObjectiveContract:
+        raise ValueError("expected an immutable ObjectiveContract")
+    ObjectiveContract.__post_init__(contract)
+    scope = contract.training_scope
+    if (scope.skills != ("program_reasoning",) or len(contract.targets) != 1
+            or scope.domain not in ("reasoning", "program_reasoning")):
+        raise ValueError("executable objective focus supports program_reasoning only")
+    target = contract.targets[0]
+    if target.rubric_id != "program_structure_v1" or len(target.focus_tags) != 1:
+        raise ValueError("no approved executable training rubric and single focus tag")
+    focus = contract.selected_focus("program_reasoning")
+    levels_by_profile = {semantic_focus_profile(level): level for level in range(1, 6)}
+    if len(focus) != 1 or focus[0] not in levels_by_profile:
+        raise ValueError("unsupported executable program focus tag")
+
+    if type(plan) is not MazePlan or type(room) is not MazeRoom:
+        raise ValueError("expected a validated TRAIN maze and room")
+    MazePlan.__post_init__(plan)
+    MazeRoom.__post_init__(room)
+    if (plan.objective_id != scope.objective_id
+            or plan.scope_fingerprint != scope.fingerprint
+            or room not in plan.rooms
+            or room.skill != "program_reasoning" or room.purpose != "train"):
+        raise ValueError("TRAIN room is outside the declared objective and maze")
+
+    challenge = generate_semantic_program_challenge(
+        scope, room, difficulty=levels_by_profile[focus[0]],
+    )
+    if (challenge.split != "train"
+            or dict(challenge.metadata).get("semantic_focus") != focus[0]):
+        raise ValueError("trusted provider did not honor the approved TRAIN focus")
+    challenge = replace(challenge, metadata=challenge.metadata + (
+        ("objective_contract_sha256", contract.fingerprint),
+        ("objective_focus_tag", focus[0]),
+        ("objective_training_rubric_marker", target.rubric_id),
+    ))
+    return PreparedTrainingRoom(room.room_id, room.skill, challenge)

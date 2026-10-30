@@ -19,7 +19,7 @@ from unittest import mock
 
 from labyrinth.hf_pilot import (
     PilotConfig, _resume_training_cases, _scoped_training_cases,
-    run_pilot, training_cases,
+    reload_evaluate, run_pilot, training_cases,
 )
 from labyrinth.hf_resume_bridge import ResumeContext
 from labyrinth.training_scope import TrainingScopeSpec
@@ -75,7 +75,57 @@ class ResumeIntegrationTests(unittest.TestCase):
         self.assertEqual(second_plan.cycle_index, 1)
         self.assertTrue({case.id for case in first}.isdisjoint({case.id for case in second}))
         self.assertTrue({case.prompt for case in second}.isdisjoint({case.prompt for case in heldout}))
-        self.assertEqual([case.id for case in heldout], [case.id for case in next_heldout])
+        self.assertTrue({case.id for case in heldout}.isdisjoint({case.id for case in next_heldout}))
+        self.assertTrue({case.prompt for case in heldout}.isdisjoint({case.prompt for case in next_heldout}))
+        self.assertEqual({case.split for case in heldout + next_heldout}, {"eval"})
+
+    def test_scoped_resume_rejects_current_diagnostic_reusing_historical_public_prompt(self):
+        prior = self._prior_report(scoped_cycle=1)
+        _, current_eval, _ = _scoped_training_cases(self.config, self.scope, 2, ())
+        prior["resumed_journey"]["historical_prompt_sha256"].append(
+            hashlib.sha256(current_eval[0].prompt.encode("utf-8")).hexdigest()
+        )
+        with self.assertRaisesRegex(ValueError, "overlaps prior"):
+            _resume_training_cases(self.config, self.scope, 2, (), prior)
+
+    def test_scoped_reload_reconstructs_the_recorded_cycle_diagnostic(self):
+        from labyrinth.hf_pilot import (
+            SCHEMA, _metadata_digest, _prompt_commitment, _weights_digest,
+        )
+        from labyrinth.runner import _source_state
+
+        run_dir = self.root / "scoped-reload"
+        run_dir.mkdir()
+        adapter = run_dir / "candidate_adapter"
+        adapter.mkdir()
+        (adapter / "adapter_model.safetensors").write_bytes(b"fake-adapter")
+        config = PilotConfig(**{**asdict(self.config), "output_dir": str(run_dir)})
+        _, diagnostic, _ = _scoped_training_cases(config, self.scope, 1, ())
+        _, unscoped = training_cases(config)
+        self.assertNotEqual([case.id for case in diagnostic], [case.id for case in unscoped])
+        report = {
+            "schema": SCHEMA, "source": _source_state(),
+            "config": {**asdict(config), "tiers": list(config.tiers)},
+            "base_weights_sha256": _weights_digest([self.base / "model.safetensors"]),
+            "model_metadata_sha256": _metadata_digest(self.base),
+            "candidate_adapter_sha256": {
+                "adapter_model.safetensors": hashlib.sha256(b"fake-adapter").hexdigest(),
+            },
+            "heldout_case_ids": [case.id for case in diagnostic],
+            "heldout_public_prompt_sha256": _prompt_commitment(diagnostic),
+            "resumed_journey": {"scope": self.scope.to_dict(),
+                                "scope_fingerprint": self.scope.fingerprint,
+                                "cycle_index": 1},
+        }
+        report_path = run_dir / "pilot_report.json"
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        with mock.patch("labyrinth.hf_pilot._deps", side_effect=AssertionError("deps reached")):
+            with self.assertRaisesRegex(AssertionError, "deps reached"):
+                reload_evaluate(run_dir, run_dir / "reload.json")
+            report["heldout_case_ids"] = [case.id for case in unscoped]
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "heldout generation differs"):
+                reload_evaluate(run_dir, run_dir / "reload.json")
 
     def test_unsupported_skill_is_not_misrepresented_by_tier_four_diagnostic(self):
         unsupported = TrainingScopeSpec(
@@ -164,11 +214,16 @@ class ResumeIntegrationTests(unittest.TestCase):
 
         model = Model()
         visits = []
+        evaluated_ids = []
         def fake_train(current, _tokenizer, _torch, train, labels, config, *, learning_rate=None):
             visits.append(("sham" if learning_rate == 0 else "correct" if labels == [c.answer for c in train] else "corrupt", current.value))
             if learning_rate != 0:
                 current.value = trained if labels == [c.answer for c in train] else corrupt
             return {"steps": config.steps, "visited_case_ids": [c.id for c in train]}
+
+        def fake_score(_model, _tokenizer, _torch, cases, **_kwargs):
+            evaluated_ids.append(tuple(case.id for case in cases))
+            return {"trials": [], "correct": 0, "total": 0}
 
         torch = SimpleNamespace(
             get_num_threads=lambda: 4, set_num_threads=lambda _value: None,
@@ -189,7 +244,7 @@ class ResumeIntegrationTests(unittest.TestCase):
             mock.patch("labyrinth.hf_pilot._deps", return_value=mock_deps),
             mock.patch("labyrinth.hf_pilot._device_headroom", return_value=None),
             mock.patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])),
-            mock.patch("labyrinth.hf_pilot._score_model", return_value={"trials": [], "correct": 0, "total": 0}),
+            mock.patch("labyrinth.hf_pilot._score_model", side_effect=fake_score),
             mock.patch("labyrinth.hf_pilot._train_steps", side_effect=fake_train),
             mock.patch("labyrinth.hf_pilot._parameter_digest", side_effect=lambda obj, _torch: obj.value),
             mock.patch("labyrinth.hf_pilot._lora_value_digest", side_effect=lambda obj, _torch: obj.value),
@@ -203,6 +258,10 @@ class ResumeIntegrationTests(unittest.TestCase):
                 allow_unscoped_predecessor=True,
             )
         self.assertEqual(visits, [("sham", initial), ("correct", initial), ("corrupt", initial)])
+        self.assertEqual(len(evaluated_ids), 4)
+        self.assertEqual(len(set(evaluated_ids)), 1)
+        _, expected_diagnostic, _ = _scoped_training_cases(self.config, self.scope, 1, ())
+        self.assertEqual(evaluated_ids[0], tuple(case.id for case in expected_diagnostic))
         self.assertEqual(model.saved, trained)
         self.assertEqual(result["initial_lora_parameter_sha256"], initial)
         self.assertEqual(result["candidate_lora_parameter_sha256"], trained)

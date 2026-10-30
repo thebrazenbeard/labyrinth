@@ -149,14 +149,38 @@ def training_cases(config: PilotConfig) -> tuple[list[Challenge], list[Challenge
     return train, heldout
 
 
+def _scoped_public_heldout(config: PilotConfig, scope: Any, cycle_index: int) -> list[Challenge]:
+    """Deterministic, cycle-specific *public development* diagnostic cases.
+
+    The seed is committed to the declared scope and cycle, never influenced by
+    candidate answers or training labels. This is not an unseen/private final
+    examination. Unscoped v2/v3 pilots retain their historical fixed split.
+    """
+    from .training_scope import TrainingScopeSpec
+
+    if type(scope) is not TrainingScopeSpec:
+        raise ValueError("scoped diagnostic requires a validated TrainingScopeSpec")
+    TrainingScopeSpec.__post_init__(scope)
+    if type(cycle_index) is not int or not 0 <= cycle_index < scope.max_cycles:
+        raise ValueError("diagnostic cycle outside declared training scope")
+    digest = hashlib.sha256(
+        f"labyrinth.hf-public-diagnostic.v1:{scope.fingerprint}:{config.seed}:{cycle_index}"
+        .encode("ascii")
+    ).digest()
+    seed = int.from_bytes(digest[:4], "big") & (2**31 - 1)
+    return generate_maze(seed=seed, count=config.eval_count,
+                         tiers=config.tiers, split="eval")
+
+
 def _scoped_training_cases(config: PilotConfig, scope: Any, cycle_index: int,
                            weak_skills: tuple[str, ...]
                            ) -> tuple[list[Challenge], list[Challenge], Any]:
     """Materialize a scoped TRAIN maze; never use exam cases for SGD.
 
-    The held-out split stays the existing v3 pilot's public diagnostic set.
-    This is not the Minotaur's private graduation examination. A nonexistent
-    skill provider fails closed instead of pretending a declared goal was taught.
+    Public diagnostic cases change with each cycle and are shared by all
+    matched arms *within* that cycle. They are not a private final exam. A
+    nonexistent skill provider fails closed instead of pretending a declared
+    goal was taught.
     """
     from .journey_challenges import prepare_training_rooms
     from .regenerative_maze import generate_maze_plan
@@ -183,7 +207,7 @@ def _scoped_training_cases(config: PilotConfig, scope: Any, cycle_index: int,
         raise ValueError("resumed maze tiers must exactly match pilot diagnostic tiers")
     if config.steps < len({challenge.tier for challenge in train}):
         raise ValueError("steps insufficient to visit each regenerated training tier")
-    _, heldout = training_cases(config)
+    heldout = _scoped_public_heldout(config, scope, cycle_index)
     if ({challenge.id for challenge in train} & {challenge.id for challenge in heldout}
             or {challenge.prompt for challenge in train} & {challenge.prompt for challenge in heldout}):
         raise ValueError("scoped training maze overlaps public heldout diagnostic cases")
@@ -225,7 +249,7 @@ def _resume_training_cases(config: PilotConfig, scope: Any, cycle_index: int,
         prior_plan = generate_maze_plan(scope, cycle_index - 1, weak_skills=prior_weak_skills)
         prior_train = [room.challenge for room in prepare_training_rooms(
             prior_plan, semantic_scope=scope)]
-        _, prior_eval = training_cases(prior_training)
+        prior_eval = _scoped_public_heldout(prior_training, scope, cycle_index - 1)
     if [challenge.id for challenge in prior_train] != prior_train_ids or [challenge.id for challenge in prior_eval] != prior_heldout_ids:
         raise ValueError("predecessor training/evaluation generation disagrees with report")
     earlier = prior_train + prior_eval
@@ -247,13 +271,12 @@ def _resume_training_cases(config: PilotConfig, scope: Any, cycle_index: int,
             raise ValueError("predecessor history does not seal all immediate public cases")
         old_ids.update(history_ids)
         old_prompt_hashes.update(history_hashes)
-    new_ids = {challenge.id for challenge in train}
+    new_ids = {challenge.id for challenge in train + heldout}
     new_prompt_hashes = {hashlib.sha256(challenge.prompt.encode("utf-8")).hexdigest()
-                         for challenge in train}
+                         for challenge in train + heldout}
     if (new_ids & old_ids or new_prompt_hashes & old_prompt_hashes
-            or new_ids & {challenge.id for challenge in heldout}
-            or new_prompt_hashes & {hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
-                                    for case in heldout}):
+            or {challenge.id for challenge in train} & {challenge.id for challenge in heldout}
+            or {challenge.prompt for challenge in train} & {challenge.prompt for challenge in heldout}):
         raise ValueError("regenerated training maze overlaps prior or current evaluation/training content")
     return train, heldout, plan
 
@@ -891,7 +914,18 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     actual_adapters = _adapter_manifest(adapter_dir)
     if actual_adapters != report.get("candidate_adapter_sha256"):
         raise ValueError("candidate adapter changed after training")
-    _, heldout = training_cases(config)
+    cycle_receipt = report.get("resumed_journey")
+    if cycle_receipt is None:
+        _, heldout = training_cases(config)
+    else:
+        from .training_scope import TrainingScopeSpec
+
+        if type(cycle_receipt) is not dict:
+            raise ValueError("malformed scoped diagnostic receipt")
+        scoped = TrainingScopeSpec.from_dict(cycle_receipt.get("scope"))
+        if scoped.fingerprint != cycle_receipt.get("scope_fingerprint"):
+            raise ValueError("scoped diagnostic scope fingerprint changed")
+        heldout = _scoped_public_heldout(config, scoped, cycle_receipt.get("cycle_index"))
     if [c.id for c in heldout] != report.get("heldout_case_ids"):
         raise ValueError("heldout generation differs from training report")
     if _prompt_commitment(heldout) != report.get("heldout_public_prompt_sha256"):

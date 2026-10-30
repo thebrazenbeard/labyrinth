@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 from labyrinth.training_scope import TrainingScopeSpec
-from scripts.qualify_hf_regenerative import _command, preflight
+from scripts.qualify_hf_regenerative import _command, _run_bounded_child, preflight
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "qualify_hf_regenerative.py"
@@ -128,6 +130,49 @@ class HFRegenerativeHarnessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "LoRA digest"):
             _command(plan, 1, predecessor={"candidate_lora_tensor_value_sha256": "bad"},
                      predecessor_report_path=report_path, authority_ref="operator-123")
+
+    def test_hanging_child_is_bounded_and_owned_receipts_remain(self):
+        run_root = self.outputs / "fake-run"
+        run_root.mkdir()
+        began = time.monotonic()
+        with self.assertRaisesRegex(TimeoutError, "timed out"):
+            _run_bounded_child(
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                run_root=run_root, phase="cycle-0-train", timeout_seconds=0.2,
+            )
+        self.assertLess(time.monotonic() - began, 6.0)
+        receipt = json.loads((run_root / "child-cycle-0-train-outcome.json").read_text())
+        self.assertEqual(receipt["status"], "TIMEOUT")
+        self.assertEqual(receipt["phase"], "cycle-0-train")
+        self.assertTrue((run_root / "child-cycle-0-train-output.log").is_file())
+        self.assertTrue((run_root / "child-cycle-0-train-start.json").is_file())
+        if os.name == "posix":
+            with self.assertRaises(ProcessLookupError):
+                os.kill(receipt["pid"], 0)
+
+    def test_child_failure_is_reported_without_overwrite(self):
+        run_root = self.outputs / "fake-run"
+        run_root.mkdir()
+        with self.assertRaises(subprocess.CalledProcessError):
+            _run_bounded_child(
+                [sys.executable, "-c", "raise SystemExit(7)"],
+                run_root=run_root, phase="cycle-0-train", timeout_seconds=3,
+            )
+        receipt = json.loads((run_root / "child-cycle-0-train-outcome.json").read_text())
+        self.assertEqual(receipt["status"], "FAILED")
+        self.assertEqual(receipt["exit_code"], 7)
+        with self.assertRaises(FileExistsError):
+            _run_bounded_child(
+                [sys.executable, "-c", "raise SystemExit(0)"],
+                run_root=run_root, phase="cycle-0-train", timeout_seconds=3,
+            )
+
+    def test_explicit_child_timeout_budget_is_bounded_before_writes(self):
+        result = subprocess.run(self.args() + ["--child-timeout-seconds", "14401"],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("child timeout", result.stderr)
+        self.assertEqual(tuple(self.outputs.iterdir()), ())
 
 
 if __name__ == "__main__":

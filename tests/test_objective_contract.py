@@ -1,6 +1,6 @@
 """Declarations describe observable, bounded targets without executing them."""
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, asdict, replace
 import json
 import unittest
 
@@ -9,7 +9,9 @@ from labyrinth.objective_contract import (
     ObjectiveContract,
     SkillTarget,
     parse_objective_json,
+    prepare_objective_program_room,
 )
+from labyrinth.regenerative_maze import generate_maze_plan
 from labyrinth.training_scope import TrainingScopeSpec
 
 
@@ -45,6 +47,79 @@ def _contract(scope=None):
 
 
 class ObjectiveContractTests(unittest.TestCase):
+    def test_approved_program_focus_changes_real_train_content(self):
+        # Only the explicitly approved program focus changes. Keep declared
+        # scope, room, and generator seed identical to rule out maze novelty.
+        scope = TrainingScopeSpec(
+            objective_id="program-focus-contract", domain="reasoning",
+            skills=("program_reasoning",), specificity=3,
+            scale=1, max_cycles=2, seed=20261030,
+        )
+
+        def contract(focus, rubric="program_structure_v1"):
+            return ObjectiveContract(
+                scope=scope, intention="Practice executable register reasoning.",
+                targets=(SkillTarget(
+                    skill="program_reasoning", focus_tags=(focus,),
+                    observable_behaviors=("Computes register A after a sequence of steps.",),
+                    rubric_id=rubric, minimum_score_percent=75,
+                    minimum_gain_percent=10,
+                ),),
+                excluded_scopes=("Private final examination material.",),
+                forbidden_claims=("TRAIN performance alone establishes graduation.",),
+            )
+
+        plan = generate_maze_plan(scope, 0)
+        room = plan.rooms[0]
+        focused_contract = contract("dependency_path_wrapping_both_registers")
+        broad = prepare_objective_program_room(
+            contract("mixed_3_to_4_instruction_structures"), plan, room,
+        )
+        focused = prepare_objective_program_room(
+            focused_contract, plan, room,
+        )
+        self.assertEqual(broad.challenge.split, "train")
+        self.assertEqual(focused.challenge.split, "train")
+        self.assertNotEqual(broad.challenge.prompt, focused.challenge.prompt)
+        self.assertEqual(dict(broad.challenge.metadata)["semantic_focus"],
+                         "mixed_3_to_4_instruction_structures")
+        self.assertEqual(dict(focused.challenge.metadata)["semantic_focus"],
+                         "dependency_path_wrapping_both_registers")
+        self.assertEqual(dict(focused.challenge.metadata)["objective_contract_sha256"],
+                         focused_contract.fingerprint)
+        self.assertIn("1. MUL A", focused.challenge.prompt)
+        self.assertIn("2. SUB B A", focused.challenge.prompt)
+        self.assertIn("3. ADD B", focused.challenge.prompt)
+        self.assertIn("4. ADD A B", focused.challenge.prompt)
+        self.assertNotIn("answer", asdict(focused.trainee_view))
+        self.assertEqual(focused.challenge, prepare_objective_program_room(
+            focused_contract, plan, room,
+        ).challenge)
+
+        multiple = replace(focused_contract, targets=(replace(
+            focused_contract.targets[0], focus_tags=(
+                "dependency_path_wrapping_both_registers",
+                "four_step_register_programs",
+            ),
+        ),))
+
+        for unsupported in (
+            contract("invented_focus"),
+            contract("dependency_path_wrapping_both_registers", "unapproved_rubric"),
+            multiple,
+            _contract(),
+        ):
+            with self.subTest(unsupported=unsupported), self.assertRaises(ValueError):
+                prepare_objective_program_room(unsupported, plan, room)
+        with self.assertRaises(ValueError):
+            prepare_objective_program_room(contract("four_step_register_programs"),
+                                           plan, replace(room, case_seed=room.case_seed + 1))
+        other_domain = replace(scope, domain="empathy")
+        wrong_domain = replace(focused_contract, scope=other_domain)
+        wrong_plan = generate_maze_plan(other_domain, 0)
+        with self.assertRaisesRegex(ValueError, "program_reasoning only"):
+            prepare_objective_program_room(wrong_domain, wrong_plan, wrong_plan.rooms[0])
+
     def test_wraps_legacy_training_scope_without_changing_its_identity(self):
         c = _contract()
         self.assertEqual(c.training_scope, _scope())

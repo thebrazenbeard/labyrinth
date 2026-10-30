@@ -12,11 +12,15 @@ No network/model download is performed by this script.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -41,6 +45,7 @@ _RUN_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z")
 _AUTHORITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _TOKENIZER_FILES = ("tokenizer.json", "tokenizer.model", "vocab.json", "vocab.txt",
                     "sentencepiece.bpe.model")
+_MAX_CHILD_TIMEOUT_SECONDS = 14400
 
 
 @dataclass(frozen=True)
@@ -54,6 +59,7 @@ class ProbePlan:
     disk_free_bytes: int
     disk_required_bytes: int
     model_origin_claim: str
+    child_timeout_seconds: int
 
     def public(self) -> dict[str, Any]:
         return {
@@ -63,6 +69,7 @@ class ProbePlan:
             "scope": self.scope.to_dict(),
             "model_path": str(self.model_path),
             "model_origin_claim": self.model_origin_claim,
+            "child_timeout_seconds": self.child_timeout_seconds,
             "base_model_origin_evidence": "OPERATOR_CLAIM_ONLY",
             "model_manifest": self.model_manifest,
             "run_root": str(self.run_root),
@@ -96,6 +103,10 @@ def preflight(args: argparse.Namespace) -> ProbePlan:
         raise ValueError("bounded operator model-origin-claim is required")
     if args.execute and (not args.authority_ref or not _AUTHORITY.fullmatch(args.authority_ref)):
         raise ValueError("--execute requires a bounded --authority-ref operator label")
+    child_timeout = getattr(args, "child_timeout_seconds", 1800)
+    if (type(child_timeout) is not int
+            or not 1 <= child_timeout <= _MAX_CHILD_TIMEOUT_SECONDS):
+        raise ValueError("child timeout must be 1-14400 seconds")
     if not (1 <= args.steps <= 16 and 2 <= args.train_count <= 16
             and 2 <= args.eval_count <= 16 and 32 <= args.max_tokens <= 512):
         raise ValueError("harness budget exceeds conservative steps/cases/token limits")
@@ -139,7 +150,7 @@ def preflight(args: argparse.Namespace) -> ProbePlan:
         raise ValueError("insufficient available disk for isolated two-cycle adapter outputs")
     return ProbePlan(scope, raw_scope.resolve(strict=True), cfg, model, run_root,
                      _checkpoint_manifest(model, weights), available, required,
-                     args.model_origin_claim)
+                     args.model_origin_claim, child_timeout)
 
 
 def _command(plan: ProbePlan, cycle: int, *, predecessor: dict[str, Any] | None,
@@ -192,6 +203,115 @@ def _read_report(path: Path, cycle: int, plan: ProbePlan) -> dict[str, Any]:
     return report
 
 
+def _stop_owned_child(proc: subprocess.Popen) -> bool:
+    """Stop only the subprocess we launched and, where supported, its children.
+
+    The POSIX subprocess is a new session/process group. On Windows, taskkill
+    targets the exact launched PID and its descendants; that host path still
+    requires physical qualification. Never kill unrelated host workloads.
+    """
+    if os.name == "posix":
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+        # Descendants might remain after the group leader exits.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    elif proc.poll() is None:
+        try:
+            result = subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=6, check=False,
+            )
+            if result.returncode != 0:
+                proc.kill()
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    pass
+                return False  # Direct child stopped; descendants unconfirmed.
+        except (OSError, subprocess.TimeoutExpired):
+            proc.kill()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass
+            return False
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        return False
+    return True
+
+
+def _run_bounded_child(command: list[str], *, run_root: Path,
+                       phase: str, timeout_seconds: float) -> None:
+    """Run a single owned child with a wall clock cap and forensic receipts."""
+    if not re.fullmatch(r"cycle-[01]-(train|reload)", phase):
+        raise ValueError("invalid owned child phase")
+    if (not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool)
+            or not 0 < timeout_seconds <= _MAX_CHILD_TIMEOUT_SECONDS):
+        raise ValueError("invalid child timeout")
+    if (type(command) is not list or not command
+            or any(type(part) is not str or not part for part in command)):
+        raise ValueError("child command must be a nonempty argv list")
+    if not run_root.is_dir() or run_root.is_symlink():
+        raise ValueError("owned child requires an existing non-symlink run root")
+    start_path = run_root / f"child-{phase}-start.json"
+    outcome_path = run_root / f"child-{phase}-outcome.json"
+    log_path = run_root / f"child-{phase}-output.log"
+    if any(path.exists() or path.is_symlink()
+           for path in (start_path, outcome_path, log_path)):
+        raise FileExistsError("owned child receipts already exist")
+    started = time.time()
+    with log_path.open("xb") as log:
+        kwargs: dict[str, Any] = {"cwd": REPO, "stdout": log, "stderr": subprocess.STDOUT}
+        if os.name == "posix":
+            kwargs["start_new_session"] = True
+        elif os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            raise RuntimeError("process-tree timeout requires POSIX or Windows")
+        proc = subprocess.Popen(command, **kwargs)
+        try:
+            _write_new(start_path, {
+                "phase": phase, "pid": proc.pid, "started_unix": started,
+                "timeout_seconds": timeout_seconds,
+                "argv_sha256": hashlib.sha256("\x00".join(command).encode()).hexdigest(),
+            })
+        except BaseException:
+            _stop_owned_child(proc)
+            raise
+        status, code, cleanup = "INTERRUPTED", None, None
+        try:
+            code = proc.wait(timeout=timeout_seconds)
+            status = "SUCCESS" if code == 0 else "FAILED"
+        except subprocess.TimeoutExpired:
+            cleanup = _stop_owned_child(proc)
+            status = "TIMEOUT" if cleanup else "TIMEOUT_CLEANUP_UNCONFIRMED"
+        except BaseException:
+            cleanup = _stop_owned_child(proc)
+            raise
+        finally:
+            _write_new(outcome_path, {
+                "phase": phase, "pid": proc.pid, "status": status,
+                "exit_code": code, "cleanup_confirmed": cleanup,
+                "elapsed_seconds": round(time.time() - started, 3),
+            })
+    if status.startswith("TIMEOUT"):
+        raise TimeoutError(f"{phase} timed out; cleanup={cleanup}; see {outcome_path}")
+    if code != 0:
+        raise subprocess.CalledProcessError(code, command)
+
+
 def execute(plan: ProbePlan, *, authority_ref: str) -> dict[str, Any]:
     """Run two bounded local training cycles and fresh-process reload checks.
 
@@ -210,13 +330,16 @@ def execute(plan: ProbePlan, *, authority_ref: str) -> dict[str, Any]:
         command = _command(plan, cycle, predecessor=preceding,
                            predecessor_report_path=preceding_path,
                            authority_ref=authority_ref)
-        subprocess.run(command, cwd=REPO, check=True)
+        _run_bounded_child(command, run_root=plan.run_root,
+                           phase=f"cycle-{cycle}-train",
+                           timeout_seconds=plan.child_timeout_seconds)
         report_path = run_dir / "pilot_report.json"
         report = _read_report(report_path, cycle, plan)
         reload_path = run_dir / "fresh_process_reload.json"
-        subprocess.run([sys.executable, "-m", "labyrinth.hf_pilot", "eval",
-                        "--run-dir", str(run_dir), "--report", str(reload_path)],
-                       cwd=REPO, check=True)
+        _run_bounded_child([sys.executable, "-m", "labyrinth.hf_pilot", "eval",
+                            "--run-dir", str(run_dir), "--report", str(reload_path)],
+                           run_root=plan.run_root, phase=f"cycle-{cycle}-reload",
+                           timeout_seconds=plan.child_timeout_seconds)
         reloaded = load_json(reload_path, strict=True)
         if (reloaded.get("process_id_differs") is not True
                 or reloaded.get("matches_original_candidate_trials") is not True
@@ -304,6 +427,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--answer-only", action="store_true")
     parser.add_argument("--execute", action="store_true", help="Run real local training; default is read-only")
+    parser.add_argument("--child-timeout-seconds", type=int, default=1800,
+                        help="Wall-time limit per owned training/reload child, 1-14400 seconds")
     parser.add_argument("--authority-ref", help="Opaque operator approval identifier, not a credential")
     args = parser.parse_args(argv)
     try:
