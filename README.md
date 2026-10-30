@@ -16,7 +16,10 @@ python -m labyrinth experiment --seed 42 --eval-count 3 --artifact-in training.j
 python -m labyrinth train-toy --seed 0 --train-count 64 --eval-count 64 --checkpoint-out toy-checkpoint.json --report toy-comparison.json
 python -m labyrinth toy-eval --seed 0 --eval-count 64 --checkpoint toy-checkpoint.json --report toy-reloaded.json
 python -m labyrinth journey-plan --scope examples/scopes/empathy_declaration.json --cycle 0 --report planned-maze.json
+python -m labyrinth journey-plan --objective-contract examples/objectives/empathy_observable_declaration.json
+python -m labyrinth journey-plan --scope examples/scopes/program_specificity5_declaration.json --materialize-training
 python -m labyrinth journey-toy --scope examples/scopes/arithmetic_toy_declaration.json --epochs-by-cycle 4,4,4 --report toy-journey.json
+python -m labyrinth journey-toy-controls --scope examples/scopes/arithmetic_toy_declaration.json --epochs-by-cycle 4,4,4
 python -m unittest discover -s tests -v
 ```
 
@@ -71,13 +74,15 @@ The seed-0 fixture with 64 training and 64 held-out cases yields **0/64 baseline
 
 Patrick's complete intended learner/maze/Minotaur behavior, including the empathy example and what it means to retain learning when a maze resets, is preserved in [REGENERATIVE_LABYRINTH_VISION_V1.md](docs/REGENERATIVE_LABYRINTH_VISION_V1.md). The architecture is **declare → generate → train → development-examine → regenerate or provisionally pass**. The independent, signed private graduation gate remains a separate authority.
 
-`journey-plan` parses a bounded, immutable JSON declaration with an objective, domain, specific skills, specificity, scale, a maximum cycle budget, and seed. It deterministically schedules training chambers for each skill. Failed-skill feedback can increase the next cycle's chamber allocation, and each regeneration changes room identities and seeds. A declaration is data; it is not evaluated as code. `journey-plan` previews a maze but never trains a model.
+`journey-plan` parses a bounded, immutable JSON declaration with an objective, domain, specific skills, specificity, scale, a maximum cycle budget, and seed. It deterministically schedules training chambers for each skill. Failed-skill feedback can increase the next cycle's chamber allocation, and each regeneration changes room identities and seeds. A declaration is data; it is not evaluated as code. `--objective-contract` accepts an alternative declaration describing the intention, per-skill focus tags, observable behavioral targets, provisional rubric identifiers, thresholds and forbidden claims. These are not executable evaluators. `journey-plan` previews a maze but never trains a model.
 
-`journey-toy` demonstrates the bounded end-to-end control loop **with actual changes to a four-parameter arithmetic learner across maze resets**, fresh seeded development cases, a frozen zero-update baseline, and per-cycle checkpoint identities. It accepts only an arithmetic-only declaration; it does not produce a pretrained-model checkpoint. Development scores and model hashes in its JSON report are local self-reports, not independent attestation. An exhausted budget is an expected, valid outcome, not a graduation failure to conceal. Both commands create output reports exclusively: existing report files are not overwritten.
+Opt-in `journey-plan --materialize-training` yields only trainee-visible training prompts, **not answers or private exams**. For an arithmetic-only scope a deterministic bounded Minotaur routing policy selects actual difficulty and *practice/contrast/word-problem* tactics. An operator-trusted adapter may propose alternative choices through `route_training_rooms`; two distinct adapter implementations have been tested, but this is not a trained general-purpose Minotaur. For a `program_reasoning` scope the approved training-only source restricts actual program structure by specificity: from mixed 3–4 step programs at level 1 to cross-register programs with modular wraparound on both registers at level 5. Other built-in skills retain ordinary training providers, and empathy remains unsupported for executable training. `--materialize-training` will reject unsupported skills.
 
-The `Minotaur` developmental examiner operates on untrusted score receipts and enforces per-skill, per-split coverage, paired improvement, absolute performance, and nonreused evidence commitments. Its optional model suggestion interface only validates taskmaster-proposed tactics and difficulty; it is **not** an autonomous trained Minotaur model, is **not** wired into the maze generator, and operator-installed Python adapters execute with caller permissions (no sandbox). Unsupported domains such as empathy can be declared and planned, but are not trainable until a validated challenge provider, rubric, learning backend, and adversarial evaluation are supplied.
+`journey-toy` demonstrates the bounded end-to-end control loop **with actual changes to a four-parameter arithmetic learner across maze resets**, fresh seeded development cases, a frozen zero-update baseline, and per-cycle checkpoint identities. `journey-toy-controls` runs fixed-cycle baseline, correct-label, zero-update and corrupted-label arms from identical starting values, with identical case visits and matched development problems. On one deterministic fixture the correct-label arm improves while controls do not; this is a narrow arithmetic result, not a model-generalization claim. Both commands accept only an arithmetic-only declaration and never produce pretrained-model checkpoints. Development scores and model hashes are local self-reports, not independent attestation. An exhausted budget is an expected, valid outcome, not a graduation failure to conceal. All three commands create output reports exclusively: existing report files are not overwritten.
 
-**Qualification gap:** specificity currently changes *chamber count*, not the semantic depth or task distribution; there is no checkpoint-resumed HF LoRA/MeZO path across journeys, no trained general Minotaur weights, no evidence of transfer or retained old competencies, and no independent private graduation result. The source implementation is a testable development slice toward the full vision, **not completion of that vision**.
+The `Minotaur` developmental examiner operates on untrusted score receipts and enforces per-skill, per-split coverage, paired improvement, absolute performance, and nonreused evidence commitments. Its optional model suggestion interface validates proposed tactics and difficulty, and the **opt-in arithmetic routing generator consumes those suggestions** to change training problems; it is **not** an autonomous trained Minotaur model and is not used by the toy training journey. Operator-installed Python adapters execute with caller permissions (no sandbox). Unsupported domains such as empathy can be declared and planned, but are not trainable until a validated challenge provider, rubric, learning backend, and adversarial evaluation are supplied.
+
+**Qualification gap:** structural specificity is implemented only for one program-reasoning family; it does not yet apply to arbitrary domains or individual intra-maze feedback. There is no checkpoint-resumed HF LoRA/MeZO path across journeys, no trained general Minotaur weights, no evidence of broad transfer or retained old competencies, and no independent private graduation result. The source implementation is a testable development slice toward the full vision, **not completion of that vision**.
 
 ## Optional real language-model LoRA pilot (unqualified runtime)
 
@@ -150,12 +155,16 @@ Important limitations:
 - `labyrinth/report_audit.py`: offline report consistency verifier; neither provenance authentication nor a learning claim
 - `labyrinth/toy_backend.py`: explicitly limited CPU parameter learning and checkpoint reload
 - `labyrinth/training_scope.py`: frozen, bounded declarations; no executable objective content
+- `labyrinth/objective_contract.py`: per-skill human-authored intent, focus and evaluation targets; no executable rubrics
 - `labyrinth/regenerative_maze.py`: deterministic per-cycle maze scheduling and weak-skill rebalancing
 - `labyrinth/journey_challenges.py`: strict, approved training-only challenge providers
+- `labyrinth/semantic_chambers.py`: bounded actual structural specificity for program training challenges
 - `labyrinth/journey.py`: regenerative state machine and checkpoint/holdout separation
 - `labyrinth/minotaur_exam.py`: development mastery decision, never final graduation
-- `labyrinth/minotaur_model.py`: bounded operator-trusted model-suggestion interface, currently advisory only
+- `labyrinth/minotaur_model.py`: bounded operator-trusted taskmaster suggestion interface
+- `labyrinth/taskmaster_routing.py`: opt-in arithmetic room generation driven by validated taskmaster suggestions
 - `labyrinth/journey_toy.py`: arithmetic toy-model journey with retained parameter updates
+- `labyrinth/journey_controls.py`: matched-exposure toy control arms across regenerated cycles
 - `labyrinth/hf_pilot.py`: opt-in local HF/PEFT LoRA SFT and same-checkpoint controls; no default ML dependency
 - `labyrinth/hf_report_audit.py`: dependency-free self-consistency audit of HF pilot receipts and available predictions
 - `labyrinth/cli.py`: `run`, `experiment`, `audit-report`, `train-toy`, `toy-eval`, `train-hf`, and `eval-hf` commands

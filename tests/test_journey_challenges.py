@@ -15,6 +15,40 @@ def scope(skills=("arithmetic", "source_priority")):
 
 
 class TrainingChambersTests(unittest.TestCase):
+    def test_semantic_specificity_changes_program_training_content(self):
+        def program_scope(specificity):
+            return TrainingScopeSpec(
+                objective_id="specific-program-journey", domain="program_reasoning",
+                skills=("program_reasoning",), specificity=specificity,
+                scale=2, max_cycles=2, seed=19,
+            )
+
+        broad = program_scope(1)
+        narrow = program_scope(5)
+        broad_rooms = prepare_training_rooms(generate_maze_plan(broad, 0), semantic_scope=broad)
+        narrow_rooms = prepare_training_rooms(generate_maze_plan(narrow, 0), semantic_scope=narrow)
+        self.assertTrue(all(dict(item.challenge.metadata)["semantic_focus"]
+                            == "mixed_3_to_4_instruction_structures" for item in broad_rooms))
+        self.assertTrue(all(dict(item.challenge.metadata)["semantic_focus"]
+                            == "dependency_path_wrapping_both_registers" for item in narrow_rooms))
+        self.assertTrue(all(dict(item.challenge.metadata)["wrap_events"].isdigit()
+                            for item in narrow_rooms))
+        self.assertTrue(all(item.challenge.split == "train" for item in narrow_rooms))
+        self.assertTrue(all("answer" not in dataclasses.asdict(item.trainee_view)
+                            for item in narrow_rooms))
+
+    def test_semantic_provider_rejects_scope_mismatch_and_override(self):
+        left = scope(("program_reasoning",))
+        right = TrainingScopeSpec(
+            objective_id=left.objective_id, domain=left.domain, skills=left.skills,
+            specificity=5, scale=left.scale, max_cycles=left.max_cycles, seed=left.seed,
+        )
+        plan = generate_maze_plan(left, 0)
+        with self.assertRaises(ValueError):
+            prepare_training_rooms(plan, semantic_scope=right)
+        with self.assertRaises(ValueError):
+            prepare_training_rooms(plan, semantic_scope=left, providers={})
+
     def test_generated_rooms_have_real_train_tasks(self):
         plan = generate_maze_plan(scope(), 0)
         cases = prepare_training_rooms(plan)

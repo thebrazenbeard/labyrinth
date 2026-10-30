@@ -13,6 +13,7 @@ from typing import Callable, Mapping
 
 from .maze import Challenge, generate_maze
 from .regenerative_maze import MazePlan
+from .training_scope import TrainingScopeSpec
 
 
 _BUILTIN_TIERS = {
@@ -55,6 +56,7 @@ def prepare_training_rooms(
     plan: MazePlan,
     *,
     providers: Mapping[str, Callable[[int], Challenge]] | None = None,
+    semantic_scope: TrainingScopeSpec | None = None,
 ) -> tuple[PreparedTrainingRoom, ...]:
     """Materialize only registered skills; unsupported goals fail closed.
 
@@ -67,6 +69,17 @@ def prepare_training_rooms(
     plan.__post_init__()
     if providers is not None and not isinstance(providers, Mapping):
         raise ValueError("providers must be an explicit skill mapping")
+    if semantic_scope is not None:
+        if type(semantic_scope) is not TrainingScopeSpec:
+            raise ValueError("semantic_scope must be a frozen TrainingScopeSpec")
+        TrainingScopeSpec.__post_init__(semantic_scope)
+        if (plan.scope_fingerprint != semantic_scope.fingerprint
+                or plan.objective_id != semantic_scope.objective_id
+                or len(plan.rooms) != semantic_scope.total_chambers
+                or any(room.skill not in semantic_scope.skills for room in plan.rooms)):
+            raise ValueError("semantic training scope does not match the maze")
+        if providers is not None:
+            raise ValueError("uncontrolled provider override cannot bypass semantic focus")
     supplied = {} if providers is None else dict(providers)
     if any(not isinstance(key, str) or not key or not callable(value) for key, value in supplied.items()):
         raise ValueError("invalid skill provider")
@@ -76,7 +89,11 @@ def prepare_training_rooms(
     for room in plan.rooms:
         if room.purpose != "train":
             raise ValueError("exam/holdout room cannot be materialized for training")
-        if room.skill in supplied:
+        if semantic_scope is not None and room.skill == "program_reasoning":
+            from .semantic_chambers import generate_semantic_program_challenge
+
+            challenge = generate_semantic_program_challenge(semantic_scope, room)
+        elif room.skill in supplied:
             challenge = supplied[room.skill](room.case_seed)
         elif room.skill in _BUILTIN_TIERS:
             challenge = generate_maze(

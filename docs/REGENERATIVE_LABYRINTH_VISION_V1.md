@@ -166,10 +166,12 @@ The metaphor isn't just a narrative wrapper for conventional fine-tuning. It's a
 This Draft PR begins a **source-level implementation** of that vision, rather than claiming the full narrative is already running:
 
 - An immutable declared training scope determines bounded maze size, skills, specificity, scale, and maximum cycles.
+- An optional immutable objective contract gives each skill an observable focus, declared rubric identifier, minimum desired improvement, and explicit forbidden claims; this records intent but does not invent qualified graders.
 - Deterministic room identifiers and seeds regenerate across cycles, with development-only weak-skill feedback permitted to redirect capacity.
 - Approved skill providers generate actual training challenges; unsupported domains (including empathy until independently authored providers and assessment rubrics exist) fail closed.
+- A narrowly approved program-reasoning provider already changes real training-case structure by specificity level; opt-in Minotaur taskmaster routing already changes arithmetic training prompts by validated difficulty/practice tactic. Neither is yet a general adaptive world-generator.
 - A separable Minotaur *development* gate checks recorded baseline versus candidate per-skill held-out/transfer performance; it does not sign private graduation receipts or assert subjective emotional states.
-- The toy learner can demonstrate actual coefficient updates across a regenerated maze. This proves mechanism, not pretrained LLM learning, human empathy, or broad reasoning transfer.
+- The toy learner can demonstrate actual coefficient updates across a regenerated maze, and a fixed-budget four-arm toy control experiment can distinguish correct-label learning from zero-update and corrupted-label exposure on one deterministic arithmetic distribution. This proves a narrow mechanism, not pretrained LLM learning, human empathy, or broad reasoning transfer.
 - Minotaur's in-repo 12-parameter algebraic model is not a verified trained general-purpose taskmaster. An optional policy adapter may suggest room tactics, never authorize graduation.
 - A learner is not externally **GRADUATED** without the existing independent authenticated `graduation_gate.py` evaluator. Development gate results must not turn exposed private final exams into future training data.
 - No automatic LoRA/MeZO checkpoint resume, genuine new emotional-response task datasets, private independent evaluator, or Vera-local production deployment is claimed by this source work.
