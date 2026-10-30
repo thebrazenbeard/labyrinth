@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from .adapters import AdapterError, load_adapter
 from .runner import (
@@ -102,7 +103,27 @@ def _parser() -> argparse.ArgumentParser:
     rg.add_argument("--report", metavar="JSON", help="Exclusively create a JSON report")
     subcommands.add_parser("train-hf", help="Opt-in bounded LoRA update of an existing local HF checkpoint")
     subcommands.add_parser("eval-hf", help="Reload and evaluate a saved HF LoRA pilot in a new process")
+    journey_plan = subcommands.add_parser("journey-plan", help="Preview a declared, regenerative training maze (no training)")
+    journey_plan.add_argument("--scope", required=True, metavar="JSON", help="Predeclared immutable training-scope manifest")
+    journey_plan.add_argument("--cycle", type=int, default=0, help="Bounded zero-based regeneration cycle")
+    journey_plan.add_argument("--weak-skills", default="", help="Comma-separated DEVELOPMENT weaknesses only")
+    journey_plan.add_argument("--report", metavar="JSON", help="Exclusively create a JSON plan")
+    journey_toy = subcommands.add_parser("journey-toy", help="Real toy-weight adaptive journey; not an LLM or graduation")
+    journey_toy.add_argument("--scope", required=True, metavar="JSON", help="Predeclared immutable training-scope manifest")
+    journey_toy.add_argument("--learner-seed", type=int, default=0)
+    journey_toy.add_argument("--epochs-by-cycle", help="One positive toy epoch count per authorized cycle (default: 4 each)")
+    journey_toy.add_argument("--learning-rate", type=float, default=0.5)
+    journey_toy.add_argument("--report", metavar="JSON", help="Exclusively create JSON receipts")
     return parser
+
+
+def _read_training_scope(path: str):
+    """Bound scope bytes before parsing; a declaration is never executed."""
+    from .training_scope import MAX_SCOPE_JSON_BYTES, parse_scope_json
+
+    with Path(path).open("rb") as stream:
+        raw = stream.read(MAX_SCOPE_JSON_BYTES + 1)
+    return parse_scope_json(raw)
 
 
 def _load_model(args: argparse.Namespace):
@@ -160,6 +181,34 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "toy-eval":
             candidate = ToyLinearAdapter.load_checkpoint(args.checkpoint)
             report = evaluate_toy_model(candidate, seed=args.seed, eval_count=args.eval_count)
+        elif args.command == "journey-plan":
+            from dataclasses import asdict
+            from .regenerative_maze import generate_maze_plan
+
+            scope = _read_training_scope(args.scope)
+            weak = tuple(token.strip() for token in args.weak_skills.split(",") if token.strip())
+            plan = generate_maze_plan(scope, args.cycle, weak_skills=weak)
+            report = {"schema": "labyrinth.journey-plan.v1", "scope": scope.to_dict(),
+                      "scope_fingerprint": scope.fingerprint, "plan": asdict(plan),
+                      "limitations": ["Room descriptors are not actual learning or private exams."]}
+        elif args.command == "journey-toy":
+            from .journey_toy import run_toy_journey
+
+            scope = _read_training_scope(args.scope)
+            epochs = None
+            if args.epochs_by_cycle is not None:
+                try:
+                    epochs = tuple(int(token.strip()) for token in args.epochs_by_cycle.split(","))
+                except ValueError as exc:
+                    raise ValueError("epochs-by-cycle must be comma-separated integers") from exc
+                if (not epochs or len(epochs) != scope.max_cycles
+                        or any(type(n) is not int or not 1 <= n <= 128 for n in epochs)
+                        or sum(epochs) > 256):
+                    raise ValueError("epochs-by-cycle must supply bounded positive epochs for every cycle")
+            elif scope.max_cycles * 4 > 256:
+                raise ValueError("default total toy epoch budget exceeded")
+            report = run_toy_journey(scope, learner_seed=args.learner_seed,
+                                     epochs_by_cycle=epochs, learning_rate=args.learning_rate)
         elif args.command == "benchmark-rg":
             from .reasoning_gym_bridge import benchmark_reasoning_gym
 
