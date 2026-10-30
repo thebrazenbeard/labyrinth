@@ -22,9 +22,18 @@ on:
       - "labyrinth/hf_development_transition.py"
       - "labyrinth/hf_resume_bridge.py"
       - "labyrinth/hf_pilot.py"
+      - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
+      - "labyrinth/hf_development_event_journal.py"
+      - "labyrinth/recovery_composition.py"
+      - "labyrinth/frozen_base_binding.py"
+      - "labyrinth/blind_evaluation_custody.py"
+      - "labyrinth/blind_transition_bridge.py"
+      - "labyrinth/pretrained_model_provenance.py"
       - "scripts/qualify_hf_regenerative.py"
+      - "scripts/qualify_minilm*.py"
+      - "scripts/qualify_model_bytes_provenance.py"
       - "tests/test_minotaur_*.py"
       - "tests/test_adaptive_corridors.py"
       - "tests/test_journey_policy_runner.py"
@@ -34,6 +43,14 @@ on:
       - "tests/test_hf_resume_bridge.py"
       - "tests/test_hf_regenerative_harness.py"
       - "tests/test_hf_pilot.py"
+      - "tests/test_neural_resume_checkpoint.py"
+      - "tests/test_hf_event_recovery.py"
+      - "tests/test_recovery_composition.py"
+      - "tests/test_frozen_base_binding.py"
+      - "tests/test_blind_*.py"
+      - "tests/test_pretrained_model_provenance.py"
+      - "tests/test_provenance_runner_integration.py"
+      - "tests/test_qualify_minilm*.py"
       - "tests/test_hf_report_audit.py"
       - "tests/test_hf_journey_resume_integration.py"
       - "tests/test_hf_scoped_report_audit.py"
@@ -67,9 +84,18 @@ on:
       - "labyrinth/hf_development_transition.py"
       - "labyrinth/hf_resume_bridge.py"
       - "labyrinth/hf_pilot.py"
+      - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
+      - "labyrinth/hf_development_event_journal.py"
+      - "labyrinth/recovery_composition.py"
+      - "labyrinth/frozen_base_binding.py"
+      - "labyrinth/blind_evaluation_custody.py"
+      - "labyrinth/blind_transition_bridge.py"
+      - "labyrinth/pretrained_model_provenance.py"
       - "scripts/qualify_hf_regenerative.py"
+      - "scripts/qualify_minilm*.py"
+      - "scripts/qualify_model_bytes_provenance.py"
       - "tests/test_minotaur_*.py"
       - "tests/test_adaptive_corridors.py"
       - "tests/test_journey_policy_runner.py"
@@ -79,6 +105,14 @@ on:
       - "tests/test_hf_resume_bridge.py"
       - "tests/test_hf_regenerative_harness.py"
       - "tests/test_hf_pilot.py"
+      - "tests/test_neural_resume_checkpoint.py"
+      - "tests/test_hf_event_recovery.py"
+      - "tests/test_recovery_composition.py"
+      - "tests/test_frozen_base_binding.py"
+      - "tests/test_blind_*.py"
+      - "tests/test_pretrained_model_provenance.py"
+      - "tests/test_provenance_runner_integration.py"
+      - "tests/test_qualify_minilm*.py"
       - "tests/test_hf_report_audit.py"
       - "tests/test_hf_journey_resume_integration.py"
       - "tests/test_hf_scoped_report_audit.py"
@@ -143,4 +177,25 @@ jobs:
           python -m unittest tests.test_adaptive_corridors tests.test_journey_policy_runner tests.test_journey_challenges tests.test_semantic_chambers tests.test_minotaur_exam -v
           python -m unittest tests.test_hf_development_transition tests.test_hf_resume_bridge tests.test_hf_regenerative_harness -v
           python -m unittest tests.test_hf_pilot tests.test_hf_report_audit tests.test_hf_journey_resume_integration -v
+          # Full-state optimizer recovery and measured frozen-base binding
+          # are required CPU tests, never optional/skip-allowed smoke checks.
+          python - <<'PY'
+          import unittest
+
+          recovery = unittest.defaultTestLoader.loadTestsFromName(
+              "tests.test_neural_resume_checkpoint")
+          recovery_result = unittest.TextTestRunner(verbosity=2).run(recovery)
+          if (recovery_result.testsRun < 6 or not recovery_result.wasSuccessful()
+                  or recovery_result.skipped):
+              raise SystemExit("required full-state recovery CPU tests failed or skipped")
+
+          base = unittest.defaultTestLoader.loadTestsFromName(
+              "tests.test_frozen_base_binding")
+          base_result = unittest.TextTestRunner(verbosity=2).run(base)
+          optional_cuda = {"test_rejects_non_cpu_frozen_tensor"}
+          skipped = {test.id().split(".")[-1] for test, _ in base_result.skipped}
+          if (base_result.testsRun < 9 or not base_result.wasSuccessful()
+                  or skipped - optional_cuda or len(base_result.skipped) > 1):
+              raise SystemExit("required frozen-base CPU tests failed or unexpectedly skipped")
+          PY
           python -m unittest tests.test_hf_scoped_report_audit tests.test_hf_program_scope tests.test_objective_contract tests.test_reserved_structural_transfer -v

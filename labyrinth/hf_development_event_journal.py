@@ -100,6 +100,7 @@ def _parse(serialized: str) -> dict[str, dict[str, Any]]:
         events = state["events"]
         if type(events) is not dict or len(events) > _MAX_EVENTS:
             raise ValueError("invalid event registry")
+        run_ids: set[str] = set()
         for event_id, record in events.items():
             _event_check(event_id)
             if type(record) is not dict or record.keys() not in (_LEGACY_FIELDS, _RUN_FIELDS):
@@ -126,6 +127,9 @@ def _parse(serialized: str) -> dict[str, dict[str, Any]]:
                         or not 0 <= record["fence"] < 2**63 - 1
                         or record["run_state"] not in ("ACTIVE", "COMPLETED")):
                     raise ValueError("invalid run-bound reservation")
+                if record["run_id"] in run_ids:
+                    raise ValueError("duplicate logical run custody")
+                run_ids.add(record["run_id"])
                 result = record["result_sha256"]
                 if ((record["run_state"] == "ACTIVE" and result is not None)
                         or (record["run_state"] == "COMPLETED" and
@@ -253,6 +257,11 @@ def reserve_development_run(
         version, events = _load(db, state_key)
         if event_id in events:
             raise DevelopmentJournalError("event already consumed; use fenced recovery")
+        # One logical run is allowed one event-owned fence domain for its
+        # entire lifetime, including after completion. The transaction's
+        # BEGIN IMMEDIATE serializes competing reservations across processes.
+        if any(record.get("run_id") == run_id for record in events.values()):
+            raise DevelopmentJournalError("run already reserved; use fenced recovery")
         if len(events) >= _MAX_EVENTS:
             raise DevelopmentJournalError("journal event budget exhausted")
         events[event_id] = {

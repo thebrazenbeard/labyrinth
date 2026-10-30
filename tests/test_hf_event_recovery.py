@@ -126,6 +126,70 @@ class RecoveryFenceTests(TestCase):
         self.assertEqual(len(failures), 5)
         self.assertTrue(all("mismatch" in message for message in failures))
 
+    def test_distinct_events_cannot_reserve_the_same_logical_run(self):
+        self.assertEqual(self.reserve("event-first"), 0)
+        for index, (commitment, checkpoint) in enumerate((
+            (self.COMMITMENT, self.INITIAL),
+            ("c" * 64, self.INITIAL),
+            (self.COMMITMENT, "d" * 64),
+        )):
+            other_event = f"event-second-{index}"
+            with self.subTest(commitment=commitment, checkpoint=checkpoint):
+                with self.assertRaisesRegex(DevelopmentJournalError, "run already reserved"):
+                    reserve_development_run(
+                        self.db, other_event, state_key=self.KEY,
+                        run_id=self.RUN,
+                        run_commitment_sha256=commitment,
+                        initial_checkpoint_sha256=checkpoint,
+                    )
+                self.assertFalse(inspect_development_event(
+                    self.db, other_event, state_key=self.KEY,
+                )["consumed"])
+
+        # A new event and a genuinely different run remain valid, even when
+        # the original run happened to start from the same checkpoint digest.
+        self.assertEqual(reserve_development_run(
+            self.db, "event-second", state_key=self.KEY,
+            run_id="different-logical-run",
+            run_commitment_sha256=self.COMMITMENT,
+            initial_checkpoint_sha256=self.INITIAL,
+        ), 0)
+
+    def test_completed_run_identity_cannot_be_reused_by_new_event(self):
+        self.assertEqual(self.reserve("event-fail-1"), 0)
+        complete_development_run(
+            self.db, "event-fail-1", state_key=self.KEY, run_id=self.RUN,
+            run_commitment_sha256=self.COMMITMENT,
+            checkpoint_sha256=self.INITIAL, expected_fence=0,
+            result_sha256="f" * 64,
+        )
+        with self.assertRaisesRegex(DevelopmentJournalError, "run already reserved"):
+            self.reserve("event-fail-2")
+
+    def test_concurrent_distinct_event_reservations_allow_only_one_run_owner(self):
+        outcomes, failures = [], []
+
+        def worker(index: int):
+            try:
+                outcomes.append((index, self.reserve(f"event-race-{index}")))
+            except DevelopmentJournalError as exc:
+                failures.append(str(exc))
+
+        threads = [Thread(target=worker, args=(index,)) for index in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0][1], 0)
+        self.assertEqual(len(failures), 7)
+        self.assertTrue(all("run already reserved" in item for item in failures))
+        consumed = [inspect_development_event(
+            self.db, f"event-race-{index}", state_key=self.KEY,
+        )["consumed"] for index in range(8)]
+        self.assertEqual(sum(consumed), 1)
+
     def test_legacy_event_cannot_be_silently_upgraded_and_tamper_fails(self):
         self.assertTrue(reserve_development_event(self.db, "event-fail-1", state_key=self.KEY))
         with self.assertRaisesRegex(DevelopmentJournalError, "legacy-only"):
