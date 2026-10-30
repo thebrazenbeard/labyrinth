@@ -5,6 +5,16 @@ on:
     paths:
       - "labyrinth/minotaur_*.py"
       - "labyrinth/toy_backend.py"
+      - "labyrinth/runner.py"
+      - "labyrinth/training_scope.py"
+      - "labyrinth/evaluation.py"
+      - "labyrinth/maze.py"
+      - "labyrinth/regenerative_maze.py"
+      - "labyrinth/journey.py"
+      - "labyrinth/program_maze.py"
+      - "labyrinth/taskmaster_routing.py"
+      - "labyrinth/minotaur_model.py"
+      - "labyrinth/minotaur_policy_learning.py"
       - "labyrinth/adaptive_corridors.py"
       - "labyrinth/journey_policy_runner.py"
       - "labyrinth/journey_challenges.py"
@@ -27,6 +37,7 @@ on:
       - "tests/test_hf_report_audit.py"
       - "tests/test_hf_journey_resume_integration.py"
       - "tests/test_hf_scoped_report_audit.py"
+      - "tests/test_hf_program_scope.py"
       - "tests/test_objective_contract.py"
       - "tests/test_reserved_structural_transfer.py"
       - "tests/minotaur_required_tests.txt"
@@ -39,6 +50,16 @@ on:
     paths:
       - "labyrinth/minotaur_*.py"
       - "labyrinth/toy_backend.py"
+      - "labyrinth/runner.py"
+      - "labyrinth/training_scope.py"
+      - "labyrinth/evaluation.py"
+      - "labyrinth/maze.py"
+      - "labyrinth/regenerative_maze.py"
+      - "labyrinth/journey.py"
+      - "labyrinth/program_maze.py"
+      - "labyrinth/taskmaster_routing.py"
+      - "labyrinth/minotaur_model.py"
+      - "labyrinth/minotaur_policy_learning.py"
       - "labyrinth/adaptive_corridors.py"
       - "labyrinth/journey_policy_runner.py"
       - "labyrinth/journey_challenges.py"
@@ -61,6 +82,7 @@ on:
       - "tests/test_hf_report_audit.py"
       - "tests/test_hf_journey_resume_integration.py"
       - "tests/test_hf_scoped_report_audit.py"
+      - "tests/test_hf_program_scope.py"
       - "tests/test_objective_contract.py"
       - "tests/test_reserved_structural_transfer.py"
       - "tests/minotaur_required_tests.txt"
@@ -121,4 +143,4 @@ jobs:
           python -m unittest tests.test_adaptive_corridors tests.test_journey_policy_runner tests.test_journey_challenges tests.test_semantic_chambers tests.test_minotaur_exam -v
           python -m unittest tests.test_hf_development_transition tests.test_hf_resume_bridge tests.test_hf_regenerative_harness -v
           python -m unittest tests.test_hf_pilot tests.test_hf_report_audit tests.test_hf_journey_resume_integration -v
-          python -m unittest tests.test_hf_scoped_report_audit tests.test_objective_contract tests.test_reserved_structural_transfer -v
+          python -m unittest tests.test_hf_scoped_report_audit tests.test_hf_program_scope tests.test_objective_contract tests.test_reserved_structural_transfer -v

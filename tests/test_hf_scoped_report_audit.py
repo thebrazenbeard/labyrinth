@@ -9,6 +9,7 @@ from labyrinth.evaluation import score_response
 from labyrinth.hf_pilot import (
     PilotConfig, SCHEMA, _prompt_commitment, _scoped_training_cases,
     _training_visit_indices, derange_answers,
+    RESEARCH_ONLY_RESUME, SIGNED_DEVELOPMENT_RESUME,
 )
 from labyrinth.hf_report_audit import audit_hf_report
 from labyrinth.training_scope import TrainingScopeSpec
@@ -93,6 +94,23 @@ class HfScopedReportAuditTests(unittest.TestCase):
         result = audit_hf_report(report)
         self.assertEqual(result["status"], "INCOMPLETE", result)
         self.assertTrue(any("predecessor custody" in item for item in result["unchecked"]))
+
+    def test_successor_authority_is_qualified_only_as_self_report(self):
+        for authority, expected in (
+            (None, "lacks recognized development-transition authority"),
+            (RESEARCH_ONLY_RESUME, "unauthenticated research-only"),
+            (SIGNED_DEVELOPMENT_RESUME, "self-reported"),
+        ):
+            with self.subTest(authority=authority):
+                report = scoped_pilot_fixture(cycle_index=1)
+                report["resumed_journey"]["development_resume_authority"] = authority
+                result = audit_hf_report(report)
+                self.assertEqual(result["status"], "INCOMPLETE", result)
+                self.assertTrue(any(expected in entry for entry in result["unchecked"]))
+
+        bootstrap = scoped_pilot_fixture(cycle_index=0)
+        bootstrap["resumed_journey"]["development_resume_authority"] = SIGNED_DEVELOPMENT_RESUME
+        self.assertEqual(audit_hf_report(bootstrap)["status"], "FAIL")
 
     def test_scoped_scope_room_and_case_forgery_fail(self):
         fixture = scoped_pilot_fixture()

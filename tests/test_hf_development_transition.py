@@ -12,7 +12,9 @@ from labyrinth.hf_development_transition import (
     SCHEMA, _DOMAIN, run_exam_bound_successor, verify_development_transition,
 )
 from labyrinth.hf_resume_bridge import ResumeContext
-from labyrinth.hf_pilot import PilotConfig
+from labyrinth.hf_pilot import (
+    PilotConfig, _authorized_development_resume, run_pilot,
+)
 from labyrinth.training_scope import TrainingScopeSpec
 
 
@@ -88,6 +90,68 @@ class SignedDevelopmentTransitionTests(TestCase):
                     reserve_development_event=reserve,
                 )
             self.assertEqual(runner.call_count, 1)
+
+    def test_unsigned_direct_scoped_resume_fails_before_model_or_dependencies(self):
+        with (mock.patch("labyrinth.hf_pilot.validate_config") as validate,
+              mock.patch("labyrinth.hf_pilot._deps") as deps):
+            with self.assertRaisesRegex(ValueError, "evaluator-signed development FAIL"):
+                run_pilot(
+                    self.config, scope=self.scope, cycle_index=1,
+                    predecessor_run_dir="prior-run", resume_context=self.context,
+                    weak_skills=("arithmetic",),
+                )
+            validate.assert_not_called()
+            deps.assert_not_called()
+
+    def test_untrusted_research_resume_is_explicit_and_not_a_signed_gate(self):
+        with mock.patch("labyrinth.hf_pilot.validate_config",
+                        side_effect=ValueError("after research gate")) as validate:
+            with self.assertRaisesRegex(ValueError, "after research gate"):
+                run_pilot(
+                    self.config, scope=self.scope, cycle_index=1,
+                    predecessor_run_dir="prior-run", resume_context=self.context,
+                    weak_skills=("arithmetic",), unauthenticated_research_resume=True,
+                )
+            validate.assert_called_once()
+        with self.assertRaisesRegex(ValueError, "requires a scoped successor"):
+            run_pilot(self.config, unauthenticated_research_resume=True)
+
+    def test_signed_authorization_context_is_scoped_and_cleared_on_exception(self):
+        raw, sig = self.signed()
+        self.assertIsNone(_authorized_development_resume.get())
+        observed = []
+
+        def capture(*_args, **_kwargs):
+            observed.append(_authorized_development_resume.get())
+            raise RuntimeError("test interruption")
+
+        with (mock.patch("labyrinth.hf_development_transition.preflight_resume"),
+              mock.patch("labyrinth.hf_development_transition.run_pilot",
+                         side_effect=capture)):
+            with self.assertRaisesRegex(RuntimeError, "test interruption"):
+                run_exam_bound_successor(
+                    self.config, self.scope, "prior-run", self.context, raw, sig,
+                    independent_development_key=self.key,
+                    reserve_development_event=lambda _id: True,
+                )
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0][1], self.scope.fingerprint)
+        self.assertEqual(observed[0][-1], ("arithmetic",))
+        self.assertIsNone(_authorized_development_resume.get())
+
+    def test_signed_bridge_passes_pilot_guard_only_after_reservation(self):
+        raw, sig = self.signed()
+        with (mock.patch("labyrinth.hf_development_transition.preflight_resume"),
+              mock.patch("labyrinth.hf_pilot.validate_config",
+                         side_effect=ValueError("signed passed pilot guard")) as validate):
+            with self.assertRaisesRegex(ValueError, "signed passed pilot guard"):
+                run_exam_bound_successor(
+                    self.config, self.scope, "prior-run", self.context, raw, sig,
+                    independent_development_key=self.key,
+                    reserve_development_event=lambda _id: True,
+                )
+            validate.assert_called_once()
+        self.assertIsNone(_authorized_development_resume.get())
 
     def test_unsigned_or_tampered_weakness_cannot_start_training(self):
         raw, sig = self.signed()

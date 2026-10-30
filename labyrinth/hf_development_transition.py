@@ -8,9 +8,11 @@ or the truthfulness of that evaluator. The caller must durably reject consumed
 event IDs and manage key custody before invoking this function; no local
 source-only helper can establish those external runtime properties.
 
-The ordinary HF pilot remains a separately exposed experimental API. Only
-callers using ``run_exam_bound_successor`` have this additional signed gate.
-Neither path is a signed private graduation decision.
+The ordinary HF pilot remains an experimental API: its successor route is
+explicitly *unqualified research only*. Only callers using
+``run_exam_bound_successor`` get a signed development-transition bound. This
+in-process interface guard is not a defense against arbitrary malicious code
+running inside the Python trainer, and neither path is a private graduation.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from .hf_pilot import PilotConfig, run_pilot
+from .hf_pilot import PilotConfig, _authorized_development_resume, run_pilot
 from .hf_resume_bridge import ResumeContext, preflight_resume
 from .training_scope import TrainingScopeSpec
 
@@ -171,8 +173,17 @@ def run_exam_bound_successor(
         raise ValueError("development transition event is not newly reserved")
     # All successor scope, cycle and weakness arguments derive from signed
     # evidence, never from a separate operator-supplied weakness override.
-    return run_pilot(
-        config, scope=scope, cycle_index=resume_context.cycle_index,
-        predecessor_run_dir=predecessor_run_dir, resume_context=resume_context,
-        weak_skills=verified.weak_skills,
+    authorization = (
+        config, scope.fingerprint, resume_context.cycle_index,
+        str(Path(predecessor_run_dir).expanduser().resolve(strict=False)),
+        resume_context, verified.weak_skills,
     )
+    token = _authorized_development_resume.set(authorization)
+    try:
+        return run_pilot(
+            config, scope=scope, cycle_index=resume_context.cycle_index,
+            predecessor_run_dir=predecessor_run_dir, resume_context=resume_context,
+            weak_skills=verified.weak_skills,
+        )
+    finally:
+        _authorized_development_resume.reset(token)

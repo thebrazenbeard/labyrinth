@@ -18,10 +18,12 @@ import unittest
 from unittest import mock
 
 from labyrinth.hf_pilot import (
-    PilotConfig, _resume_training_cases, _scoped_training_cases,
-    reload_evaluate, run_pilot, training_cases,
+    PilotConfig, EVAL_SPLIT_MAX_ATTEMPTS, _arithmetic_equivalence_key,
+    _resume_training_cases, _scoped_public_heldout, _scoped_training_cases,
+    RESEARCH_ONLY_RESUME, reload_evaluate, run_pilot, training_cases,
 )
 from labyrinth.hf_resume_bridge import ResumeContext
+from labyrinth.maze import generate_maze
 from labyrinth.training_scope import TrainingScopeSpec
 
 
@@ -79,6 +81,63 @@ class ResumeIntegrationTests(unittest.TestCase):
         self.assertTrue({case.prompt for case in heldout}.isdisjoint({case.prompt for case in next_heldout}))
         self.assertEqual({case.split for case in heldout + next_heldout}, {"eval"})
 
+    def test_scoped_public_arithmetic_rerolls_commutative_collision_deterministically(self):
+        # Before this repair, these declared settings produced TRAIN
+        # "Calculate 843 + 470." and public EVAL "Calculate 470 + 843.".
+        config = PilotConfig(**{
+            **asdict(self.config), "seed": 19, "train_count": 15,
+            "eval_count": 32, "tiers": (1,),
+        })
+        scope = TrainingScopeSpec(
+            "cross-split-audit", "reasoning", ("arithmetic",), 5, 5, 2, 7014,
+        )
+        train, heldout, _ = _scoped_training_cases(config, scope, 0, ())
+        seed_digest = hashlib.sha256(
+            f"labyrinth.hf-public-diagnostic.v1:{scope.fingerprint}:{config.seed}:0"
+            .encode("ascii")
+        ).digest()
+        original_seed = int.from_bytes(seed_digest[:4], "big") & (2**31 - 1)
+        before = generate_maze(
+            seed=original_seed, count=config.eval_count,
+            tiers=config.tiers, split="eval",
+        )
+        train_keys = {_arithmetic_equivalence_key(case) for case in train}
+        self.assertTrue(train_keys & {_arithmetic_equivalence_key(case) for case in before})
+        self.assertFalse(train_keys & {_arithmetic_equivalence_key(case) for case in heldout})
+        self.assertEqual(len(heldout), config.eval_count)
+        self.assertNotEqual([case.id for case in before], [case.id for case in heldout])
+        self.assertEqual(heldout, _scoped_training_cases(config, scope, 0, ())[1])
+
+        prior_cases = train + heldout
+        prior = {
+            "config": asdict(config),
+            "training_case_ids": [case.id for case in train],
+            "heldout_case_ids": [case.id for case in heldout],
+            "resumed_journey": {
+                "scope": scope.to_dict(), "scope_fingerprint": scope.fingerprint,
+                "cycle_index": 0, "weak_skills": [],
+                "historical_case_ids": sorted(case.id for case in prior_cases),
+                "historical_prompt_sha256": sorted(
+                    hashlib.sha256(case.prompt.encode()).hexdigest()
+                    for case in prior_cases
+                ),
+            },
+        }
+        next_train, next_eval, _ = _resume_training_cases(
+            config, scope, 1, (), prior,
+        )
+        self.assertTrue(next_train and next_eval)
+        self.assertTrue({c.id for c in prior_cases}.isdisjoint(
+            c.id for c in next_train + next_eval
+        ))
+
+    def test_scoped_semantic_reroll_fails_closed_at_fixed_budget(self):
+        train, _, _ = _scoped_training_cases(self.config, self.scope, 0, ())
+        with mock.patch("labyrinth.hf_pilot.generate_maze", return_value=train) as generated:
+            with self.assertRaisesRegex(ValueError, "could not avoid semantic arithmetic"):
+                _scoped_public_heldout(self.config, self.scope, 0, train)
+            self.assertEqual(generated.call_count, EVAL_SPLIT_MAX_ATTEMPTS)
+
     def test_scoped_resume_rejects_current_diagnostic_reusing_historical_public_prompt(self):
         prior = self._prior_report(scoped_cycle=1)
         _, current_eval, _ = _scoped_training_cases(self.config, self.scope, 2, ())
@@ -129,7 +188,7 @@ class ResumeIntegrationTests(unittest.TestCase):
 
     def test_unsupported_skill_is_not_misrepresented_by_tier_four_diagnostic(self):
         unsupported = TrainingScopeSpec(
-            "learn-programs", "reasoning", ("program_reasoning",), 1, 3, 4, 2,
+            "learn-empathy", "social", ("empathy",), 1, 3, 4, 2,
         )
         with self.assertRaisesRegex(ValueError, "matching heldout diagnostic"):
             _scoped_training_cases(self.config, unsupported, 0, ())
@@ -154,6 +213,7 @@ class ResumeIntegrationTests(unittest.TestCase):
                     self.config, scope=self.scope, cycle_index=1,
                     predecessor_run_dir=self.prior, resume_context=context,
                     allow_unscoped_predecessor=False,
+                    unauthenticated_research_resume=True,
                 )
         self.assertFalse(Path(self.config.output_dir).exists())
 
@@ -256,6 +316,7 @@ class ResumeIntegrationTests(unittest.TestCase):
                 self.config, scope=self.scope, cycle_index=1,
                 predecessor_run_dir=self.prior, resume_context=context,
                 allow_unscoped_predecessor=True,
+                unauthenticated_research_resume=True,
             )
         self.assertEqual(visits, [("sham", initial), ("correct", initial), ("corrupt", initial)])
         self.assertEqual(len(evaluated_ids), 4)
@@ -270,6 +331,8 @@ class ResumeIntegrationTests(unittest.TestCase):
         self.assertEqual(result["resumed_journey"]["predecessor_scope_status"],
                          "LEGACY_UNSCOPED_OPERATOR_BOOTSTRAP_NOT_SAME_OBJECTIVE_PROOF")
         self.assertEqual(result["resumed_journey"]["qualification"], "NOT_ESTABLISHED")
+        self.assertEqual(result["resumed_journey"]["development_resume_authority"],
+                         RESEARCH_ONLY_RESUME)
         self.assertFalse(result["resumed_journey"]["minotaur_private_graduation"])
         self.assertTrue((Path(self.config.output_dir) / "candidate_adapter" / "adapter_model.safetensors").exists())
 

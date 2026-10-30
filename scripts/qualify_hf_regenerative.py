@@ -31,7 +31,8 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from labyrinth.hf_pilot import (  # noqa: E402 - script may run from an arbitrary cwd
-    PilotConfig, SCHEMA as PILOT_SCHEMA, _checkpoint_manifest, _sha_file, validate_config,
+    PilotConfig, RESEARCH_ONLY_RESUME, SCHEMA as PILOT_SCHEMA,
+    _checkpoint_manifest, _sha_file, validate_config,
 )
 from labyrinth.runner import _source_state, load_json  # noqa: E402
 from labyrinth.training_scope import (  # noqa: E402
@@ -92,6 +93,7 @@ class ProbePlan:
                 "Structural validity of model files does not establish they are loadable.",
                 "No RAM/GPU capacity or workload coordination is established by dry-run.",
                 "Cycle-one weakness selection is empty/operator-scoped, not Minotaur-authenticated.",
+                "Cycle-one resume explicitly permits unsigned research-only continuation; no signed FAIL is established.",
                 "Public same-family diagnostics are not an independent transfer examination.",
             ],
         }
@@ -185,6 +187,9 @@ def _command(plan: ProbePlan, cycle: int, *, predecessor: dict[str, Any] | None,
             "--predecessor-report-sha256", _sha_file(predecessor_report_path),
             "--predecessor-lora-sha256", value,
             "--resume-authority-ref", authority_ref,
+            # This source-only mechanics probe has no independent signed
+            # FAIL event. Make its untrusted status explicit and auditable.
+            "--unauthenticated-research-resume",
         ])
     return command
 
@@ -199,6 +204,8 @@ def _read_report(path: Path, cycle: int, plan: ProbePlan) -> dict[str, Any]:
             or report.get("model_metadata_sha256") != plan.model_manifest["metadata"]
             or journey.get("same_initial_lora_for_all_controls") is not True):
         raise RuntimeError("HF report does not match pinned scope, model, cycle or controls")
+    if cycle == 1 and journey.get("development_resume_authority") != RESEARCH_ONLY_RESUME:
+        raise RuntimeError("mechanical probe successor is not marked unauthenticated research-only")
     initial = report.get("initial_lora_parameter_sha256")
     candidate = report.get("candidate_lora_tensor_value_sha256")
     if type(initial) is not str or type(candidate) is not str or initial == candidate:
@@ -227,7 +234,25 @@ def _stop_owned_child(proc: subprocess.Popen) -> bool:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-    elif proc.poll() is None:
+    elif os.name == "nt":
+        if proc.poll() is not None:
+            # taskkill /T needs the live root PID to discover descendants.
+            # After it exits, descendant ownership/termination is unknown.
+            return False
+
+        def stop_direct_only() -> None:
+            # The child can exit between poll(), taskkill, and kill(). That
+            # race cannot establish descendant cleanup, but must not replace
+            # the original TIMEOUT with an unrelated ProcessLookupError.
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass
+
         try:
             result = subprocess.run(
                 ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
@@ -235,18 +260,10 @@ def _stop_owned_child(proc: subprocess.Popen) -> bool:
                 timeout=6, check=False,
             )
             if result.returncode != 0:
-                proc.kill()
-                try:
-                    proc.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    pass
+                stop_direct_only()
                 return False  # Direct child stopped; descendants unconfirmed.
         except (OSError, subprocess.TimeoutExpired):
-            proc.kill()
-            try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                pass
+            stop_direct_only()
             return False
     try:
         proc.wait(timeout=3)
@@ -283,7 +300,19 @@ def _run_bounded_child(command: list[str], *, run_root: Path,
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             raise RuntimeError("process-tree timeout requires POSIX or Windows")
-        proc = subprocess.Popen(command, **kwargs)
+        try:
+            proc = subprocess.Popen(command, **kwargs)
+        except BaseException as exc:
+            # Without a PID there is no owned child to stop. Still leave an
+            # unambiguous outcome rather than an orphan output.log alone.
+            _write_new(outcome_path, {
+                "phase": phase, "pid": None, "status": "LAUNCH_FAILED",
+                "exit_code": None, "cleanup_confirmed": None,
+                "error_class": type(exc).__name__,
+                "argv_sha256": hashlib.sha256("\x00".join(command).encode()).hexdigest(),
+                "elapsed_seconds": round(time.time() - started, 3),
+            })
+            raise
         try:
             _write_new(start_path, {
                 "phase": phase, "pid": proc.pid, "started_unix": started,

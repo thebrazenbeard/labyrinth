@@ -38,6 +38,36 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
 
 
 class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_neural_journey_transitive_source_changes_trigger_pinned_cpu_ci(self):
+        # These modules are imported by the HF pilot, objective-conditioned
+        # generator, report auditor or adaptive taskmaster. Editing only one
+        # must not bypass the dependency-present CPU checks.
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for path in (
+            "labyrinth/runner.py",
+            "labyrinth/training_scope.py",
+            "labyrinth/evaluation.py",
+            "labyrinth/maze.py",
+            "labyrinth/regenerative_maze.py",
+            "labyrinth/journey.py",
+            "labyrinth/program_maze.py",
+            "labyrinth/taskmaster_routing.py",
+            "labyrinth/minotaur_model.py",
+            "labyrinth/minotaur_policy_learning.py",
+        ):
+            with self.subTest(path=path, exists=True):
+                self.assertTrue((Path(__file__).resolve().parents[1] / path).is_file())
+            for trigger, manifest in paths_by_trigger.items():
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', manifest)
+
     def test_adaptive_training_integrations_trigger_and_run_under_cpu_dependencies(self):
         # The generic Python workflow allows optional neural skips. This
         # separate dependency-present job must cover the TRAIN-only

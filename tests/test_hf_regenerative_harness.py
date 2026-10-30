@@ -16,7 +16,9 @@ import unittest
 from unittest.mock import patch
 
 from labyrinth.training_scope import TrainingScopeSpec
-from scripts.qualify_hf_regenerative import _command, _run_bounded_child, execute, preflight
+from scripts.qualify_hf_regenerative import (
+    _command, _run_bounded_child, _stop_owned_child, execute, preflight,
+)
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "qualify_hf_regenerative.py"
@@ -165,6 +167,7 @@ class HFRegenerativeHarnessTests(unittest.TestCase):
         self.assertIn("--predecessor-report-sha256", successor)
         self.assertEqual(successor[successor.index("--predecessor-lora-sha256") + 1], digest)
         self.assertEqual(successor[successor.index("--resume-authority-ref") + 1], "operator-123")
+        self.assertIn("--unauthenticated-research-resume", successor)
         self.assertNotIn("--weak-skills", successor)
         with self.assertRaisesRegex(ValueError, "LoRA digest"):
             _command(plan, 1, predecessor={"candidate_lora_tensor_value_sha256": "bad"},
@@ -205,6 +208,55 @@ class HFRegenerativeHarnessTests(unittest.TestCase):
                 [sys.executable, "-c", "raise SystemExit(0)"],
                 run_root=run_root, phase="cycle-0-train", timeout_seconds=3,
             )
+
+    def test_child_launch_failure_has_a_recoverable_receipt(self):
+        run_root = self.outputs / "fake-run"
+        run_root.mkdir()
+        with self.assertRaises(FileNotFoundError):
+            _run_bounded_child(
+                [str(self.root / "nonexistent-child")],
+                run_root=run_root, phase="cycle-0-train", timeout_seconds=3,
+            )
+        outcome = json.loads((run_root / "child-cycle-0-train-outcome.json").read_text())
+        self.assertEqual(outcome["status"], "LAUNCH_FAILED")
+        self.assertIsNone(outcome["pid"])
+        self.assertEqual(outcome["error_class"], "FileNotFoundError")
+        self.assertFalse((run_root / "child-cycle-0-train-start.json").exists())
+
+    def test_windows_exited_parent_cannot_confirm_descendant_cleanup(self):
+        # A Win32 parent may exit after launching a descendant but before
+        # taskkill /T discovers its process tree. That is not confirmed cleanup.
+        class ExitedParent:
+            pid = 12345
+
+            def poll(self):
+                return 0
+
+            def wait(self, timeout):
+                return 0
+
+        with patch("scripts.qualify_hf_regenerative.os.name", "nt"):
+            with patch("scripts.qualify_hf_regenerative.subprocess.run") as command:
+                self.assertFalse(_stop_owned_child(ExitedParent()))
+                command.assert_not_called()
+
+    def test_windows_taskkill_race_preserves_unconfirmed_receipt(self):
+        class ExitingParent:
+            pid = 12345
+
+            def poll(self):
+                return None
+
+            def kill(self):
+                raise ProcessLookupError("exited after taskkill failed")
+
+            def wait(self, timeout):
+                return 1
+
+        with patch("scripts.qualify_hf_regenerative.os.name", "nt"):
+            with patch("scripts.qualify_hf_regenerative.subprocess.run") as command:
+                command.return_value.returncode = 1
+                self.assertFalse(_stop_owned_child(ExitingParent()))
 
     def test_explicit_child_timeout_budget_is_bounded_before_writes(self):
         result = subprocess.run(self.args() + ["--child-timeout-seconds", "14401"],

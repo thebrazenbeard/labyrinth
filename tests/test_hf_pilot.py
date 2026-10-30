@@ -12,6 +12,9 @@ from unittest.mock import patch
 
 from labyrinth.hf_pilot import (
     PilotConfig,
+    _arithmetic_equivalence_key,
+    EVAL_SEED_XOR,
+    EVAL_SPLIT_MAX_ATTEMPTS,
     _metadata_digest,
     _weights_digest,
     _device_headroom,
@@ -24,7 +27,7 @@ from labyrinth.hf_pilot import (
     training_cases,
     validate_config,
 )
-from labyrinth.maze import Challenge
+from labyrinth.maze import Challenge, generate_maze
 
 
 class DummyTokenizer:
@@ -87,6 +90,67 @@ class HfPilotContractTests(unittest.TestCase):
         self.assertEqual({c.split for c in heldout}, {"eval"})
         self.assertFalse({c.id for c in train} & {c.id for c in heldout})
         self.assertEqual(train, training_cases(config)[0])
+        self.assertEqual(heldout, generate_maze(
+            seed=config.seed ^ EVAL_SEED_XOR, count=config.eval_count,
+            tiers=config.tiers, split="eval",
+        ))
+
+    def test_train_eval_split_excludes_commutative_arithmetic_leakage(self):
+        # Reproduced public train/eval collision before the repair: the two
+        # texts differ but the addition expression is the same up to operand
+        # order, a stronger equivalence than an exact prompt hash.
+        config = self.spec(seed=1073, train_count=32, eval_count=32, tiers=(1,))
+        train, heldout = training_cases(config)
+        self.assertEqual((len(train), len(heldout)), (32, 32))
+        train_keys = {_arithmetic_equivalence_key(case) for case in train}
+        heldout_keys = {_arithmetic_equivalence_key(case) for case in heldout}
+        self.assertFalse(train_keys & heldout_keys)
+        self.assertEqual((train, heldout), training_cases(config))
+        raw_heldout = generate_maze(
+            seed=config.seed ^ EVAL_SEED_XOR, count=config.eval_count,
+            tiers=config.tiers, split="eval",
+        )
+        self.assertTrue(train_keys & {
+            _arithmetic_equivalence_key(case) for case in raw_heldout
+        })  # Confirms the original seed-1073 false independence.
+        self.assertNotEqual(raw_heldout, heldout)
+
+    def test_arithmetic_split_equivalence_is_narrow_not_answer_equality(self):
+        make = lambda prompt: Challenge("test", "arithmetic", 1, "train", prompt, "0")
+        instruction = "\nRespond with exactly one line: ANSWER: <integer>."
+        self.assertEqual(
+            _arithmetic_equivalence_key(make("Calculate 991 + 807." + instruction)),
+            _arithmetic_equivalence_key(make("Calculate 807 + 991." + instruction)),
+        )
+        self.assertNotEqual(
+            _arithmetic_equivalence_key(make("Calculate 991 - 807." + instruction)),
+            _arithmetic_equivalence_key(make("Calculate 807 - 991." + instruction)),
+        )
+        self.assertNotEqual(
+            _arithmetic_equivalence_key(make("Calculate 1 + 3." + instruction)),
+            _arithmetic_equivalence_key(make("Calculate 2 + 2." + instruction)),
+        )
+        self.assertEqual(
+            _arithmetic_equivalence_key(make("Calculate 9 * 3." + instruction)),
+            _arithmetic_equivalence_key(make("Calculate 3 * 9." + instruction)),
+        )
+        with self.assertRaisesRegex(ValueError, "unrecognized arithmetic prompt"):
+            _arithmetic_equivalence_key(make("Calculate 9 / 3." + instruction))
+
+    def test_arithmetic_split_reroll_budget_fails_closed_without_dropping_cases(self):
+        instruction = "\nRespond with exactly one line: ANSWER: <integer>."
+        train = [Challenge("t1", "arithmetic", 1, "train",
+                           "Calculate 991 + 807." + instruction, "1798")]
+        eval_cases = [Challenge("e1", "arithmetic", 1, "eval",
+                                "Calculate 807 + 991." + instruction, "1798")]
+
+        def never_separates(*, split, **kwargs):
+            return train if split == "train" else eval_cases
+
+        with patch("labyrinth.hf_pilot.generate_maze", side_effect=never_separates) as generate:
+            with self.assertRaisesRegex(ValueError, "could not avoid semantic arithmetic"):
+                training_cases(self.spec(seed=1073, train_count=2, eval_count=2))
+            self.assertEqual(generate.call_count, 1 + EVAL_SPLIT_MAX_ATTEMPTS)
 
     def test_derangement_preserves_multiset_without_collisions(self):
         cases = [Challenge(str(i), "test", 1, "train", str(i), answer)
