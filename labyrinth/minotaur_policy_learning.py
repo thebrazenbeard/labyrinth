@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import tempfile
 from typing import Any, Mapping
 from dataclasses import dataclass
 
@@ -354,7 +355,14 @@ class MinotaurTrainingPolicy:
         return {"difficulty": difficulty, "tactic": tactic}
 
     def save_policy(self, destination: str | Path) -> str:
-        """Persist write-once, bounded local checkpoint; no destination overwrite."""
+        """Atomically publish a write-once checkpoint; never expose partial bytes.
+
+        An interruption before publication or failed data sync leaves the
+        final destination free for recovery (an orphaned staging file can
+        remain after process termination).
+        Publishing via a same-directory hard link preserves non-overwrite
+        semantics even when a competing writer creates the destination.
+        """
         path = Path(destination)
         payload = self._validated_payload()
         digest = hashlib.sha256(_canonical(payload)).hexdigest()
@@ -362,8 +370,22 @@ class MinotaurTrainingPolicy:
         encoded = _canonical(wrapped) + b"\n"
         if len(encoded) > MAX_POLICY_JSON_BYTES:
             raise ValueError("taskmaster checkpoint exceeds size cap")
-        with path.open("xb") as handle:
-            handle.write(encoded)
+        staged: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", dir=path.parent, prefix=f".{path.name}.",
+                suffix=".pending", delete=False,
+            ) as handle:
+                staged = Path(handle.name)
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            # os.replace() would silently overwrite an existing checkpoint.
+            # Hard-link creation is atomic and fails if the target exists.
+            os.link(staged, path)
+        finally:
+            if staged is not None:
+                staged.unlink(missing_ok=True)
         return digest
 
 

@@ -133,6 +133,25 @@ class AdaptiveCorridorTests(unittest.TestCase):
                 forbidden_prompt_sha256=("c" * 64,) * 4097,
             )
 
+    def test_mutated_valid_pending_difficulty_is_not_a_valid_route(self):
+        state = offer_next_chamber(start())
+        # Both values are syntactically valid; only the trained route decides
+        # which one was actually assigned for this visit.
+        changed = replace(state, pending=replace(state.pending, difficulty=5))
+        self.assertNotEqual(state.pending.difficulty, changed.pending.difficulty)
+        with self.assertRaises(ValueError):
+            record_training_feedback(changed, feedback(changed, score=1))
+
+    def test_mutated_prior_route_cannot_be_used_to_generate_next_chamber(self):
+        pending = offer_next_chamber(start())
+        visited = record_training_feedback(pending, feedback(pending, score=1))
+        first = visited.history[0]
+        changed = replace(visited, history=(replace(
+            first, assignment=replace(first.assignment, difficulty=5)
+        ),))
+        with self.assertRaises(ValueError):
+            offer_next_chamber(changed)
+
     def test_regeneration_requires_prior_exam_custody_even_with_explicit_empty_sets(self):
         s = scope()
         cycle1 = generate_maze_plan(s, 1)

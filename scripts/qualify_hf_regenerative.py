@@ -60,6 +60,7 @@ class ProbePlan:
     disk_required_bytes: int
     model_origin_claim: str
     child_timeout_seconds: int
+    harness_sha256: str
 
     def public(self) -> dict[str, Any]:
         return {
@@ -69,6 +70,7 @@ class ProbePlan:
             "scope": self.scope.to_dict(),
             "model_path": str(self.model_path),
             "model_origin_claim": self.model_origin_claim,
+            "harness_sha256": self.harness_sha256,
             "child_timeout_seconds": self.child_timeout_seconds,
             "base_model_origin_evidence": "OPERATOR_CLAIM_ONLY",
             "model_manifest": self.model_manifest,
@@ -150,7 +152,8 @@ def preflight(args: argparse.Namespace) -> ProbePlan:
         raise ValueError("insufficient available disk for isolated two-cycle adapter outputs")
     return ProbePlan(scope, raw_scope.resolve(strict=True), cfg, model, run_root,
                      _checkpoint_manifest(model, weights), available, required,
-                     args.model_origin_claim, child_timeout)
+                     args.model_origin_claim, child_timeout,
+                     _sha_file(Path(__file__).resolve(strict=True)))
 
 
 def _command(plan: ProbePlan, cycle: int, *, predecessor: dict[str, Any] | None,
@@ -312,12 +315,37 @@ def _run_bounded_child(command: list[str], *, run_root: Path,
         raise subprocess.CalledProcessError(code, command)
 
 
+def _verify_plan_inputs(plan: ProbePlan) -> None:
+    """Recheck mutable scope/model bytes before starting a training child.
+
+    These hashes detect changes at the check boundary, not simultaneous writes
+    during a model load. Physical runs still require a stable local checkpoint.
+    """
+    if (plan.scope_path.is_symlink() or not plan.scope_path.is_file()
+            or not 0 < plan.scope_path.stat().st_size <= MAX_SCOPE_JSON_BYTES
+            or parse_scope_json(plan.scope_path.read_bytes()) != plan.scope):
+        raise ValueError("training scope changed since preflight")
+    model, _, weights = validate_config(plan.config, output_must_be_new=False)
+    if model != plan.model_path or _checkpoint_manifest(model, weights) != plan.model_manifest:
+        raise ValueError("model manifest changed since preflight")
+
+
 def execute(plan: ProbePlan, *, authority_ref: str) -> dict[str, Any]:
     """Run two bounded local training cycles and fresh-process reload checks.
 
     Creating the unique run root is intentional. On failure, partial artifacts
     remain for forensic review; this function never overwrites or deletes them.
     """
+    # The command-line preflight also checks this label, but this callable is
+    # independently importable. Keep the physical-execution boundary guarded
+    # even when callers bypass argparse and construct a plan directly.
+    if type(plan) is not ProbePlan:
+        raise ValueError("execute requires a ProbePlan")
+    if type(authority_ref) is not str or _AUTHORITY.fullmatch(authority_ref) is None:
+        raise ValueError("execute requires a bounded --authority-ref operator label")
+    if _sha_file(Path(__file__).resolve(strict=True)) != plan.harness_sha256:
+        raise ValueError("harness digest changed since preflight")
+    _verify_plan_inputs(plan)
     plan.run_root.mkdir(mode=0o700, exist_ok=False)
     _write_new(plan.run_root / "preflight.json", {**plan.public(), "execute": True,
                                                 "operator_authority_ref": authority_ref,
@@ -326,6 +354,7 @@ def execute(plan: ProbePlan, *, authority_ref: str) -> dict[str, Any]:
     preceding: dict[str, Any] | None = None
     preceding_path: Path | None = None
     for cycle in range(2):
+        _verify_plan_inputs(plan)
         run_dir = plan.run_root / f"cycle-{cycle}"
         command = _command(plan, cycle, predecessor=preceding,
                            predecessor_report_path=preceding_path,
@@ -371,6 +400,7 @@ def execute(plan: ProbePlan, *, authority_ref: str) -> dict[str, Any]:
         "schema": REPORT_SCHEMA, "preflight": "preflight.json",
         "base_model_origin_evidence": "OPERATOR_CLAIM_ONLY",
         "model_origin_claim": plan.model_origin_claim,
+        "harness_sha256": plan.harness_sha256,
         "scope_fingerprint": plan.scope.fingerprint,
         "cycles": cycles,
         "neural_parameter_continuation_mechanism": "OBSERVED_BY_LOCAL_HARNESS",

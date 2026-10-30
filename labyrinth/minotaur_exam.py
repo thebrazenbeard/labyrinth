@@ -161,14 +161,18 @@ def evaluate_minotaur(scope: TrainingScopeSpec, receipt: MinotaurExamReceipt) ->
         baseline = sum(case.baseline_score for case in results) / len(results)
         heldout = outcomes[(skill, "heldout")]
         heldout_average = sum(case.score for case in heldout) / len(heldout)
+        heldout_baseline = sum(case.baseline_score for case in heldout) / len(heldout)
         transfer = outcomes[(skill, "transfer")]
         transfer_average = sum(case.score for case in transfer) / len(transfer)
+        transfer_baseline = sum(case.baseline_score for case in transfer) / len(transfer)
         gain = average - baseline
         accuracy.append((skill, average))
         gains.append((skill, gain))
         # Each independently covered development split must demonstrate mastery;
         # a strong transfer average must not conceal weak held-out performance.
         if (heldout_average < MIN_ACCURACY or transfer_average < MIN_ACCURACY
+                or heldout_average < heldout_baseline
+                or transfer_average < transfer_baseline
                 or gain < MIN_GAIN_OVER_BASELINE):
             weak.append(skill)
 

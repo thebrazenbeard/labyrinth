@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from labyrinth.minotaur_model import RoomContext, plan_training_room
 from labyrinth.training_scope import TrainingScopeSpec
@@ -263,6 +264,35 @@ class MinotaurPolicyLearningTests(unittest.TestCase):
                                  text=True, check=True)
             self.assertEqual(run.stdout.splitlines()[0], stored)
             self.assertIn("'contrast'", run.stdout)
+
+    def test_failed_checkpoint_sync_never_publishes_partial_final_file(self):
+        learner = model()
+        learner.observe(outcome(0, correct=True))
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "training-state.json"
+            with patch("labyrinth.minotaur_policy_learning.os.fsync",
+                       side_effect=OSError("disk sync failed")):
+                with self.assertRaisesRegex(OSError, "disk sync failed"):
+                    learner.save_policy(destination)
+            self.assertFalse(destination.exists(), "failed sync must not publish checkpoint")
+            self.assertEqual(list(Path(tmp).iterdir()), [], "failed save must remove staging files")
+            # A subsequent safe retry must be possible using the same exact name.
+            self.assertEqual(learner.save_policy(destination), learner.model_hash)
+            self.assertEqual(load_policy(destination, scope=SCOPE,
+                                         approved_training_cases=APPROVED).model_hash,
+                             learner.model_hash)
+
+    def test_checkpoint_publishing_failure_preserves_existing_target(self):
+        learner = model()
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "training-state.json"
+            destination.write_bytes(b"preexisting checkpoint")
+            with patch("labyrinth.minotaur_policy_learning.os.link",
+                       side_effect=FileExistsError("publish refused")):
+                with self.assertRaises(FileExistsError):
+                    learner.save_policy(destination)
+            self.assertEqual(destination.read_bytes(), b"preexisting checkpoint")
+            self.assertEqual(list(Path(tmp).iterdir()), [destination])
 
     def test_checkpoint_tamper_and_untrusted_code_rejected(self):
         learner = model()

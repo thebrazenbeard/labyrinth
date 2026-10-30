@@ -70,6 +70,27 @@ class MinotaurExamTests(unittest.TestCase):
         self.assertEqual(decision.weak_skills, ("cognitive_empathy",))
         self.assertEqual(dict(decision.mean_accuracy_by_skill)["cognitive_empathy"], 0.75)
 
+    def test_aggregate_gain_cannot_conceal_heldout_regression(self):
+        cases = []
+        for case in make_cases():
+            if case.skill == "cognitive_empathy":
+                if case.split == "heldout":
+                    cases.append(ExamCaseResult(
+                        case.case_id, case.skill, case.split,
+                        0.0 if case.case_id.endswith("-3") else 1.0,
+                        1.0, case.prompt_sha256,
+                    ))
+                else:
+                    cases.append(ExamCaseResult(
+                        case.case_id, case.skill, case.split,
+                        1.0, 0.0, case.prompt_sha256,
+                    ))
+            else:
+                cases.append(case)
+        decision = evaluate_minotaur(make_scope(), make_receipt(cases=tuple(cases)))
+        self.assertEqual(decision.status, "FAIL")
+        self.assertIn("cognitive_empathy", decision.weak_skills)
+
     def test_incomplete_transfer_coverage_never_passes(self):
         cases = tuple(case for case in make_cases()
                       if not (case.skill == "cognitive_empathy" and case.split == "transfer"))

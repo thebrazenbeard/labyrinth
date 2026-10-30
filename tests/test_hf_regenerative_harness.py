@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,9 +13,10 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from labyrinth.training_scope import TrainingScopeSpec
-from scripts.qualify_hf_regenerative import _command, _run_bounded_child, preflight
+from scripts.qualify_hf_regenerative import _command, _run_bounded_child, execute, preflight
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "qualify_hf_regenerative.py"
@@ -70,6 +73,7 @@ class HFRegenerativeHarnessTests(unittest.TestCase):
         self.assertEqual(plan["base_model_origin_evidence"], "OPERATOR_CLAIM_ONLY")
         self.assertEqual(plan["device_resource_qualification"], "NOT_RUN")
         self.assertFalse(plan["execute"])
+        self.assertEqual(plan["harness_sha256"], hashlib.sha256(SCRIPT.read_bytes()).hexdigest())
         self.assertEqual(tuple(self.outputs.iterdir()), before)
         self.assertEqual(len(plan["planned_cycle_dirs"]), 2)
 
@@ -107,6 +111,41 @@ class HFRegenerativeHarnessTests(unittest.TestCase):
         result = subprocess.run(self.args() + ["--execute"], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("authority-ref", result.stderr)
+        self.assertEqual(tuple(self.outputs.iterdir()), ())
+
+    def test_direct_execute_requires_valid_authority_before_creating_run(self):
+        plan = self.plan()
+        for label in ("", "token with spaces", "../../untrusted", None, 7):
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(ValueError, "authority-ref"):
+                    execute(plan, authority_ref=label)
+                self.assertEqual(tuple(self.outputs.iterdir()), ())
+        with self.assertRaisesRegex(ValueError, "requires a ProbePlan"):
+            execute(object(), authority_ref="operator-123")
+        self.assertEqual(tuple(self.outputs.iterdir()), ())
+
+    def test_direct_execute_rejects_stale_harness_digest_before_writes(self):
+        plan = replace(self.plan(), harness_sha256="0" * 64)
+        with self.assertRaisesRegex(ValueError, "harness digest"):
+            execute(plan, authority_ref="operator-123")
+        self.assertEqual(tuple(self.outputs.iterdir()), ())
+
+    def test_direct_execute_rejects_changed_model_before_writes(self):
+        plan = self.plan()
+        (self.model / "config.json").write_text('{"changed":true}', encoding="utf-8")
+        with patch("scripts.qualify_hf_regenerative._run_bounded_child") as child:
+            with self.assertRaisesRegex(ValueError, "model manifest"):
+                execute(plan, authority_ref="operator-123")
+            child.assert_not_called()
+        self.assertEqual(tuple(self.outputs.iterdir()), ())
+
+    def test_direct_execute_rejects_changed_scope_before_writes(self):
+        plan = self.plan()
+        self.scope.write_text('{"objective_id":"changed"}', encoding="utf-8")
+        with patch("scripts.qualify_hf_regenerative._run_bounded_child") as child:
+            with self.assertRaises(ValueError):
+                execute(plan, authority_ref="operator-123")
+            child.assert_not_called()
         self.assertEqual(tuple(self.outputs.iterdir()), ())
 
     def test_cycle_one_pins_prior_report_and_lora_value_digest(self):

@@ -185,6 +185,9 @@ def _validate_state(state: AdaptiveWalkState) -> None:
             raise ValueError("invalid chamber event payload")
         PendingChamber.__post_init__(assignment)
         TrainingRoomFeedback.__post_init__(receipt)
+        if assignment != _expected_assignment(state.scope, state.plan,
+                                              state.history[:index], checkpoint):
+            raise ValueError("recorded chamber deviates from deterministic train-only route")
         if (assignment.origin_room_id not in originals
                 or assignment.skill != originals[assignment.origin_room_id]
                 or assignment.origin_room_id in origins
@@ -210,6 +213,10 @@ def _validate_state(state: AdaptiveWalkState) -> None:
         if type(state.pending) is not PendingChamber:
             raise ValueError("invalid pending chamber")
         PendingChamber.__post_init__(state.pending)
+        if state.pending != _expected_assignment(
+            state.scope, state.plan, state.history, state.checkpoint_sha256
+        ):
+            raise ValueError("pending chamber deviates from deterministic train-only route")
         if (state.pending.origin_room_id not in originals
                 or state.pending.skill != originals[state.pending.origin_room_id]
                 or state.pending.origin_room_id in origins
@@ -283,22 +290,22 @@ def begin_adaptive_walk_from_journey(journey: object) -> AdaptiveWalkState:
     return state
 
 
-def offer_next_chamber(state: AdaptiveWalkState) -> AdaptiveWalkState:
-    """Select the next train-only chamber from *observed train* feedback.
+def _expected_assignment(
+    scope: TrainingScopeSpec,
+    plan: MazePlan,
+    history: tuple[ChamberEvent, ...],
+    checkpoint_sha256: str,
+) -> PendingChamber:
+    """Derive the one authorized route without relying on a stored assignment.
 
-    Failure drills the same skill when any such room remains. Success seeks a
-    different skill to maintain breadth. A source-controlled fallback picks
-    the first remaining room. The suggested difficulty falls after a failure
-    and rises after success. Every branch changes the next room's seed.
+    Also used when validating restored history, so this helper deliberately
+    performs no recursive state validation.
     """
-    _validate_state(state)
-    if state.pending is not None:
-        raise ValueError("must complete pending chamber before requesting another")
-    if len(state.history) == len(state.plan.rooms):
+    if len(history) == len(plan.rooms):
         raise ValueError("authorized corridor budget exhausted")
-    visited = {event.assignment.origin_room_id for event in state.history}
-    remaining = [room for room in state.plan.rooms if room.room_id not in visited]
-    last = state.history[-1] if state.history else None
+    visited = {event.assignment.origin_room_id for event in history}
+    remaining = [room for room in plan.rooms if room.room_id not in visited]
+    last = history[-1] if history else None
     preferred = None
     if last is not None:
         previous_skill = last.assignment.skill
@@ -310,43 +317,57 @@ def offer_next_chamber(state: AdaptiveWalkState) -> AdaptiveWalkState:
     # Difficulty follows evidence for *this* skill only: success on arithmetic
     # cannot justify advancing programming difficulty without a programming
     # observation. Missing skill evidence starts at the declared specificity.
-    difficulty = state.scope.specificity
+    difficulty = scope.specificity
     last_same_skill = next(
-        (event for event in reversed(state.history) if event.assignment.skill == room.skill), None
+        (event for event in reversed(history) if event.assignment.skill == room.skill), None
     )
     if last_same_skill is not None:
         difficulty = max(1, min(5, last_same_skill.assignment.difficulty
                                  + (1 if last_same_skill.feedback.score else -1)))
     feedback_commitment = _digest(
-        "adaptive-journey-history", state.scope.fingerprint, state.plan.cycle_index,
+        "adaptive-journey-history", scope.fingerprint, plan.cycle_index,
         *(_digest(event.assignment.room_id, event.feedback.case_id,
-                  event.feedback.prompt_sha256, event.feedback.score) for event in state.history),
+                  event.feedback.prompt_sha256, event.feedback.score) for event in history),
     )
-    used_room_ids = {event.assignment.room_id for event in state.history}
-    used_seeds = {event.assignment.case_seed for event in state.history}
-    initial_room_ids = {entry.room_id for entry in state.plan.rooms}
-    initial_seeds = {entry.case_seed for entry in state.plan.rooms}
+    used_room_ids = {event.assignment.room_id for event in history}
+    used_seeds = {event.assignment.case_seed for event in history}
+    initial_room_ids = {entry.room_id for entry in plan.rooms}
+    initial_seeds = {entry.case_seed for entry in plan.rooms}
     assignment = None
     for nonce in range(_MAX_NONCES):
-        tag = _digest("adaptive-chamber", state.scope.fingerprint, state.plan.cycle_index,
-                      room.room_id, len(state.history), feedback_commitment, nonce)
+        tag = _digest("adaptive-chamber", scope.fingerprint, plan.cycle_index,
+                      room.room_id, len(history), feedback_commitment, nonce)
         new_id = tag[:32]
         new_seed = int(_digest("adaptive-seed", tag)[:8], 16) % (2**31)
         if (new_id in used_room_ids or new_id in initial_room_ids
                 or new_seed in used_seeds or new_seed in initial_seeds):
             continue
-        assignment = PendingChamber(
+        return PendingChamber(
             origin_room_id=room.room_id,
             room_id=new_id,
             skill=room.skill,
             case_seed=new_seed,
             difficulty=difficulty,
-            visit_index=len(state.history),
-            checkpoint_sha256=state.checkpoint_sha256,
+            visit_index=len(history),
+            checkpoint_sha256=checkpoint_sha256,
         )
-        break
-    if assignment is None:
-        raise ValueError("unable to assign unique train-only chamber within bounded attempts")
+    raise ValueError("unable to assign unique train-only chamber within bounded attempts")
+
+
+def offer_next_chamber(state: AdaptiveWalkState) -> AdaptiveWalkState:
+    """Select the next train-only chamber from *observed train* feedback.
+
+    Failure drills the same skill when any such room remains. Success seeks a
+    different skill to maintain breadth. A source-controlled fallback picks
+    the first remaining room. The suggested difficulty falls after a failure
+    and rises after success. Every branch changes the next room's seed.
+    """
+    _validate_state(state)
+    if state.pending is not None:
+        raise ValueError("must complete pending chamber before requesting another")
+    assignment = _expected_assignment(
+        state.scope, state.plan, state.history, state.checkpoint_sha256
+    )
     result = replace(state, pending=assignment)
     _validate_state(result)
     return result
