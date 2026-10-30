@@ -65,6 +65,7 @@ class FullCheckpointContext:
                 or type(self.cursor) is not int
                 or not 0 <= self.cursor <= len(self.exposures)):
             raise ValueError("invalid checkpoint cursor or exposure sequence")
+        seen_occurrence_ids: set[str] = set()
         for exposure in self.exposures:
             if (type(exposure) is not tuple or len(exposure) != 2
                     or type(exposure[0]) is not str
@@ -72,6 +73,11 @@ class FullCheckpointContext:
                     or type(exposure[1]) is not str
                     or not _DIGEST.fullmatch(exposure[1])):
                 raise ValueError("invalid checkpoint training exposure")
+            # A case may be practiced repeatedly, but every exposure record
+            # represents a distinct training occurrence/cursor position.
+            if exposure[0] in seen_occurrence_ids:
+                raise ValueError("duplicate checkpoint training exposure occurrence")
+            seen_occurrence_ids.add(exposure[0])
 
 
 @dataclass(frozen=True)

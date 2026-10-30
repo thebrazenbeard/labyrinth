@@ -224,6 +224,23 @@ the opt-in binding checks as exercised on real PyTorch, including changed
 frozen tensors/buffers and checkpoint restoration. It does **not** establish
 that existing production training entry points exclusively use this binding.
 
+### Exposure-occurrence uniqueness — physical regression
+
+After a source-level hostile probe showed that duplicate consumed exposure
+tokens could be accepted, `FullCheckpointContext.validate` was tightened to
+require globally distinct **occurrence IDs**. The same training prompt hash
+may recur as a new practice visit, but every visit needs its own ID. The
+updated `labyrinth/neural_resume_checkpoint.py` and test module were copied
+into Lappy's existing isolated Q8 root and matched local SHA-256 values:
+
+- Module: `3e27bb1297ba43e229de458b0a4dc76532b41197be4b7d5b44f0cf733f4ba21a`.
+- Tests: `37b958322bc936bee4a07dc4a09e3d4645673e5ab6657dfbecfd483ffd7dea31`.
+
+Lappy's real CPU PyTorch run returned **8 tests, 0 skipped, PASS**. This is
+source-level replay hardening with physical module tests; it does not provide
+an external monotonic journal anchor or independently authenticated training
+worker execution.
+
 In the local source checkout (where Torch is unavailable), the full suite after
 adding the pilot and checkpoint modules returned **523 tests, 42 skipped,
 PASS**; four new PyTorch-dependent tests were skipped locally and are covered

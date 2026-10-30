@@ -235,8 +235,9 @@ def prepare_objective_program_room(
 ) -> "PreparedTrainingRoom":
     """Bind one *approved* program focus declaration to executable TRAIN content.
 
-    Only the five public semantic program profiles and the explicit
-    ``program_structure_v1`` *training* rubric marker are recognized. This
+    Only the five public semantic program profiles matching the declared
+    specificity and the explicit ``program_structure_v1`` *training* rubric
+    marker are recognized. No focus tag may silently override scope narrowness. This
     helper does not execute that rubric, grade a learner, authorize graduation,
     infer arbitrary goals, or handle private examination commitments.
 
@@ -267,6 +268,8 @@ def prepare_objective_program_room(
     levels_by_profile = {semantic_focus_profile(level): level for level in range(1, 6)}
     if len(focus) != 1 or focus[0] not in levels_by_profile:
         raise ValueError("unsupported executable program focus tag")
+    if levels_by_profile[focus[0]] != scope.specificity:
+        raise ValueError("approved program focus contradicts declared specificity")
 
     if type(plan) is not MazePlan or type(room) is not MazeRoom:
         raise ValueError("expected a validated TRAIN maze and room")

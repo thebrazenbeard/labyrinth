@@ -38,6 +38,22 @@ class CheckpointContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fence"):
             replace(_context(), fence=-1).validate()
 
+    def test_reject_duplicate_exposure_occurrence_ids(self):
+        # The occurrence token identifies one consumed training visit, not
+        # the underlying case. Reusing it must never count as new exposure.
+        for repeated in (("case-0", "c" * 64), ("case-0", "d" * 64)):
+            with self.subTest(second_digest=repeated[1]):
+                context = replace(_context(), cursor=2,
+                                  exposures=(("case-0", "c" * 64), repeated))
+                with self.assertRaisesRegex(ValueError, "duplicate.*exposure"):
+                    context.validate()
+
+    def test_repeated_training_case_under_distinct_occurrence_ids_is_valid(self):
+        context = replace(_context(), cursor=2,
+                          exposures=(("visit-0", "c" * 64),
+                                     ("visit-1", "c" * 64)))
+        context.validate()
+
     def test_missing_and_symlink_checkpoint_rejected_before_torch_import(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / "missing"
@@ -141,6 +157,17 @@ class PhysicalTorchCheckpointTests(unittest.TestCase):
                 load_full_checkpoint(path, model=model, optimizer=optimizer,
                                      expected_sha256=receipt.sha256,
                                      expected_context=replace(_context(), fence=3))
+            with self.assertRaisesRegex(ValueError, "duplicate.*exposure"):
+                # Even the caller's nominally trusted resume context must
+                # not contain a replayed training occurrence identifier.
+                load_full_checkpoint(
+                    path, model=model, optimizer=optimizer,
+                    expected_sha256=receipt.sha256,
+                    expected_context=replace(
+                        _context(), cursor=2,
+                        exposures=(("visit", "c" * 64),
+                                   ("visit", "d" * 64))),
+                )
             for name, p in model.named_parameters():
                 self.assertTrue(torch.equal(p.detach(), untouched[name]))
             state_path = path / "state.safetensors"
