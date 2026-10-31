@@ -88,6 +88,7 @@ on:
       - "tests/test_minotaur_*.py"
       - "tests/test_r57_minotaur_policy_regression.py"
       - "tests/test_r68_minotaur_policy_concurrency.py"
+      - "tests/test_r72_minotaur_registry_transition.py"
       - "tests/test_retention_sample_planning_r57.py"
       - "tests/test_retention_transfer_cohort_r68.py"
       - "tests/test_rezon_pointer_mapping_r57.py"
@@ -267,6 +268,7 @@ on:
       - "tests/test_minotaur_*.py"
       - "tests/test_r57_minotaur_policy_regression.py"
       - "tests/test_r68_minotaur_policy_concurrency.py"
+      - "tests/test_r72_minotaur_registry_transition.py"
       - "tests/test_retention_sample_planning_r57.py"
       - "tests/test_retention_transfer_cohort_r68.py"
       - "tests/test_rezon_pointer_mapping_r57.py"
@@ -498,6 +500,9 @@ jobs:
               ("tests.test_q8_external_acceptance_source_r68", 9),
               ("tests.test_rezon_two_adapter_source_partition_r68", 13),
               ("tests.test_r68_minotaur_policy_concurrency", 1),
+              # R72 source-only nonlearning registry receipt: independently
+              # visible policy/registry transition, NOT neural adaptation.
+              ("tests.test_r72_minotaur_registry_transition", 4),
               # The runner must bind its predecessor to observe()'s atomic
               # policy receipt, not a separate mutable model_hash read.
               ("tests.test_journey_policy_runner", 7),

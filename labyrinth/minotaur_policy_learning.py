@@ -23,7 +23,7 @@ import re
 import stat
 import tempfile
 import threading
-from typing import Any, Mapping
+from typing import Any, Mapping, NamedTuple
 from dataclasses import dataclass
 
 from .minotaur_model import RoomContext, TACTICS
@@ -119,6 +119,33 @@ class TrainCaseApproval:
             raise ValueError("only TRAIN cases may be approved")
 
 
+class TrainRegistryAdmissionReceipt(NamedTuple):
+    """Local registry transition lineage; never a scored TRAIN observation.
+
+    The caller remains responsible for authenticated trainer admission and
+    durable cross-process event sequencing. This value is not a permission or
+    an assertion that neural parameters changed.
+    """
+
+    before_policy_sha256: str
+    after_policy_sha256: str
+    before_registry_sha256: str
+    after_registry_sha256: str
+    added_case_ids: tuple[str, ...]
+
+    @property
+    def transition_kind(self) -> str:
+        return "train_registry_admission_nonlearning"
+
+    @property
+    def train_observation(self) -> bool:
+        return False
+
+    @property
+    def authorizes_model_update(self) -> bool:
+        return False
+
+
 class MinotaurTrainingPolicy:
     """Bounded tabular competence observations; not neural model weights.
 
@@ -196,6 +223,29 @@ class MinotaurTrainingPolicy:
         """
         with self._lock:
             return self._extend_training_registry_locked(new_cases)
+
+    def extend_training_registry_with_receipt(
+        self, new_cases: tuple[TrainCaseApproval, ...],
+    ) -> TrainRegistryAdmissionReceipt:
+        """Return one atomic, non-learning lineage record for TRAIN admission.
+
+        Unlike a scored `observe` receipt, this event only changes the exact
+        approved TRAIN inventory. The legacy registry-digest-returning method
+        is retained for existing callers. No host-issued authorization or
+        cross-process monotonicity is inferred from this local record.
+        """
+        with self._lock:
+            before_policy = self.model_hash
+            before_registry = self._registry_digest()
+            after_registry = self._extend_training_registry_locked(new_cases)
+            after_policy = self.model_hash
+            return TrainRegistryAdmissionReceipt(
+                before_policy_sha256=before_policy,
+                after_policy_sha256=after_policy,
+                before_registry_sha256=before_registry,
+                after_registry_sha256=after_registry,
+                added_case_ids=tuple(item.case_id for item in new_cases),
+            )
 
     def _extend_training_registry_locked(self, new_cases: tuple[TrainCaseApproval, ...]) -> str:
         self._validated_payload()

@@ -314,6 +314,25 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('R68 source-only', workflow)
         self.assertIn('NO Q5/Q6/Q7/Q8 authority', workflow)
 
+    def test_r72_registry_transition_receipt_is_required_by_both_cpu_ci_triggers(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for trigger, event_paths in paths_by_trigger.items():
+            with self.subTest(trigger=trigger):
+                self.assertIn('      - "labyrinth/minotaur_policy_learning.py"', event_paths)
+                self.assertIn('      - "tests/test_r72_minotaur_registry_transition.py"', event_paths)
+
+        self.assertIn('("tests.test_r72_minotaur_registry_transition", 4)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+        self.assertIn('R72 source-only nonlearning registry receipt', workflow)
+
     def test_r60_private_wheel_contract_is_required_by_both_cpu_ci_triggers(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
