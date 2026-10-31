@@ -61,6 +61,8 @@ class GraduationPolicy:
         ):
             if type(getattr(self, field)) is not str:
                 raise ValueError(f"{field} must be a string")
+        if type(self.objective_kind) is not str:
+            raise ValueError("objective_kind must be an exact string")
         if type(self.required_slices) is not tuple:
             raise ValueError("required_slices must be an immutable tuple")
         if not _ID.fullmatch(self.objective_id):

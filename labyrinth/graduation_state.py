@@ -50,6 +50,9 @@ def _valid_key(state_key: bytes) -> None:
 def _valid_path(db_path: Path) -> Path:
     if not isinstance(db_path, Path) or not db_path.is_absolute():
         raise ValueError("explicit absolute custodian database Path required")
+    for part in (db_path, *db_path.parents):
+        if part.is_symlink() or (hasattr(part, "is_junction") and part.is_junction()):
+            raise ValueError("symlink or junction in custodian database path")
     if not db_path.parent.is_dir() or db_path.parent.is_symlink():
         raise ValueError("preexisting non-symlink custodian directory required")
     if db_path.is_symlink() or (db_path.exists() and not db_path.is_file()):
