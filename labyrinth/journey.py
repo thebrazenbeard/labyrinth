@@ -181,6 +181,24 @@ def _validate_state(state: JourneyState) -> None:
     if (state.phase in (DEVELOPMENT_PASSED_PENDING_PRIVATE_QUALIFICATION, EXHAUSTED)
             and len(state.attempts) != state.cycle_index + 1):
         raise ValueError("finished journey requires terminal attempt")
+    if any(attempt.exam_status != "FAIL" for attempt in state.attempts[:state.cycle_index]):
+        raise ValueError("every prior cycle must have a failed development exam")
+    if (state.phase == DEVELOPMENT_PASSED_PENDING_PRIVATE_QUALIFICATION
+            and state.attempts[-1].exam_status != "PASS"):
+        raise ValueError("terminal exam does not match development-pass phase")
+    if (state.phase == EXHAUSTED
+            and state.attempts[-1].exam_status not in ("FAIL", "INCONCLUSIVE")):
+        raise ValueError("terminal exam does not match exhausted phase")
+    # A syntactically valid replacement room ID could previously be paired
+    # with a matching forged TRAIN receipt. The maze is deterministic given
+    # its frozen scope, cycle and the *prior* failed exam's weak-skill hints.
+    # The current terminal attempt did not generate its own maze.
+    weak_skills = (() if state.cycle_index == 0
+                   else state.attempts[state.cycle_index - 1].weak_skills)
+    expected_maze = generate_maze_plan(state.scope, state.cycle_index,
+                                      weak_skills=weak_skills)
+    if state.maze != expected_maze:
+        raise ValueError("journey maze differs from canonical generated plan")
 
 
 def begin_journey(scope: TrainingScopeSpec, *, checkpoint_sha256: str) -> JourneyState:

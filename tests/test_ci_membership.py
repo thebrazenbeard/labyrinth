@@ -50,6 +50,19 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('("tests.test_r42_complete_maze_primitive_boundary", 5)', workflow)
         self.assertIn('or result.skipped', workflow)
 
+    def test_canonical_maze_identity_is_required_by_cpu_ci(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/journey.py"', event_paths)
+            self.assertIn('"tests/test_r48_canonical_maze_identity.py"', event_paths)
+        self.assertIn('("tests.test_r48_canonical_maze_identity", 7)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
     def test_legacy_minotaur_exam_boundary_is_a_required_cpu_suite(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
