@@ -93,7 +93,7 @@ class TrainingRoomFeedback:
         _sha(self.prompt_sha256, "training prompt")
         if type(self.score) is not int or self.score not in (0, 1):
             raise ValueError("train score must be exactly 0 or 1")
-        if self.split != "train":
+        if type(self.split) is not str or self.split != "train":
             raise ValueError("only train feedback can steer a corridor")
         _sha(self.checkpoint_before_sha256, "checkpoint before room")
         _sha(self.checkpoint_after_sha256, "checkpoint after room")

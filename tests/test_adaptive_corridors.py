@@ -89,6 +89,24 @@ class AdaptiveCorridorTests(unittest.TestCase):
             record_training_feedback(pending, replace(feedback(pending, score=1),
                                                       case_id="eval-leak"))
 
+    def test_adversarial_split_comparison_cannot_import_final_feedback(self):
+        # The split is a trust-boundary label; never invoke caller-defined
+        # equality before checking its exact primitive type.
+        class ForgedPrivateSplit(str):
+            def __ne__(self, other):
+                return False
+
+        class PretendTrainingSplit:
+            def __ne__(self, other):
+                return False
+
+        pending = offer_next_chamber(start())
+        for hostile_split in (ForgedPrivateSplit("private_final"), PretendTrainingSplit()):
+            with self.subTest(split_type=type(hostile_split).__name__), self.assertRaises(ValueError):
+                record_training_feedback(
+                    pending, replace(feedback(pending, score=0), split=hostile_split)
+                )
+
     def test_rejects_duplicate_and_sealed_prompts_before_state_change(self):
         state = start()
         first = offer_next_chamber(state)
