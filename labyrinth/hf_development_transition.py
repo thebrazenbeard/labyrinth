@@ -28,6 +28,11 @@ from typing import Any, Callable
 from .hf_pilot import PilotConfig, _authorized_development_resume, run_pilot
 from .hf_resume_bridge import ResumeContext, preflight_resume
 from .journey import JourneyState, TRAINING, _validate_state
+from .external_monotonic_authority_contract import (
+    ExternalAuthorityConflict,
+    ExternalMonotonicReservationClient,
+    ExternalReservationRequest,
+)
 from .regenerative_maze import generate_maze_plan
 from .training_scope import TrainingScopeSpec
 
@@ -47,6 +52,7 @@ MAX_RECEIPT_BYTES = 65_536
 MAX_DEVELOPMENT_CASES = 512
 _BOUND_RECEIPT_DOMAIN = b"labyrinth.hf-bound-development-reservation.v1\0"
 _MAX_FENCE = 2**63 - 1
+_EXAM_LINEAGE_DOMAIN = b"labyrinth.hf-development-exam-lineage.v1\0"
 
 
 @dataclass(frozen=True)
@@ -249,6 +255,51 @@ def _reserve_bound_successor(
         raise ValueError("bound reservation receipt signature invalid")
 
 
+def development_exam_lineage_commitment(receipt_bytes: bytes,
+                                        signature_hex: str) -> str:
+    """Bind a host reservation to the exact signed development FAIL bytes."""
+    if (type(receipt_bytes) is not bytes
+            or type(signature_hex) is not str or not _DIGEST.fullmatch(signature_hex)):
+        raise ValueError("signed development exam required for lineage commitment")
+    return hashlib.sha256(
+        _EXAM_LINEAGE_DOMAIN + receipt_bytes + b"\0" + signature_hex.encode("ascii")
+    ).hexdigest()
+
+
+def _reserve_external_qualification_successor(
+    client: ExternalMonotonicReservationClient,
+    request: ExternalReservationRequest,
+    verified: VerifiedDevelopmentTransition,
+    scope: TrainingScopeSpec,
+    context: ResumeContext,
+    receipt_bytes: bytes,
+    signature_hex: str,
+) -> None:
+    """Source-only typed external one-shot CAS, *not* host custody proof.
+
+    Provider/key pinning, atomicity, monotonicity and rollback resistance must
+    be verified on an independently administered host. In-process client
+    construction cannot establish any of those physical qualification gates.
+    """
+    if (type(client) is not ExternalMonotonicReservationClient
+            or type(request) is not ExternalReservationRequest):
+        raise ValueError("qualification requires typed external reservation client and intent")
+    request.validate()
+    expected = {
+        "event_id": verified.event_id,
+        "exam_id": verified.exam_id,
+        "scope_fingerprint": scope.fingerprint,
+        "exam_lineage_sha256": development_exam_lineage_commitment(
+            receipt_bytes, signature_hex),
+        "prior_checkpoint_sha256": context.predecessor_lora_value_sha256,
+        "to_cycle": context.cycle_index,
+    }
+    if any(getattr(request, name) != value for name, value in expected.items()):
+        raise ExternalAuthorityConflict(
+            "external qualification intent differs from signed predecessor or exam")
+    client.reserve(request)
+
+
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -348,6 +399,9 @@ def run_journey_bound_successor(
     independent_development_key: bytes,
     reserve_development_event: Callable[[str], bool] | None = None,
     bound_reservation_authority: BoundReservationAuthority | None = None,
+    qualification_mode: bool = False,
+    external_reservation_client: ExternalMonotonicReservationClient | None = None,
+    external_reservation_request: ExternalReservationRequest | None = None,
 ) -> dict[str, Any]:
     """Strict, opt-in Journey + signed development successor entry point.
 
@@ -360,6 +414,18 @@ def run_journey_bound_successor(
 
     All checks precede predecessor preflight and event reservation, so invalid
     lineage cannot consume a signed development event or start an optimizer.
+
+    ``qualification_mode=True`` selects the *source-side* strict policy: no
+    legacy event-only callback or symmetric HMAC reservation authority is
+    accepted. The caller supplies an ``ExternalMonotonicReservationClient``
+    with an independently pinned Ed25519 verification key and host-pinned
+    ``ExternalReservationRequest`` whose exam lineage is
+    ``development_exam_lineage_commitment(receipt_bytes, signature_hex)``.
+    The external provider must durably implement atomic one-shot CAS/readback.
+    This Python API cannot prove that the provider, private signing key, or
+    monotonic store actually lives outside the trainer rollback domain.
+    It is NOT independent host qualification, physical neural-learning proof,
+    or permission to graduate a learner.
     """
     verified = verify_development_transition(
         scope, resume_context, receipt_bytes, signature_hex,
@@ -416,11 +482,23 @@ def run_journey_bound_successor(
     ):
         raise ValueError("regenerated Journey maze does not derive from signed weaknesses")
 
-    return run_exam_bound_successor(
+    # Qualification can proceed only after the above complete Journey checks.
+    # The exam-only public API always denies qualification, regardless of
+    # caller-supplied arguments. Keep legacy research delegation on its
+    # historical, mockable public call surface.
+    downstream = (_run_exam_bound_successor if qualification_mode is True
+                  else run_exam_bound_successor)
+    qualified_marker = ({"journey_validated": True}
+                        if qualification_mode is True else {})
+    return downstream(
         config, scope, predecessor_run_dir, resume_context, receipt_bytes, signature_hex,
         independent_development_key=independent_development_key,
         reserve_development_event=reserve_development_event,
         bound_reservation_authority=bound_reservation_authority,
+        qualification_mode=qualification_mode,
+        external_reservation_client=external_reservation_client,
+        external_reservation_request=external_reservation_request,
+        **qualified_marker,
     )
 
 
@@ -435,6 +513,44 @@ def run_exam_bound_successor(
     independent_development_key: bytes,
     reserve_development_event: Callable[[str], bool] | None = None,
     bound_reservation_authority: BoundReservationAuthority | None = None,
+    qualification_mode: bool = False,
+    external_reservation_client: ExternalMonotonicReservationClient | None = None,
+    external_reservation_request: ExternalReservationRequest | None = None,
+) -> dict[str, Any]:
+    """Research/development route: cannot enable qualification without a Journey.
+
+    Only ``run_journey_bound_successor`` runs the full sealed, regenerated
+    Journey consistency checks needed before requesting an external one-shot
+    reservation. This function retains the legacy research callers.
+    """
+    return _run_exam_bound_successor(
+        config, scope, predecessor_run_dir, resume_context,
+        receipt_bytes, signature_hex,
+        independent_development_key=independent_development_key,
+        reserve_development_event=reserve_development_event,
+        bound_reservation_authority=bound_reservation_authority,
+        qualification_mode=qualification_mode,
+        external_reservation_client=external_reservation_client,
+        external_reservation_request=external_reservation_request,
+        journey_validated=False,
+    )
+
+
+def _run_exam_bound_successor(
+    config: PilotConfig,
+    scope: TrainingScopeSpec,
+    predecessor_run_dir: str | Path,
+    resume_context: ResumeContext,
+    receipt_bytes: bytes,
+    signature_hex: str,
+    *,
+    independent_development_key: bytes,
+    reserve_development_event: Callable[[str], bool] | None,
+    bound_reservation_authority: BoundReservationAuthority | None,
+    qualification_mode: bool,
+    external_reservation_client: ExternalMonotonicReservationClient | None,
+    external_reservation_request: ExternalReservationRequest | None,
+    journey_validated: bool,
 ) -> dict[str, Any]:
     """Run an opt-in neural successor with only signed remediation hints.
 
@@ -457,19 +573,53 @@ def run_exam_bound_successor(
         scope, resume_context, receipt_bytes, signature_hex,
         independent_development_key=independent_development_key,
     )
-    if (reserve_development_event is None) == (bound_reservation_authority is None):
-        raise ValueError("legacy and bound reservation paths are mutually exclusive")
-    if (bound_reservation_authority is not None
-            and type(bound_reservation_authority) is not BoundReservationAuthority):
-        raise ValueError("typed bound reservation authority required")
-    if (reserve_development_event is not None
-            and not callable(reserve_development_event)):
-        raise ValueError("legacy reservation callback must be callable")
+    if type(qualification_mode) is not bool:
+        raise ValueError("qualification_mode must be bool")
+    if qualification_mode:
+        if journey_validated is not True:
+            raise ValueError("qualification requires validated regenerated Journey")
+        if (reserve_development_event is not None
+                or bound_reservation_authority is not None):
+            raise ValueError("qualification prohibits legacy and HMAC reservation providers")
+        if (type(external_reservation_client) is not ExternalMonotonicReservationClient
+                or type(external_reservation_request) is not ExternalReservationRequest):
+            raise ValueError("qualification requires typed external reservation client and intent")
+        # Validate host-pinned request against signed evidence before touching
+        # predecessor files; the live external CAS still occurs after preflight.
+        external_reservation_request.validate()
+        if any((
+            external_reservation_request.event_id != verified.event_id,
+            external_reservation_request.exam_id != verified.exam_id,
+            external_reservation_request.scope_fingerprint != scope.fingerprint,
+            external_reservation_request.exam_lineage_sha256 !=
+                development_exam_lineage_commitment(receipt_bytes, signature_hex),
+            external_reservation_request.prior_checkpoint_sha256 !=
+                resume_context.predecessor_lora_value_sha256,
+            external_reservation_request.to_cycle != resume_context.cycle_index,
+        )):
+            raise ExternalAuthorityConflict("external qualification intent differs from signed predecessor or exam")
+    else:
+        if (external_reservation_client is not None
+                or external_reservation_request is not None):
+            raise ValueError("external reservation requires qualification_mode")
+        if (reserve_development_event is None) == (bound_reservation_authority is None):
+            raise ValueError("legacy and bound reservation paths are mutually exclusive")
+        if (bound_reservation_authority is not None
+                and type(bound_reservation_authority) is not BoundReservationAuthority):
+            raise ValueError("typed bound reservation authority required")
+        if (reserve_development_event is not None
+                and not callable(reserve_development_event)):
+            raise ValueError("legacy reservation callback must be callable")
     # No model training or output creation happens during this read-only
     # preflight. It rejects malformed/missing local model and predecessor
     # files while the signed development event is still available to retry.
     preflight_resume(config, predecessor_run_dir, resume_context)
-    if bound_reservation_authority is not None:
+    if qualification_mode:
+        _reserve_external_qualification_successor(
+            external_reservation_client, external_reservation_request,
+            verified, scope, resume_context, receipt_bytes, signature_hex,
+        )
+    elif bound_reservation_authority is not None:
         _reserve_bound_successor(
             bound_reservation_authority, verified, scope, resume_context,
             config, predecessor_run_dir, independent_development_key,
