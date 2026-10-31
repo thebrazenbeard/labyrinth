@@ -38,6 +38,32 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
 
 
 class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_train_completion_primitive_boundary_is_required_by_cpu_ci(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"tests/test_r42_complete_maze_primitive_boundary.py"', event_paths)
+        self.assertIn('("tests.test_r42_complete_maze_primitive_boundary", 5)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_legacy_minotaur_exam_boundary_is_a_required_cpu_suite(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"tests/test_r40_face_minotaur_primitive_boundary.py"',
+                          event_paths)
+        self.assertIn('("tests.test_r40_face_minotaur_primitive_boundary", 6)',
+                      workflow)
+        self.assertIn('or result.skipped', workflow)
+
     def test_r36_toy_evidence_is_required_and_archived_as_non_authorizing_artifact(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()

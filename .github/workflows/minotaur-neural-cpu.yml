@@ -74,6 +74,8 @@ on:
       - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
       - "tests/test_v2_checkpoint_cpu_smoke_r22.py"
       - "tests/test_r36_toy_cpu_evidence_receipt.py"
+      - "tests/test_r40_face_minotaur_primitive_boundary.py"
+      - "tests/test_r42_complete_maze_primitive_boundary.py"
       - "tests/test_fullstate_physical_gate_r8.py"
       - "tests/test_optimizer_runner_v2_r19.py"
       - "tests/test_checkpoint_manifest_v2_r19.py"
@@ -217,6 +219,8 @@ on:
       - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
       - "tests/test_v2_checkpoint_cpu_smoke_r22.py"
       - "tests/test_r36_toy_cpu_evidence_receipt.py"
+      - "tests/test_r40_face_minotaur_primitive_boundary.py"
+      - "tests/test_r42_complete_maze_primitive_boundary.py"
       - "tests/test_fullstate_physical_gate_r8.py"
       - "tests/test_optimizer_runner_v2_r19.py"
       - "tests/test_checkpoint_manifest_v2_r19.py"
@@ -408,6 +412,8 @@ jobs:
               ("tests.test_v2_checkpoint_cpu_smoke_r22", 5),
               ("tests.test_r36_toy_cpu_evidence_receipt", 9),
               ("tests.test_minotaur_exam_intake_guard_r36", 10),
+              ("tests.test_r40_face_minotaur_primitive_boundary", 6),
+              ("tests.test_r42_complete_maze_primitive_boundary", 5),
               ("tests.test_fullstate_physical_gate_r8", 1),
               ("tests.test_optimizer_runner_v2_r19", 7),
               ("tests.test_checkpoint_manifest_v2_r19", 6),
