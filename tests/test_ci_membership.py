@@ -38,6 +38,14 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
 
 
 class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_graduation_auth_dependency_is_pinned_in_both_workflows(self):
+        root = Path(__file__).resolve().parents[1]
+        generic = (root / ".github/workflows/ci.yml").read_text()
+        neural = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        self.assertIn("-e '.[auth]' \"cryptography==50.0.2\"", generic)
+        self.assertIn('"cryptography==50.0.2"', neural)
+        self.assertIn('cryptography.__version__ == "50.0.2"', neural)
+
     def test_l12_l14_neural_and_custody_boundaries_are_required_in_cpu_ci(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
