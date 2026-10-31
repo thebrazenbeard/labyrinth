@@ -108,6 +108,10 @@ class OptimizerContinuityRequest:
     logical_run_id: str
     prior_checkpoint_sha256: str
     fence: int
+    # Explicitly opt in to the stricter v2 source-only journal. This is not
+    # proof of host-owned authority, a crash recovery service or graduation.
+    source_journal_v2: bool = False
+    candidate_artifact_sha256: str | None = None
 
     def validate(self) -> None:
         if (type(self.logical_run_id) is not str
@@ -119,6 +123,15 @@ class OptimizerContinuityRequest:
                 or type(self.fence) is not int
                 or not 0 <= self.fence < 2**63 - 1):
             raise ValueError("optimizer continuity requires bounded operator pins")
+        if type(self.source_journal_v2) is not bool:
+            raise ValueError("optimizer journal v2 selection must be explicit")
+        if self.source_journal_v2:
+            if (type(self.candidate_artifact_sha256) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}",
+                                    self.candidate_artifact_sha256, re.ASCII) is None):
+                raise ValueError("optimizer journal v2 requires candidate artifact pin")
+        elif self.candidate_artifact_sha256 is not None:
+            raise ValueError("v2 candidate pin requires explicit optimizer journal v2")
 
 
 @dataclass(frozen=True)
@@ -137,6 +150,141 @@ class MeasuredNeuralExecutionRequest:
     predecessor_checkpoint_sha256: str
     scope_fingerprint: str
     fence: int
+
+
+MEASURED_CLI_SCHEMA = "labyrinth.measured-minilm-cli-source-schedule.v1"
+_MEASURED_CLI_FIELDS = frozenset((
+    "schema", "run_id", "candidate_artifact_sha256",
+    "predecessor_checkpoint_sha256", "scope_fingerprint", "fence",
+    "source_event_id", "source_exam_id", "weak_skill", "tactic",
+    "steps_per_cycle", "schedule_sha256", "arms", "ordered_exposures",
+))
+
+
+def _unique_json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    output: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in output:
+            raise ValueError("duplicate field in measured schedule")
+        output[key] = value
+    return output
+
+
+def export_measured_cli_schedule_json(schedule: Any) -> bytes:
+    """Serialize a source schedule; the resulting file is never a host credential.
+
+    The producer is expected to have verified signed development inputs with
+    ``propose_signed_neural_batch_schedule``. This export cannot preserve or
+    independently reverify those signatures; an external pin is mandatory.
+    """
+    from labyrinth.measured_neural_batch_binding import BoundMeasuredNeuralBatches
+    if type(schedule) is not BoundMeasuredNeuralBatches:
+        raise ValueError("typed measured schedule required")
+    data = {
+        "schema": MEASURED_CLI_SCHEMA,
+        "run_id": schedule.run_id,
+        "candidate_artifact_sha256": schedule.candidate_artifact_sha256,
+        "predecessor_checkpoint_sha256": schedule.predecessor_checkpoint_sha256,
+        "scope_fingerprint": schedule.scope_fingerprint,
+        "fence": schedule.fence,
+        "source_event_id": schedule.source_event_id,
+        "source_exam_id": schedule.source_exam_id,
+        "weak_skill": schedule.weak_skill,
+        "tactic": schedule.tactic,
+        "steps_per_cycle": schedule.steps_per_cycle,
+        "schedule_sha256": schedule.schedule_sha256,
+        "arms": list(schedule.arms),
+        "ordered_exposures": [
+            [row.exposure_id for row in batch] for batch in schedule.batches
+        ],
+    }
+    return (json.dumps(data, sort_keys=True, separators=(",", ":"),
+                       allow_nan=False) + "\n").encode("ascii")
+
+
+def load_measured_cli_schedule(
+    raw: bytes, *, scope: TrainingScopeSpec, steps_per_cycle: int,
+    expected_schedule_sha256: str, expected_run_id: str,
+    expected_candidate_artifact_sha256: str,
+    expected_predecessor_checkpoint_sha256: str, expected_fence: int,
+) -> tuple[MeasuredNeuralExecutionRequest, tuple[TrainingCycle, ...]]:
+    """Fail-closed, side-effect-free conversion of a pinned source JSON manifest.
+
+    All independent expected values must be supplied separately from ``raw``.
+    Comparisons verify source consistency, not physical execution or genuine
+    custody of the supplied expected pins. No model or optimizer is loaded.
+    """
+    if type(raw) is not bytes or not 1 <= len(raw) <= 65_536:
+        raise ValueError("measured schedule must be bounded JSON bytes")
+    try:
+        data = json.loads(raw.decode("utf-8"),
+                          object_pairs_hook=_unique_json_pairs,
+                          parse_constant=lambda _: (_ for _ in ()).throw(
+                              ValueError("nonfinite number in measured schedule")))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid measured schedule JSON") from exc
+    if (type(data) is not dict or frozenset(data) != _MEASURED_CLI_FIELDS
+            or data["schema"] != MEASURED_CLI_SCHEMA
+            or raw != (json.dumps(data, sort_keys=True, separators=(",", ":"),
+                                  allow_nan=False) + "\n").encode("ascii")):
+        raise ValueError("noncanonical or unexpected measured schedule fields")
+    if (type(data["weak_skill"]) is not str or data["weak_skill"] not in SKILLS
+            or type(data["tactic"]) is not str
+            or data["tactic"] not in ("practice", "contrast", "transfer")
+            or type(data["steps_per_cycle"]) is not int
+            or data["steps_per_cycle"] != steps_per_cycle
+            or type(data["source_event_id"]) is not str
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+                           data["source_event_id"], re.ASCII) is None
+            or type(data["source_exam_id"]) is not str
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+                           data["source_exam_id"], re.ASCII) is None
+            or type(data["arms"]) is not list
+            or tuple(data["arms"]) != PREREG_ARMS):
+        raise ValueError("invalid source identity or control-arm schedule")
+    visits = data["ordered_exposures"]
+    if (type(visits) is not list or len(visits) != steps_per_cycle
+            or any(type(batch) is not list or len(batch) != 4
+                   or any(type(item) is not str for item in batch)
+                   for batch in visits)):
+        raise ValueError("measured TRAIN schedule requires complete exact visits")
+    cycles = build_training_cycles(scope, weak_cycle_one=(data["weak_skill"],))
+    known = {row.exposure_id: row for row in cycles[1].examples}
+    try:
+        batches = tuple(tuple(known[item] for item in batch) for batch in visits)
+    except KeyError as exc:
+        raise ValueError("measured schedule references a non-TRAIN exposure") from exc
+    from labyrinth.measured_neural_batch_binding import (
+        BoundMeasuredNeuralBatches, verify_precommitted_neural_batch_schedule,
+    )
+    schedule = BoundMeasuredNeuralBatches(
+        run_id=data["run_id"],
+        candidate_artifact_sha256=data["candidate_artifact_sha256"],
+        predecessor_checkpoint_sha256=data["predecessor_checkpoint_sha256"],
+        scope_fingerprint=data["scope_fingerprint"], fence=data["fence"],
+        source_event_id=data["source_event_id"],
+        source_exam_id=data["source_exam_id"],
+        weak_skill=data["weak_skill"], tactic=data["tactic"],
+        steps_per_cycle=data["steps_per_cycle"], cycle=cycles[1],
+        batches=batches, schedule_sha256=data["schedule_sha256"],
+    )
+    verified = verify_precommitted_neural_batch_schedule(
+        schedule, training_cycles=cycles,
+        expected_schedule_sha256=expected_schedule_sha256,
+        expected_run_id=expected_run_id,
+        expected_candidate_artifact_sha256=expected_candidate_artifact_sha256,
+        expected_predecessor_checkpoint_sha256=expected_predecessor_checkpoint_sha256,
+        expected_scope_fingerprint=scope.fingerprint,
+        expected_fence=expected_fence,
+    )
+    return (MeasuredNeuralExecutionRequest(
+        schedule=verified,
+        independently_pinned_schedule_sha256=expected_schedule_sha256,
+        run_id=expected_run_id,
+        candidate_artifact_sha256=expected_candidate_artifact_sha256,
+        predecessor_checkpoint_sha256=expected_predecessor_checkpoint_sha256,
+        scope_fingerprint=scope.fingerprint, fence=expected_fence,
+    ), cycles)
 
 
 def default_scope() -> TrainingScopeSpec:
@@ -614,12 +762,26 @@ def execute(
                      != measured_batches.predecessor_checkpoint_sha256
                      or optimizer_continuity.fence != measured_batches.fence)):
             raise ValueError("optimizer and measured schedule custody pins diverge")
+        if (measured_batches is not None
+                and optimizer_continuity.source_journal_v2
+                and optimizer_continuity.candidate_artifact_sha256
+                != measured_batches.candidate_artifact_sha256):
+            raise ValueError("v2 candidate differs from signed measured schedule")
         # The adapter reads this runner's source bytes to bind all visits and
         # control-label assignments before restoring model or optimizer state.
         from labyrinth.minilm_optimizer_state_resume import (
             MazeOptimizerResumePlan, load_maze_optimizer_snapshot,
             save_maze_optimizer_snapshot,
         )
+        if optimizer_continuity.source_journal_v2:
+            # A v1 journal is deliberately NOT a fallback. The import fails
+            # closed on a substrate without the typed v2 checkpoint contract.
+            from labyrinth.maze_crash_resume_journal import (
+                MazeJournalBinding, MazeJournalError, MazeJournalUnknown,
+                commit_maze_cycle, initialize_maze_journal,
+                inspect_maze_journal, precommit_maze_cycle,
+            )
+            from labyrinth.neural_resume_checkpoint import FullCheckpointContextV2
 
     import os
     os.environ["HF_HUB_OFFLINE"] = "1"
@@ -732,6 +894,17 @@ def execute(
             "optimizer_crash_resume": "NOT_TESTED",
             "reload_method": "NEW_BASE_OBJECT_FULL_MODEL_OPTIMIZER_AND_RNG_RESTORE",
         })
+        if optimizer_continuity.source_journal_v2:
+            report.update({
+                "optimizer_continuity": "V2_IMMEDIATE_PREDECESSOR_SOURCE_JOURNAL_ONLY",
+                "optimizer_checkpoint_pin_provenance": "V2_LOCAL_JOURNAL_RECEIPT_NO_HOST_CAS",
+                "optimizer_external_monotonic_authority": "NOT_ESTABLISHED",
+                "optimizer_crash_resume": "NOT_TESTED_PENDING_INTENT_FAIL_CLOSED",
+                "optimizer_source_journal_version": "v2",
+                "optimizer_v2_host_custody_verified": False,
+                "optimizer_v2_neural_derivation_verified": False,
+                "optimizer_v2_graduation_authorized": False,
+            })
     if verified_measured_schedule is not None:
         report.update({
             "weakness_feedback_provenance": "SIGNED_DEVELOPMENT_SOURCE_HOST_UNATTESTED",
@@ -771,7 +944,10 @@ def execute(
         preceding_lora = None
         preceding_frozen = None
         prior_full_state_sha256: str | None = None
+        prior_snapshot_immediate_sha256: str | None = None
         full_state_plan = None
+        source_journal_binding = None
+        source_journal_root = arm_root / "optimizer-source-journal-v2"
         cycle_results = []
         for cycle in cycles:
             randomized_labels = (preregistered_randomized_labels(cycle, scope.seed)
@@ -819,6 +995,28 @@ def execute(
                             if measured_batches is not None else None),
                     )
                     full_state_plan.validate()
+                    if optimizer_continuity.source_journal_v2:
+                        source_journal_binding = MazeJournalBinding(
+                            run_id=optimizer_continuity.logical_run_id,
+                            objective_id=scope.objective_id,
+                            arm=arm,
+                            candidate_artifact_sha256=(
+                                optimizer_continuity.candidate_artifact_sha256),
+                            scope_fingerprint=scope.fingerprint,
+                            base_checkpoint_sha256=pretrained_base,
+                            prior_checkpoint_sha256=(
+                                optimizer_continuity.prior_checkpoint_sha256),
+                            checkpoint_run_id=full_state_plan.checkpoint_run_id,
+                            # The plan commits to both executable source files,
+                            # exact scheduled exposures and optimizer options.
+                            source_sha256=full_state_plan.plan_sha256,
+                            fence=optimizer_continuity.fence,
+                            cycle_count=len(cycles),
+                        )
+                        initialize_maze_journal(
+                            source_journal_root, source_journal_binding,
+                            schema_version="v2",
+                        )
                 else:
                     if previous is None or prior_full_state_sha256 is None:
                         raise RuntimeError("missing prior full optimizer snapshot")
@@ -829,10 +1027,46 @@ def execute(
                         optimizer=optimizer, plan=full_state_plan,
                         completed_steps=steps_per_cycle,
                         independently_pinned_checkpoint_sha256=prior_full_state_sha256,
+                        **({
+                            "cycle_index": 0,
+                            "immediate_predecessor_sha256": (
+                                prior_snapshot_immediate_sha256),
+                        } if optimizer_continuity.source_journal_v2 else {}),
                     )
                     restored_full_state_sha256 = receipt.sha256
                     if restored_full_state_sha256 != prior_full_state_sha256:
                         raise RuntimeError("optimizer snapshot readback changed")
+            active_immediate_sha256 = None
+            if (optimizer_continuity is not None
+                    and optimizer_continuity.source_journal_v2):
+                if source_journal_binding is None:
+                    raise RuntimeError("v2 journal binding was not installed")
+                active_immediate_sha256 = (
+                    prior_full_state_sha256 if cycle.plan.cycle_index
+                    else optimizer_continuity.prior_checkpoint_sha256)
+                journal_status = inspect_maze_journal(
+                    source_journal_root, source_journal_binding,
+                    schema_version="v2",
+                )
+                if (journal_status.pending_cycle is not None
+                        or journal_status.committed_cycles != cycle.plan.cycle_index
+                        or journal_status.last_checkpoint_sha256
+                        != active_immediate_sha256):
+                    raise RuntimeError("v2 journal pending or immediate predecessor changed")
+                future_context = full_state_plan.context(
+                    (cycle.plan.cycle_index + 1) * steps_per_cycle,
+                    cycle_index=cycle.plan.cycle_index,
+                    immediate_predecessor_sha256=active_immediate_sha256,
+                )
+                if type(future_context) is not FullCheckpointContextV2:
+                    raise RuntimeError("v2 journal cannot accept legacy snapshot context")
+                # Intent is durable BEFORE the first optimizer training step;
+                # an interrupted cycle is UNKNOWN/HOLD, never auto-replayed.
+                precommit_maze_cycle(
+                    source_journal_root, source_journal_binding,
+                    cycle.plan.cycle_index, future_context,
+                    schema_version="v2",
+                )
             before = trainable_digest(model, head)
             lora_before = adapter_digest(model)
             if preceding_state is not None and before != preceding_state:
@@ -916,7 +1150,30 @@ def execute(
                     checkpoint / "optimizer-state", encoder=model, head=head,
                     optimizer=optimizer, plan=full_state_plan,
                     completed_steps=completed_steps,
+                    **({
+                        "cycle_index": cycle.plan.cycle_index,
+                        "immediate_predecessor_sha256": active_immediate_sha256,
+                    } if optimizer_continuity.source_journal_v2 else {}),
                 )
+                if optimizer_continuity.source_journal_v2:
+                    committed_sha = commit_maze_cycle(
+                        source_journal_root, source_journal_binding,
+                        cycle.plan.cycle_index, future_context,
+                        checkpoint / "optimizer-state", full_receipt.sha256,
+                        schema_version="v2",
+                    )
+                    committed_status = inspect_maze_journal(
+                        source_journal_root, source_journal_binding,
+                        schema_version="v2",
+                    )
+                    if (committed_sha != full_receipt.sha256
+                            or committed_status.pending_cycle is not None
+                            or committed_status.committed_cycles
+                            != cycle.plan.cycle_index + 1
+                            or committed_status.last_checkpoint_sha256
+                            != full_receipt.sha256):
+                        raise RuntimeError("v2 journal checkpoint commit readback changed")
+                    prior_snapshot_immediate_sha256 = active_immediate_sha256
                 prior_full_state_sha256 = full_receipt.sha256
                 cycle_result.update({
                     "full_optimizer_snapshot_sha256": full_receipt.sha256,
@@ -926,6 +1183,16 @@ def execute(
                     "full_optimizer_predecessor_restore_sha256": restored_full_state_sha256,
                     "optimizer_continuity_provenance": "LOCAL_RECEIPT_NO_HOST_FENCE",
                 })
+                if optimizer_continuity.source_journal_v2:
+                    cycle_result.update({
+                        "optimizer_continuity_provenance": (
+                            "V2_LOCAL_SOURCE_JOURNAL_NO_HOST_CAS"),
+                        "optimizer_v2_immediate_predecessor_sha256": (
+                            active_immediate_sha256),
+                        "optimizer_v2_journal_committed_cycles": (
+                            committed_status.committed_cycles),
+                        "optimizer_v2_external_authority_attested": False,
+                    })
             if preregistered_controls:
                 cycle_result.update({
                     "optimizer_step_invocations": 0 if arm == "zero_update"
@@ -956,7 +1223,29 @@ def execute(
         del model, head, optimizer, params, prediction, loss, labels, batch
         import gc
         gc.collect()
-        restored_model, restored_head, restored_base = create_model(previous)
+        if (optimizer_continuity is not None
+                and optimizer_continuity.source_journal_v2):
+            # Independently read the *final* full-state checkpoint through a
+            # freshly allocated encoder/head/AdamW, not only the PEFT/head
+            # export. The journal remains source-local without external CAS.
+            restored_model, restored_head, restored_base = create_model(None)
+            restored_optimizer = torch.optim.AdamW(
+                [p for p in restored_model.parameters() if p.requires_grad]
+                + list(restored_head.parameters()),
+                lr=optimizer_learning_rate(arm, learning_rate),
+            )
+            final_receipt = load_maze_optimizer_snapshot(
+                previous / "optimizer-state", encoder=restored_model,
+                head=restored_head, optimizer=restored_optimizer,
+                plan=full_state_plan, completed_steps=2 * steps_per_cycle,
+                independently_pinned_checkpoint_sha256=prior_full_state_sha256,
+                cycle_index=1,
+                immediate_predecessor_sha256=prior_snapshot_immediate_sha256,
+            )
+            if final_receipt.sha256 != prior_full_state_sha256:
+                raise RuntimeError("final v2 full optimizer restore digest changed")
+        else:
+            restored_model, restored_head, restored_base = create_model(previous)
         restored_values = {
             "trainable_sha256_after": trainable_digest(restored_model, restored_head),
             "lora_sha256_after": adapter_digest(restored_model),
@@ -981,6 +1270,11 @@ def execute(
                 != cycle_results[-1]["public_transfer_accuracy"]):
             raise RuntimeError("final checkpoint readback changed public accuracy")
         del restored_model, restored_head
+        if (optimizer_continuity is not None
+                and optimizer_continuity.source_journal_v2):
+            del restored_optimizer
+            readback["full_optimizer_restore"] = (
+                "V2_FRESH_PROCESS_OBJECT_SOURCE_BYTES_ONLY")
         gc.collect()
         report["arms"][arm] = {
             "initial_trainable_sha256": cycle_results[0]["trainable_sha256_before"],
@@ -1046,6 +1340,22 @@ def main(argv: list[str] | None = None) -> int:
                         help="required caller-declared predecessor checkpoint SHA-256; not independently attested")
     parser.add_argument("--optimizer-fence", type=int,
                         help="required caller-declared local fence; not host-owned")
+    parser.add_argument("--optimizer-v2-journal", action="store_true",
+                        help="opt-in v2 manifest and immediate-predecessor source journal; no host CAS/crash replay")
+    parser.add_argument("--optimizer-v2-candidate-sha256",
+                        help="operator-pinned candidate artifact SHA-256 required by v2 source journal")
+    parser.add_argument("--measured-schedule-file", type=Path,
+                        help="canonical source-only measured TRAIN schedule JSON; requires separate pinned identifiers")
+    parser.add_argument("--measured-schedule-sha256",
+                        help="separately pinned digest of the source schedule; not proof of host custody")
+    parser.add_argument("--measured-run-id",
+                        help="separately pinned measured-development candidate run")
+    parser.add_argument("--measured-candidate-sha256",
+                        help="separately pinned candidate artifact SHA-256")
+    parser.add_argument("--measured-predecessor-sha256",
+                        help="separately pinned predecessor checkpoint SHA-256")
+    parser.add_argument("--measured-fence", type=int,
+                        help="separately pinned source fence, not a host-issued grant")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args(argv)
     if (not 1 <= args.steps_per_cycle <= 16
@@ -1059,19 +1369,58 @@ def main(argv: list[str] | None = None) -> int:
         if args.full_optimizer_cycle_continuity:
             if any(value is None for value in optimizer_args):
                 raise ValueError("full optimizer continuity requires run ID, predecessor SHA and fence")
-            optimizer_request = OptimizerContinuityRequest(*optimizer_args)
+            optimizer_request = OptimizerContinuityRequest(
+                *optimizer_args, source_journal_v2=args.optimizer_v2_journal,
+                candidate_artifact_sha256=args.optimizer_v2_candidate_sha256,
+            )
             optimizer_request.validate()
-        elif any(value is not None for value in optimizer_args):
+        elif (any(value is not None for value in optimizer_args)
+              or args.optimizer_v2_journal
+              or args.optimizer_v2_candidate_sha256 is not None):
             raise ValueError("optimizer pins require --full-optimizer-cycle-continuity")
         scope = default_scope()
         if args.scope_file is not None:
             if args.scope_file.stat().st_size > 16_384:
                 raise ValueError("scope file exceeds 16 KiB")
             scope = parse_scope_json(args.scope_file.read_bytes())
-        cycles = build_training_cycles(
-            scope, weak_cycle_one=((args.weak_cycle_one,)
-                                   if args.weak_cycle_one else ()),
+        measured_request = None
+        measured_args = (
+            args.measured_schedule_file, args.measured_schedule_sha256,
+            args.measured_run_id, args.measured_candidate_sha256,
+            args.measured_predecessor_sha256, args.measured_fence,
         )
+        if any(value is not None for value in measured_args):
+            if any(value is None for value in measured_args):
+                raise ValueError("measured schedule requires all independent schedule/run/candidate/predecessor/fence pins")
+            if args.weak_cycle_one is not None:
+                raise ValueError("operator-declared weakness cannot override measured schedule")
+            if not args.preregistered_controls or optimizer_request is None:
+                raise ValueError("measured TRAIN requires five-arm and full optimizer continuity opt-ins")
+            if (optimizer_request.logical_run_id != args.measured_run_id
+                    or optimizer_request.prior_checkpoint_sha256
+                    != args.measured_predecessor_sha256
+                    or optimizer_request.fence != args.measured_fence
+                    or (optimizer_request.source_journal_v2
+                        and optimizer_request.candidate_artifact_sha256
+                        != args.measured_candidate_sha256)):
+                raise ValueError("measured and optimizer checkpoint/fence pins diverge")
+            if args.measured_schedule_file.stat().st_size > 65_536:
+                raise ValueError("measured TRAIN manifest exceeds 64 KiB")
+            measured_request, cycles = load_measured_cli_schedule(
+                args.measured_schedule_file.read_bytes(),
+                scope=scope, steps_per_cycle=args.steps_per_cycle,
+                expected_schedule_sha256=args.measured_schedule_sha256,
+                expected_run_id=args.measured_run_id,
+                expected_candidate_artifact_sha256=args.measured_candidate_sha256,
+                expected_predecessor_checkpoint_sha256=(
+                    args.measured_predecessor_sha256),
+                expected_fence=args.measured_fence,
+            )
+        else:
+            cycles = build_training_cycles(
+                scope, weak_cycle_one=((args.weak_cycle_one,)
+                                       if args.weak_cycle_one else ()),
+            )
         validation = validate_cycles(cycles)
         output = plan_output(args.output_parent, args.run_name)
         if not args.execute:
@@ -1087,10 +1436,20 @@ def main(argv: list[str] | None = None) -> int:
                     "train_label_counts": c.plan.counts_by_skill,
                 } for c in cycles],
                 "validation": validation, "model_id": MODEL_ID,
-                "weakness_feedback_provenance": "OPERATOR_DECLARED_NOT_MEASURED",
+                "weakness_feedback_provenance": (
+                    "EXTERNALLY_PINNED_SOURCE_SCHEDULE_HOST_UNATTESTED"
+                    if measured_request is not None
+                    else "OPERATOR_DECLARED_NOT_MEASURED"),
                 "public_development_only": True, "graduation_authorized": False,
+                **({"measured_schedule_sha256": (
+                    measured_request.independently_pinned_schedule_sha256),
+                    "measured_source_signatures_reverified_at_cli": False,
+                    "host_pin_custody_authenticated": False,
+                } if measured_request is not None else {}),
                 "full_optimizer_continuity": (
-                    "LOCAL_RECEIPT_NO_HOST_FENCE" if optimizer_request is not None
+                    "V2_IMMEDIATE_PREDECESSOR_SOURCE_JOURNAL_ONLY"
+                    if optimizer_request is not None and optimizer_request.source_journal_v2
+                    else "LOCAL_RECEIPT_NO_HOST_FENCE" if optimizer_request is not None
                     else "DISABLED"),
                 **({
                     "arms": list(configured_arms(True)),
@@ -1104,6 +1463,7 @@ def main(argv: list[str] | None = None) -> int:
             learning_rate=args.learning_rate,
             preregistered_controls=args.preregistered_controls,
             optimizer_continuity=optimizer_request,
+            measured_batches=measured_request,
         )
         print(json.dumps({
             "run_root": str(output),

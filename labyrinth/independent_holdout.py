@@ -13,12 +13,15 @@ seal also freezes gold while the key stays outside trainer custody.
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from hashlib import sha256
 from hmac import compare_digest, new as hmac_new
 from math import comb
 import json
+from pathlib import Path
 import re
+import sqlite3
 from typing import Mapping
 
 from .evaluation import score_response
@@ -64,7 +67,7 @@ class ExamCase:
         _identifier(self.case_id, "case ID")
         _identifier(self.skill, "skill")
         _identifier(self.structure_key, "structure key")
-        if self.split not in _SPLITS:
+        if type(self.split) is not str or self.split not in _SPLITS:
             raise ValueError("unknown evaluator split")
         if type(self.prompt) is not str or not 1 <= len(self.prompt) <= 8192:
             raise ValueError("invalid private exam prompt")
@@ -116,7 +119,7 @@ class ArmRun:
     responses: tuple[tuple[str, str], ...]
 
     def validate(self) -> None:
-        if self.name not in _ARMS:
+        if type(self.name) is not str or self.name not in _ARMS:
             raise ValueError("unknown evaluation arm")
         for field in ("base_sha256", "initial_adapter_sha256", "final_adapter_sha256"):
             _digest(getattr(self, field), field)
@@ -134,6 +137,76 @@ class ArmRun:
                     or type(trial[1]) is not str or len(trial[1]) > 8192):
                 raise ValueError("invalid predictions")
             _identifier(trial[0], "prediction case ID")
+
+
+def predictions_commitment(responses: tuple[tuple[str, str], ...]) -> str:
+    """Bind an inference receipt to exact ordered case IDs and output bytes.
+
+    This is an integrity digest, NOT evidence the named model generated them.
+    """
+    if type(responses) is not tuple or len(responses) > MAX_CASES:
+        raise ValueError("invalid prediction claim")
+    for trial in responses:
+        if (type(trial) is not tuple or len(trial) != 2
+                or type(trial[1]) is not str or len(trial[1]) > 8192):
+            raise ValueError("invalid prediction claim")
+        _identifier(trial[0], "prediction case ID")
+    payload = json.dumps(responses, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return sha256(b"labyrinth.exam-predictions.v1\0" + payload).hexdigest()
+
+
+@dataclass(frozen=True)
+class InferenceClaim:
+    """Untrusted metadata for an examiner to compare with EXTERNAL receipts.
+
+    ``process_id`` and ``inference_report_sha256`` are declarations, not proof
+    of fresh execution or authentic report bytes. Never treat passing source
+    validation as verification of independent inference provenance.
+    """
+
+    arm_name: str
+    process_id: str
+    adapter_sha256: str
+    predictions_sha256: str
+    inference_report_sha256: str
+
+    def validate(self) -> None:
+        if type(self.arm_name) is not str or self.arm_name not in _ARMS:
+            raise ValueError("unknown inference claim arm")
+        _identifier(self.process_id, "fresh process claim")
+        for field in ("adapter_sha256", "predictions_sha256", "inference_report_sha256"):
+            _digest(getattr(self, field), field)
+
+
+def _custodian_db_file(value: str | Path) -> str:
+    """Reject ephemeral SQLite names, aliases and noncanonical file targets.
+
+    This check is not a substitute for an examiner-controlled, persistent,
+    access-restricted directory: path swaps between checking and SQLite open
+    remain possible if an attacker can modify that directory (TOCTOU).
+    """
+    if not isinstance(value, (str, Path)):
+        raise ValueError("custodian requires a stable file-backed SQLite path")
+    raw = str(value)
+    if (not raw or "\x00" in raw or raw.lower().startswith("file:")
+            or raw == ":memory:"):
+        raise ValueError("custodian requires a stable file-backed SQLite path")
+    path = Path(raw)
+    if not path.is_absolute() or not path.name:
+        raise ValueError("custodian requires a stable file-backed SQLite path")
+    try:
+        canonical = path.resolve(strict=False)
+    except (RuntimeError, OSError) as exc:
+        raise ValueError("custodian requires a canonical SQLite file path") from exc
+    components = (path, *path.parents)
+    if (path != canonical or any(
+            component.is_symlink()
+            or getattr(component, "is_junction", lambda: False)()
+            for component in components)):
+        raise ValueError("custodian requires a canonical SQLite file path")
+    if path.exists() and not path.is_file():
+        raise ValueError("custodian requires a regular SQLite file path")
+    return str(path)
 
 
 @dataclass(frozen=True)
@@ -360,3 +433,111 @@ def evaluate_holdout(
 
     status = "INCONCLUSIVE" if missing_coverage else "FAIL" if reasons else "PROVISIONAL"
     return HoldoutVerdict(status, tuple(reasons), candidate_accuracy, pairs, retention_drop)
+
+
+def evaluate_one_shot_holdout(
+    cases: tuple[ExamCase, ...],
+    evaluator_precommitment: str,
+    exposure: TrainingExposure,
+    arms: tuple[ArmRun, ...],
+    retention_before: Mapping[str, str],
+    *,
+    examiner_gold_seal: str,
+    examiner_key: bytes,
+    attempt_id: str,
+    inference_claims: tuple[InferenceClaim, ...],
+    custodian_db_path: str | Path,
+) -> HoldoutVerdict:
+    """Reserve one attempt *atomically*, then evaluate, even if scoring fails.
+
+    The DB MUST be owned by an independent examiner, protected from trainer
+    writes, persistent across process restarts and shared by all exam workers.
+    The unique public-exam key prevents a second submission under a new ID.
+    An unavailable or permission-denied DB raises; no in-memory fallback.
+
+    The model identity/process/report fields are still merely untrusted claims.
+    Independent inference observation, private-bank custody and source-to-model
+    traceability remain EXTERNAL requirements. This path cannot grant graduation.
+    Canonical path checking does not defeat path-swap races in an attacker-
+    writable parent directory; custody of filesystem permissions is mandatory.
+    """
+    _identifier(attempt_id, "exam attempt ID")
+    _digest(evaluator_precommitment, "evaluator precommitment")
+    if case_commitment(cases) != evaluator_precommitment:
+        raise ValueError("exam changed since evaluator precommit")
+    _digest(examiner_gold_seal, "examiner gold seal")
+    if not compare_digest(private_gold_seal(cases, examiner_key), examiner_gold_seal):
+        raise ValueError("private oracle gold changed since examiner seal")
+    if type(exposure) is not TrainingExposure:
+        raise ValueError("invalid training exposure")
+    exposure.validate()
+    if (type(arms) is not tuple or len(arms) != len(_ARMS)
+            or any(type(arm) is not ArmRun for arm in arms)):
+        raise ValueError("all four control arms required")
+    if (type(inference_claims) is not tuple or len(inference_claims) != len(_ARMS)
+            or any(type(claim) is not InferenceClaim for claim in inference_claims)):
+        raise ValueError("all four inference claims required")
+    for arm in arms:
+        arm.validate()
+    for claim in inference_claims:
+        claim.validate()
+    by_arm = {arm.name: arm for arm in arms}
+    by_claim = {claim.arm_name: claim for claim in inference_claims}
+    if len(by_arm) != len(_ARMS) or len(by_claim) != len(_ARMS):
+        raise ValueError("duplicate control arm or inference claim")
+    if len({claim.process_id for claim in inference_claims}) != len(_ARMS):
+        raise ValueError("fresh process claims must be distinct")
+    for name in _ARMS:
+        arm, claim = by_arm[name], by_claim[name]
+        if claim.adapter_sha256 != arm.final_adapter_sha256:
+            raise ValueError(f"{name} adapter claim does not match submitted run")
+        if claim.predictions_sha256 != predictions_commitment(arm.responses):
+            raise ValueError(f"{name} prediction claim does not match submitted run")
+    if not isinstance(retention_before, Mapping):
+        # A malformed predecessor observation must not be serialized or scored.
+        raise ValueError("invalid predecessor retention responses")
+    if any(type(key) is not str or type(value) is not str
+           for key, value in retention_before.items()):
+        raise ValueError("invalid predecessor retention responses")
+
+    # Only public exam identity and submitted bytes enter the reservation DB.
+    # In particular, private gold and the examiner HMAC key do not.
+    submission = {
+        "exam": evaluator_precommitment,
+        "attempt": attempt_id,
+        "exposure": exposure.__dict__,
+        "arms": [arm.__dict__ for arm in arms],
+        "retention_before": sorted(retention_before.items()),
+        "inference_claims": [claim.__dict__ for claim in inference_claims],
+    }
+    payload = json.dumps(submission, sort_keys=True, ensure_ascii=False,
+                         separators=(",", ":")).encode("utf-8")
+    submission_sha256 = sha256(b"labyrinth.exam-submission.v1\0" + payload).hexdigest()
+
+    stable_db_path = _custodian_db_file(custodian_db_path)
+
+    # A custodian-owned SQLite file gives a real unique-key reservation across
+    # threads/processes. If a later test fails, the exam remains consumed to
+    # prevent repeated private-score probing. Never auto-clear this record.
+    with closing(sqlite3.connect(stable_db_path, timeout=10.0)) as connection:
+        try:
+            with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "CREATE TABLE IF NOT EXISTS exam_attempts ("
+                    "exam_commitment TEXT PRIMARY KEY, "
+                    "attempt_id TEXT NOT NULL UNIQUE, "
+                    "submission_sha256 TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO exam_attempts "
+                    "(exam_commitment, attempt_id, submission_sha256) VALUES (?, ?, ?)",
+                    (evaluator_precommitment, attempt_id, submission_sha256),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("exam already consumed by a prior submission") from exc
+
+    return evaluate_holdout(
+        cases, evaluator_precommitment, exposure, arms, retention_before,
+        examiner_gold_seal=examiner_gold_seal, examiner_key=examiner_key,
+    )

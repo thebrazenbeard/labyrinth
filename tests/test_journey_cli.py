@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from dataclasses import replace
 import io
 import json
 from pathlib import Path
@@ -10,6 +11,8 @@ import tempfile
 import unittest
 
 from labyrinth.cli import main
+from labyrinth.objective_contract import ObjectiveContract, SkillTarget
+from labyrinth.training_scope import TrainingScopeSpec
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -99,6 +102,74 @@ class JourneyCliTests(unittest.TestCase):
         self.assertTrue(result["training_views"])
         self.assertTrue(all(view["semantic_focus"] == "dependency_path_wrapping_both_registers"
                             and "answer" not in view for view in result["training_views"]))
+
+    def test_program_objective_contract_changes_executable_training_material(self):
+        scope = TrainingScopeSpec(
+            objective_id="declared-program-focus", domain="reasoning",
+            skills=("program_reasoning",), specificity=3, scale=1,
+            max_cycles=2, seed=20261030,
+        )
+
+        def contract(focus: str, rubric: str = "program_structure_v1",
+                     *, specificity: int = 3) -> ObjectiveContract:
+            return ObjectiveContract(
+                scope=replace(scope, specificity=specificity),
+                intention="Practice an explicitly selected register-program skill.",
+                targets=(SkillTarget(
+                    skill="program_reasoning", focus_tags=(focus,),
+                    observable_behaviors=("Finds final register A through all instructions.",),
+                    rubric_id=rubric, minimum_score_percent=75,
+                    minimum_gain_percent=10,
+                ),),
+                excluded_scopes=("Private final examinations.",),
+                forbidden_claims=("Training cases prove independent mastery.",),
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            def invoke_contract(focus: str, rubric: str = "program_structure_v1",
+                                *, specificity: int = 3):
+                path = Path(tmp) / "objective.json"
+                path.write_text(json.dumps(contract(
+                    focus, rubric, specificity=specificity,
+                ).to_dict()))
+                return self._invoke(
+                    "journey-plan", "--objective-contract", str(path),
+                    "--materialize-training",
+                )
+
+            broad_status, broad_output, broad_error = invoke_contract(
+                "mixed_3_to_4_instruction_structures", specificity=1,
+            )
+            narrow_status, narrow_output, narrow_error = invoke_contract(
+                "dependency_path_wrapping_both_registers", specificity=5,
+            )
+            self.assertEqual(broad_status, 0, broad_error)
+            self.assertEqual(narrow_status, 0, narrow_error)
+            broad, narrow = json.loads(broad_output), json.loads(narrow_output)
+            self.assertNotEqual(broad["scope_fingerprint"], narrow["scope_fingerprint"])
+            self.assertEqual(broad["scope"]["specificity"], 1)
+            self.assertEqual(narrow["scope"]["specificity"], 5)
+            self.assertNotEqual(
+                [view["prompt"] for view in broad["training_views"]],
+                [view["prompt"] for view in narrow["training_views"]],
+            )
+            self.assertEqual({view["semantic_focus"] for view in broad["training_views"]},
+                             {"mixed_3_to_4_instruction_structures"})
+            self.assertEqual({view["semantic_focus"] for view in narrow["training_views"]},
+                             {"dependency_path_wrapping_both_registers"})
+            self.assertTrue(all("answer" not in view for view in
+                                broad["training_views"] + narrow["training_views"]))
+            mismatched_status, _, mismatched_error = invoke_contract(
+                "mixed_3_to_4_instruction_structures", specificity=3,
+            )
+            self.assertEqual(mismatched_status, 2)
+            self.assertIn("contradicts declared specificity", mismatched_error)
+
+            unsupported, _, failure = invoke_contract(
+                "dependency_path_wrapping_both_registers", "unapproved_rubric",
+            )
+            self.assertEqual(unsupported, 2)
+            self.assertIn("approved", failure)
 
     def test_reports_are_exclusive_creation(self):
         with tempfile.TemporaryDirectory() as temp:

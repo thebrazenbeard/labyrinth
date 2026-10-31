@@ -262,10 +262,33 @@ class MazeOptimizerResumePlan:
                     result.append((occurrence, label_hash))
         return tuple(result)
 
-    def context(self, completed_steps: int) -> FullCheckpointContext:
+    def context(
+        self, completed_steps: int, *, cycle_index: int | None = None,
+        immediate_predecessor_sha256: str | None = None,
+    ) -> FullCheckpointContext:
         if type(completed_steps) is not int or not 0 <= completed_steps <= self.total_steps:
             raise ValueError("resume cursor is outside precommitted Maze training")
-        context = FullCheckpointContext(
+        if (cycle_index is None) != (immediate_predecessor_sha256 is None):
+            raise ValueError("v2 cycle and immediate predecessor must be supplied together")
+        context_type: type[FullCheckpointContext] = FullCheckpointContext
+        v2_fields: dict[str, Any] = {}
+        if cycle_index is not None:
+            # The v2 fields must be present in the actual manifest, not merely
+            # in the adjacent journal or a self-reported receipt.
+            from .neural_resume_checkpoint import FullCheckpointContextV2
+            if (type(cycle_index) is not int or cycle_index not in (0, 1)
+                    or completed_steps != (cycle_index + 1) * self.steps_per_cycle
+                    or type(immediate_predecessor_sha256) is not str
+                    or _SHA.fullmatch(immediate_predecessor_sha256) is None
+                    or (cycle_index == 0 and immediate_predecessor_sha256
+                        != self.prior_checkpoint_sha256)):
+                raise ValueError("invalid immediate predecessor for v2 cycle")
+            context_type = FullCheckpointContextV2
+            v2_fields = {
+                "cycle_index": cycle_index,
+                "immediate_predecessor_sha256": immediate_predecessor_sha256,
+            }
+        context = context_type(
             run_id=self.checkpoint_run_id,
             objective_id=self.scope.objective_id,
             base_checkpoint_sha256=self.base_checkpoint_sha256,
@@ -273,6 +296,7 @@ class MazeOptimizerResumePlan:
             fence=self.fence,
             cursor=completed_steps * 4,
             exposures=self.exposures(),
+            **v2_fields,
         )
         context.validate()
         return context
@@ -380,11 +404,13 @@ def _preflight_saved_optimizer(
     if not 0 < manifest_path.stat().st_size <= 4 * 1024 * 1024:
         raise FullCheckpointError("checkpoint manifest exceeds byte limit")
     raw_manifest = manifest_path.read_bytes()
-    if (_manifest_digest(raw_manifest) != pinned_sha256
-            or type(pinned_sha256) is not str):
-        raise FullCheckpointError("checkpoint digest differs from trusted identity")
     manifest = _strict_json(raw_manifest)
-    if (manifest.get("schema") != SCHEMA
+    from .neural_resume_checkpoint import FullCheckpointContextV2, SCHEMA_V2
+    expected_schema = SCHEMA_V2 if type(context) is FullCheckpointContextV2 else SCHEMA
+    if (type(pinned_sha256) is not str
+            or _manifest_digest(raw_manifest, schema=expected_schema) != pinned_sha256):
+        raise FullCheckpointError("checkpoint digest differs from trusted identity")
+    if (manifest.get("schema") != expected_schema
             or manifest.get("context") != _context_json(context)):
         raise FullCheckpointError("checkpoint context or schema mismatch")
     tensor_path = source_dir / "state.safetensors"
@@ -409,9 +435,14 @@ def _preflight_saved_optimizer(
 def save_maze_optimizer_snapshot(
     destination: str | Path, *, encoder: Any, head: Any,
     optimizer: Any, plan: MazeOptimizerResumePlan, completed_steps: int,
+    cycle_index: int | None = None,
+    immediate_predecessor_sha256: str | None = None,
 ) -> FullCheckpointReceipt:
     """Save one no-overwrite full-state snapshot at a Maze optimizer step."""
-    context = plan.context(completed_steps)
+    context = plan.context(
+        completed_steps, cycle_index=cycle_index,
+        immediate_predecessor_sha256=immediate_predecessor_sha256,
+    )
     combined = _bundle(encoder, head, optimizer, plan)
     _require_complete_adamw_state(
         optimizer.state_dict(), combined=combined, optimizer=optimizer,
@@ -425,13 +456,18 @@ def load_maze_optimizer_snapshot(
     source: str | Path, *, encoder: Any, head: Any,
     optimizer: Any, plan: MazeOptimizerResumePlan, completed_steps: int,
     independently_pinned_checkpoint_sha256: str,
+    cycle_index: int | None = None,
+    immediate_predecessor_sha256: str | None = None,
 ) -> FullCheckpointReceipt:
     """Require caller-pinned SHA + complete Maze lineage before full restore.
 
     This verifies local bytes and scope/fence but cannot attest that the caller
     chose the true latest checkpoint or owns the external monotonic authority.
     """
-    context = plan.context(completed_steps)
+    context = plan.context(
+        completed_steps, cycle_index=cycle_index,
+        immediate_predecessor_sha256=immediate_predecessor_sha256,
+    )
     combined = _bundle(encoder, head, optimizer, plan)
     _preflight_saved_optimizer(
         source, pinned_sha256=independently_pinned_checkpoint_sha256,

@@ -5,6 +5,12 @@ AdamW moments, Python/NumPy/Torch RNG, a training cursor and exposure sequence.
 It uses safetensors and strictly typed JSON; no pickle is read. A supplied,
 previously trusted digest and journal fence are required when loading.
 
+The original v1 lineage uses the initial baseline as ``prior_checkpoint_sha256``
+on every cycle and is LEGACY_UNQUALIFIED for immediate-predecessor custody.
+The opt-in v2 context commits to the exact previous committed *receipt* SHA
+under a separate manifest digest domain. Neither format proves neural
+derivation or independently protected host authority.
+
 This is a checkpoint substrate, not an integrated HF runner or an authority to
 replay a consumed development event, graduate, or deploy a model. The caller
 must bind the returned digest to the MAC-sealed development journal and enforce
@@ -28,6 +34,8 @@ from typing import Any
 
 
 SCHEMA = "labyrinth.full-neural-checkpoint.v1"
+SCHEMA_V2 = "labyrinth.full-neural-checkpoint.v2"
+LEGACY_UNQUALIFIED = "LEGACY_UNQUALIFIED"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _MAX_JSON_BYTES = 4 * 1024 * 1024
@@ -81,9 +89,32 @@ class FullCheckpointContext:
 
 
 @dataclass(frozen=True)
+class FullCheckpointContextV2(FullCheckpointContext):
+    """Opt-in cycle-specific source commitment; v1's prior is the initial anchor.
+
+    The additional SHA must be obtained from independently trusted committed
+    journal state. A caller-supplied digest alone does not prove neural
+    derivation, external custody, or resistance to filesystem rollback.
+    """
+
+    cycle_index: int
+    immediate_predecessor_sha256: str
+
+    def validate(self) -> None:
+        super().validate()
+        if (type(self.cycle_index) is not int or not 0 <= self.cycle_index <= 127
+                or type(self.immediate_predecessor_sha256) is not str
+                or not _DIGEST.fullmatch(self.immediate_predecessor_sha256)):
+            raise ValueError("invalid v2 checkpoint cycle or immediate predecessor")
+        if (self.cycle_index == 0
+                and self.immediate_predecessor_sha256 != self.prior_checkpoint_sha256):
+            raise ValueError("v2 cycle zero must descend from initial checkpoint")
+
+
+@dataclass(frozen=True)
 class FullCheckpointReceipt:
     sha256: str
-    context: FullCheckpointContext
+    context: FullCheckpointContext | FullCheckpointContextV2
     trainable_parameters: tuple[str, ...]
     optimizer: str = "AdamW"
     graduation_authorized: bool = False
@@ -283,7 +314,7 @@ def _numpy_rng_tuple(snapshot: Any) -> Any:
 
 
 def _context_json(context: FullCheckpointContext) -> dict[str, Any]:
-    return {
+    result = {
         "run_id": context.run_id,
         "objective_id": context.objective_id,
         "base_checkpoint_sha256": context.base_checkpoint_sha256,
@@ -292,10 +323,16 @@ def _context_json(context: FullCheckpointContext) -> dict[str, Any]:
         "cursor": context.cursor,
         "exposures": [list(exposure) for exposure in context.exposures],
     }
+    if type(context) is FullCheckpointContextV2:
+        result["cycle_index"] = context.cycle_index
+        result["immediate_predecessor_sha256"] = context.immediate_predecessor_sha256
+    return result
 
 
-def _manifest_digest(manifest_bytes: bytes) -> str:
-    return sha256(b"labyrinth.full-neural-checkpoint.v1\0" + manifest_bytes).hexdigest()
+def _manifest_digest(manifest_bytes: bytes, *, schema: str = SCHEMA) -> str:
+    if type(manifest_bytes) is not bytes or type(schema) is not str or schema not in (SCHEMA, SCHEMA_V2):
+        raise FullCheckpointError("unsupported neural checkpoint digest schema")
+    return sha256(schema.encode("ascii") + b"\0" + manifest_bytes).hexdigest()
 
 
 def save_full_checkpoint(
@@ -303,7 +340,7 @@ def save_full_checkpoint(
     context: FullCheckpointContext,
 ) -> FullCheckpointReceipt:
     """Atomically publish one new CPU checkpoint; never overwrite an existing one."""
-    if type(context) is not FullCheckpointContext:
+    if type(context) not in (FullCheckpointContext, FullCheckpointContextV2):
         raise ValueError("expected full checkpoint context")
     context.validate()
     root = _safe_snapshot_dir(destination, existing=False)
@@ -324,10 +361,13 @@ def save_full_checkpoint(
         save_file(tensors, str(tensor_path))
         if not 0 < tensor_path.stat().st_size <= _MAX_TENSOR_BYTES:
             raise FullCheckpointError("checkpoint tensor bytes exceed bound")
-        with tensor_path.open("rb") as stream:
+        # The tensor file must survive a power loss independently of its
+        # manifest. Hash the bytes only after syncing the completed payload.
+        with tensor_path.open("rb+") as stream:
+            os.fsync(stream.fileno())
             tensor_digest = sha256(stream.read()).hexdigest()
         manifest = {
-            "schema": SCHEMA,
+            "schema": SCHEMA_V2 if type(context) is FullCheckpointContextV2 else SCHEMA,
             "context": _context_json(context),
             "optimizer": "AdamW",
             "optimizer_groups": groups,
@@ -345,15 +385,31 @@ def save_full_checkpoint(
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
+        if os.name == "posix":
+            # Both durable files must remain reachable from the staged
+            # directory after a crash, before we publish its final name.
+            directory_fd = os.open(temporary, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         # No shared writer is allowed to target this path; the caller's journal
         # fence and unique directory reservation are the external race controls.
         if root.exists():
             raise FullCheckpointError("checkpoint destination already exists")
         os.rename(temporary, root)
+        if os.name == "posix":
+            # Persist the rename itself before returning the receipt. Without
+            # this barrier, a successful receipt can name a lost directory.
+            parent_fd = os.open(root.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
     finally:
         if temporary.exists():
             shutil.rmtree(temporary)
-    return FullCheckpointReceipt(_manifest_digest(data), context,
+    return FullCheckpointReceipt(_manifest_digest(data, schema=manifest["schema"]), context,
                                  tuple(sorted(named)))
 
 
@@ -365,20 +421,22 @@ def load_full_checkpoint(
     root = _safe_snapshot_dir(source, existing=True)
     if type(expected_sha256) is not str or not _DIGEST.fullmatch(expected_sha256):
         raise ValueError("expected trusted checkpoint SHA-256")
-    if type(expected_context) is not FullCheckpointContext:
+    if type(expected_context) not in (FullCheckpointContext, FullCheckpointContextV2):
         raise ValueError("expected full checkpoint context")
     expected_context.validate()
     manifest_path = root / "manifest.json"
     if not 0 < manifest_path.stat().st_size <= _MAX_JSON_BYTES:
         raise FullCheckpointError("checkpoint manifest byte limit violated")
     data = manifest_path.read_bytes()
-    if not _DIGEST.fullmatch(_manifest_digest(data)) or _manifest_digest(data) != expected_sha256:
+    expected_schema = (SCHEMA_V2 if type(expected_context) is FullCheckpointContextV2
+                       else SCHEMA)
+    if _manifest_digest(data, schema=expected_schema) != expected_sha256:
         raise FullCheckpointError("checkpoint digest differs from trusted identity")
     manifest = _strict_json(data)
     if (set(manifest) != {
         "schema", "context", "optimizer", "optimizer_groups", "trainable_names",
         "model_tree", "optimizer_tree", "rng_tree", "numpy_rng", "tensor_sha256",
-    } or manifest["schema"] != SCHEMA
+    } or manifest["schema"] != expected_schema
             or manifest["optimizer"] != "AdamW"
             or manifest["context"] != _context_json(expected_context)):
         raise FullCheckpointError("checkpoint context, schema, or optimizer mismatch")
@@ -433,7 +491,12 @@ def load_full_checkpoint(
         if numpy_state is not None:
             import numpy as np
             np.random.set_state(numpy_state)
-    except (ValueError, TypeError, RuntimeError) as exc:
+    except Exception as exc:
+        # Once the first parameter copy begins, a caller cannot assume that
+        # model, optimizer, and RNG have been restored as one transaction.
+        # Optimizer extensions and storage backends may raise OSError or
+        # other ordinary exceptions, not only Torch's common error classes.
+        # Every such failure must explicitly invalidate this process.
         raise FullCheckpointError("checkpoint restoration failed; discard this process") from exc
     return FullCheckpointReceipt(expected_sha256, expected_context,
                                  tuple(sorted(named)))

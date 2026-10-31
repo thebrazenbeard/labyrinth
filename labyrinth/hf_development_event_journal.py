@@ -20,6 +20,7 @@ every worker/result boundary. Legacy event-only reservations cannot be upgraded.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import hmac
 import json
@@ -31,6 +32,7 @@ from typing import Any
 
 
 _DOMAIN = b"labyrinth.hf-development-event-journal.v1\x00"
+_FULL_STATE_BINDING_DOMAIN = b"labyrinth.full-state-run-binding.v1\x00"
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z", re.ASCII)
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _TABLE_SQL = """CREATE TABLE journal (
@@ -53,6 +55,104 @@ class DevelopmentJournalError(RuntimeError):
     """Journal is missing, invalid, busy, or its custody seal cannot be read."""
 
 
+@dataclass(frozen=True)
+class FullStateRunBinding:
+    """Public metadata committed to a host-owned full-state run reservation.
+
+    This only binds *claims* to a deterministic run commitment. Receipt bytes,
+    signed development failure, host ownership and model replay must be
+    independently checked before a host reserves or resumes the run.
+    """
+
+    run_id: str
+    objective_id: str
+    base_checkpoint_sha256: str
+    source_tree_sha256: str
+    maze_commitment_sha256: str
+    prior_checkpoint_sha256: str
+    initial_checkpoint_sha256: str
+    initial_cursor: int
+    initial_exposures: tuple[tuple[str, str], ...]
+
+    def validate(self) -> None:
+        for value in (self.run_id, self.objective_id):
+            if type(value) is not str or not _IDENTIFIER.fullmatch(value):
+                raise ValueError("invalid full-state run or objective identifier")
+        for value in (self.base_checkpoint_sha256, self.source_tree_sha256,
+                      self.maze_commitment_sha256, self.prior_checkpoint_sha256,
+                      self.initial_checkpoint_sha256):
+            if type(value) is not str or not _DIGEST.fullmatch(value):
+                raise ValueError("invalid full-state provenance digest")
+        if (type(self.initial_exposures) is not tuple
+                or len(self.initial_exposures) > 100000
+                or type(self.initial_cursor) is not int
+                or not 0 <= self.initial_cursor <= len(self.initial_exposures)):
+            raise ValueError("invalid full-state exposure cursor")
+        for item in self.initial_exposures:
+            if (type(item) is not tuple or len(item) != 2
+                    or type(item[0]) is not str or not _IDENTIFIER.fullmatch(item[0])
+                    or type(item[1]) is not str or not _DIGEST.fullmatch(item[1])):
+                raise ValueError("invalid full-state exposure identity")
+
+    def commitment_sha256(self) -> str:
+        """A domain-separated, canonical commitment to immutable run metadata."""
+        self.validate()
+        payload = {
+            "schema": "labyrinth.full-state-run-binding.v1",
+            "run_id": self.run_id,
+            "objective_id": self.objective_id,
+            "base_checkpoint_sha256": self.base_checkpoint_sha256,
+            "source_tree_sha256": self.source_tree_sha256,
+            "maze_commitment_sha256": self.maze_commitment_sha256,
+            "prior_checkpoint_sha256": self.prior_checkpoint_sha256,
+            "initial_checkpoint_sha256": self.initial_checkpoint_sha256,
+            "initial_cursor": self.initial_cursor,
+            "initial_exposures": self.initial_exposures,
+        }
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False).encode("utf-8")
+        if len(raw) > _MAX_JSON_BYTES:
+            raise ValueError("full-state binding exceeds journal size budget")
+        return hashlib.sha256(_FULL_STATE_BINDING_DOMAIN + raw).hexdigest()
+
+
+def reserve_full_state_development_run(
+    db_path: Path, event_id: str, *, state_key: bytes,
+    binding: FullStateRunBinding, initial_receipt: Any,
+) -> int:
+    """Atomically reserve one signed event against a consistent full receipt.
+
+    The trusted host must authenticate the event, independently verify the
+    immutable checkpoint bytes and exact source/maze pins, and own journal DB
+    and key. Neither this receipt structure nor an HMAC proves model execution.
+    """
+    from labyrinth.neural_resume_checkpoint import FullCheckpointReceipt
+
+    if type(binding) is not FullStateRunBinding:
+        raise ValueError("a full-state run binding is required")
+    binding.validate()
+    if type(initial_receipt) is not FullCheckpointReceipt:
+        raise ValueError("a full-state checkpoint receipt is required")
+    context = initial_receipt.context
+    context.validate()
+    if (type(initial_receipt.sha256) is not str
+            or not _DIGEST.fullmatch(initial_receipt.sha256)
+            or initial_receipt.sha256 != binding.initial_checkpoint_sha256
+            or context.run_id != binding.run_id
+            or context.objective_id != binding.objective_id
+            or context.base_checkpoint_sha256 != binding.base_checkpoint_sha256
+            or context.prior_checkpoint_sha256 != binding.prior_checkpoint_sha256
+            or context.fence != 0
+            or context.cursor != binding.initial_cursor
+            or context.exposures != binding.initial_exposures):
+        raise ValueError("initial checkpoint receipt does not match full-state run binding")
+    return reserve_development_run(
+        db_path, event_id, state_key=state_key, run_id=binding.run_id,
+        run_commitment_sha256=binding.commitment_sha256(),
+        initial_checkpoint_sha256=binding.initial_checkpoint_sha256,
+    )
+
+
 def _key_check(state_key: bytes) -> None:
     if type(state_key) is not bytes or len(state_key) < 32:
         raise ValueError("a separate 32+ byte host journal secret is required")
@@ -61,9 +161,22 @@ def _key_check(state_key: bytes) -> None:
 def _path_check(db_path: Path) -> Path:
     if not isinstance(db_path, Path) or not db_path.is_absolute():
         raise ValueError("an absolute host-owned journal database Path is required")
-    if not db_path.parent.is_dir() or db_path.parent.is_symlink():
+    # The immediate parent alone is insufficient: /alias/sub/journal.sqlite
+    # can hide a replaceable symlink at /alias. Reject every lexical ancestor,
+    # junctions and noncanonical '..' paths. An operator must still own and
+    # protect the directory against time-of-check/time-of-use substitution.
+    for component in (db_path, *db_path.parents):
+        if component.is_symlink() or (hasattr(component, "is_junction")
+                                      and component.is_junction()):
+            raise ValueError("invalid journal path type: symlink or junction forbidden")
+    try:
+        if db_path != db_path.resolve(strict=False):
+            raise ValueError("noncanonical journal database path is forbidden")
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("unable to resolve journal database path") from exc
+    if not db_path.parent.is_dir():
         raise ValueError("a preexisting non-symlink journal directory is required")
-    if db_path.is_symlink() or (db_path.exists() and not db_path.is_file()):
+    if db_path.exists() and not db_path.is_file():
         raise ValueError("invalid journal database file type")
     return db_path
 

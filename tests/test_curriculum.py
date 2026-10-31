@@ -9,6 +9,7 @@ from labyrinth.curriculum import (
     TrainingObservation,
     next_training_case,
     record_training_result,
+    record_scheduled_training_result,
 )
 from labyrinth.adapters import ReplayAdapter
 
@@ -95,6 +96,34 @@ class CurriculumTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "split"):
             CurriculumState.from_dict(contaminated)
+
+    def test_mutated_existing_observation_cannot_admit_private_final_as_train(self):
+        class ForgedSplit(str):
+            def __eq__(self, other):
+                return other == "train"
+
+            def __ne__(self, other):
+                return other != "train"
+
+        spec = CurriculumSpec(levels=("easy", "hard"), window_size=1,
+                              promotion_score=0.5, distinct_challenges_required=1)
+        catalog = {"easy": ("one",), "hard": ("two",)}
+        issued = next_training_case(spec, CurriculumState(), catalog, run_seed=42)
+        observation = TrainingObservation(issued.challenge_id, issued.seed,
+                                          issued.level, 1.0)
+        object.__setattr__(observation, "split", ForgedSplit("private_final"))
+        with self.assertRaisesRegex(ValueError, "split"):
+            record_training_result(spec, CurriculumState(), observation)
+        with self.assertRaisesRegex(ValueError, "split"):
+            record_scheduled_training_result(spec, CurriculumState(), observation,
+                                             catalog, run_seed=42)
+
+    def test_mutated_curriculum_spec_is_revalidated_before_replay(self):
+        spec = CurriculumSpec(levels=("easy", "hard"), window_size=1,
+                              promotion_score=0.5, distinct_challenges_required=1)
+        object.__setattr__(spec, "levels", ["easy", "hard"])
+        with self.assertRaisesRegex(ValueError, "immutable tuple"):
+            next_training_case(spec, CurriculumState(), self.catalog, run_seed=42)
 
     def test_subclassed_level_cannot_masquerade_as_active_corridor(self):
         class ForgedLevel(str):

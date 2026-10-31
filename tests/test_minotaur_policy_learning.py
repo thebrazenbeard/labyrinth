@@ -14,6 +14,8 @@ import unittest
 from unittest.mock import patch
 
 from labyrinth.minotaur_model import RoomContext, plan_training_room
+from labyrinth.regenerative_maze import generate_maze_plan
+from labyrinth.taskmaster_routing import route_training_rooms
 from labyrinth.training_scope import TrainingScopeSpec
 from labyrinth.minotaur_policy_learning import (
     MinotaurTrainingPolicy, TrainRoomOutcome, TrainCaseApproval, load_policy,
@@ -97,6 +99,47 @@ class MinotaurPolicyLearningTests(unittest.TestCase):
             learner.propose_room(context().public_metadata()),
             {"difficulty": 1, "tactic": "contrast"},
         )
+
+    def test_transfer_stall_interleaves_contrast_remediation_and_recovers(self):
+        cases = tuple(
+            approval(i, tactic=("practice" if i < 3 else
+                                "contrast" if i < 6 or i == 10 else "transfer"))
+            for i in range(14)
+        )
+        learner = MinotaurTrainingPolicy(scope=SCOPE, approved_training_cases=cases)
+        for i in range(3):
+            learner.observe(outcome(i, correct=True))
+        for i in range(3, 6):
+            learner.observe(outcome(i, tactic="contrast", correct=True))
+        self.assertEqual(learner.propose_room(context().public_metadata())["tactic"], "transfer")
+
+        for i in range(6, 10):
+            learner.observe(outcome(i, tactic="transfer", correct=False))
+        remedial = learner.propose_room(context().public_metadata())
+        self.assertEqual(remedial["tactic"], "contrast")
+        self.assertLessEqual(remedial["difficulty"], SCOPE.specificity)
+        maze = generate_maze_plan(SCOPE, 0)
+        actual_remediation = route_training_rooms(SCOPE, maze, taskmaster=learner)
+        self.assertTrue(all(room.suggestion.tactic == "contrast"
+                            and "Expression A is" in room.trainee_view.prompt
+                            and not hasattr(room.trainee_view, "answer")
+                            for room in actual_remediation))
+        learner.observe(outcome(10, tactic="contrast", correct=True))
+        self.assertEqual(learner.propose_room(context().public_metadata())["tactic"], "transfer")
+        actual_probe = route_training_rooms(SCOPE, maze, taskmaster=learner)
+        self.assertTrue(all(room.suggestion.tactic == "transfer"
+                            and "workshop" in room.trainee_view.prompt
+                            for room in actual_probe))
+
+        for i in (11, 12, 13):
+            learner.observe(outcome(i, tactic="transfer", correct=True))
+        self.assertEqual(learner.propose_room(context().public_metadata())["tactic"], "transfer")
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = Path(tmp) / "policy.json"
+            learner.save_policy(saved)
+            restored = load_policy(saved, scope=SCOPE, approved_training_cases=cases)
+            self.assertEqual(restored.propose_room(context().public_metadata()),
+                             learner.propose_room(context().public_metadata()))
 
     def test_zero_update_and_corrupt_label_controls_are_distinguishable(self):
         correct, sham, corrupt = model(), model(), model()

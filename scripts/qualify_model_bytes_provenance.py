@@ -27,7 +27,11 @@ from typing import Any, Callable
 from labyrinth.pretrained_model_provenance import (
     ModelProvenanceError, verify_pretrained_model_manifest,
 )
-from scripts.qualify_minilm_cpu import SCHEMA as PILOT_SCHEMA, plan_output, validate_fixtures
+from labyrinth.physical_report_bridge import inspect_public_minilm_report
+from scripts.qualify_minilm_cpu import (
+    PHYSICAL_ARMS, PUBLIC_TRAIN_BATCH_SIZE, SCHEMA as PILOT_SCHEMA,
+    arm_contract, plan_output, validate_fixtures,
+)
 
 
 SCHEMA = "labyrinth.minilm-local-byte-window.v1"
@@ -100,14 +104,25 @@ def _verify_model(root: Path, manifest: dict[str, Any], trusted: str) -> None:
 
 
 def _check_report(report: dict[str, Any], *, model_root: Path,
-                  runner_sha: str, seed: int, steps: int, rate: float) -> None:
+                  runner_sha: str, run_name: str, seed: int,
+                  steps: int, rate: float) -> None:
+    # A historical v1 report is not evidence from the currently pinned v2
+    # runner, even if its self-declared harness field copies the v2 source SHA.
+    # The source and report version must advance together.
     expected = {
         "schema": PILOT_SCHEMA,
         "model_id": str(model_root),
         "harness_sha256": runner_sha,
+        "run_id": run_name,
         "seed": seed,
         "steps_per_cycle": steps,
         "learning_rate": rate,
+        "pretrained_origin": "CACHED_MODEL_ID_NOT_INDEPENDENTLY_ATTESTED",
+        "device": "cpu",
+        "physical_training_batch_size": PUBLIC_TRAIN_BATCH_SIZE,
+        "baseline_compute_matched_to_training": False,
+        "reload_method": "NEW_MODEL_OBJECT_SAME_PROCESS",
+        "zero_update_control": "SAME_FORWARD_BACKWARD_ADAMW_STEP_WITH_ZERO_LR",
         "qualification": "PUBLIC_DEVELOPMENT_ONLY",
         "private_final_exam": "NOT_RUN",
         "graduation_authorized": False,
@@ -118,10 +133,19 @@ def _check_report(report: dict[str, Any], *, model_root: Path,
         raise ModelByteWindowError("pilot report fails exact runner/configuration binding")
     if report.get("learning_qualification") != "NOT_ESTABLISHED_UNTIL_INDEPENDENT_EVALUATION":
         raise ModelByteWindowError("pilot report overclaims learning qualification")
-    if not isinstance(report.get("arms"), dict) or set(report["arms"]) != {
-        "correct", "zero_update", "inverted"
-    }:
-        raise ModelByteWindowError("missing matched development arms")
+    if type(report.get("arms")) is not dict or set(report["arms"]) != set(PHYSICAL_ARMS):
+        raise ModelByteWindowError("missing exact v2 four-arm development controls")
+    contracts = report.get("arm_contracts")
+    if type(contracts) is not dict or set(contracts) != set(PHYSICAL_ARMS):
+        raise ModelByteWindowError("physical control contract differs from pinned runner")
+    for arm in PHYSICAL_ARMS:
+        declared = contracts[arm]
+        expected_contract = arm_contract(arm, rate)
+        if (type(declared) is not dict or set(declared) != set(expected_contract)
+                or any(type(declared[key]) is not type(value)
+                       or declared[key] != value
+                       for key, value in expected_contract.items())):
+            raise ModelByteWindowError("physical control contract differs from pinned runner")
 
 
 def run_bound_pilot(
@@ -188,7 +212,21 @@ def run_bound_pilot(
     report_path = run_root / "report.json"
     report, report_sha = _read_json(report_path)
     _check_report(report, model_root=root, runner_sha=runner_sha,
-                  seed=seed, steps=steps_per_cycle, rate=learning_rate)
+                  run_name=run_name, seed=seed, steps=steps_per_cycle,
+                  rate=learning_rate)
+    try:
+        public_readback = inspect_public_minilm_report(
+            report_path, expected_report_sha256=report_sha,
+            expected_harness_sha256=runner_sha, expected_run_id=run_name,
+            expected_model_id=str(root),
+        )
+    except ValueError as exc:
+        raise ModelByteWindowError("pilot v2 report fails public structural readback") from exc
+    if (public_readback.status != "PROVISIONAL"
+            or public_readback.physical_model_verified
+            or public_readback.evaluator_custody_verified
+            or public_readback.graduation_authorized):
+        raise ModelByteWindowError("pilot report overclaims independent qualification")
     if _digest_file(_RUNNER) != runner_sha:
         raise ModelByteWindowError("pilot source changed during execution")
     if _digest_file(report_path) != report_sha:
@@ -201,6 +239,8 @@ def run_bound_pilot(
         "execute": True,
         "pilot_report_sha256": report_sha,
         "pilot_report_schema": PILOT_SCHEMA,
+        "public_report_structure_verified": True,
+        "public_report_evidence_status": "PROVISIONAL",
         "preflight_manifest_verified": True,
         "postflight_manifest_verified": True,
         "qualification": "PUBLIC_DEVELOPMENT_BYTE_WINDOW_ONLY",

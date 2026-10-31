@@ -124,12 +124,27 @@ def _digest_int(*parts: object) -> int:
 
 def _validate_state(spec: CurriculumSpec, state: CurriculumState) -> None:
     """Replay progression to reject contaminated or forged restored states."""
+    if type(spec) is not CurriculumSpec:
+        raise ValueError("invalid curriculum specification type")
+    # Frozen dataclasses can be mutated after their constructor ran. A forged
+    # level list or promotion threshold must not steer subsequent replay.
+    CurriculumSpec.__post_init__(spec)
+    if (type(state) is not CurriculumState
+            or type(state.level_index) is not int
+            or type(state.observations) is not tuple):
+        raise ValueError("invalid curriculum state shape")
     if not 0 <= state.level_index < len(spec.levels):
         raise ValueError("invalid state level_index")
     cursor = 0
     seen: set[tuple[str, int]] = set()
     window: list[TrainingObservation] = []
     for obs in state.observations:
+        if type(obs) is not TrainingObservation:
+            raise ValueError("invalid stored training observation")
+        # Dataclass frozen state can be modified through object.__setattr__ or
+        # external restoration; replaying raw scores without revalidation lets
+        # impossible historic scores fabricate a promotion at the next visit.
+        TrainingObservation.__post_init__(obs)
         if obs.split != "train" or obs.level != spec.levels[cursor]:
             raise ValueError("state contains non-training or out-of-level evidence")
         key = (obs.challenge_id, obs.seed)
@@ -192,9 +207,22 @@ def record_training_result(
     """Return (new state, promoted) using a trailing training-only window.
 
     Promotion is *curriculum routing*, not evidence of persistent learning.
-    Scores must be supplied by a trusted external grader.
+    Scores must be supplied by a trusted external grader. This legacy entry
+    point does NOT check that a challenge was actually issued by the scheduler;
+    untrusted callers must use ``record_scheduled_training_result`` with an
+    operator-pinned catalog and seed rather than treating its result as
+    admitted scheduled-training evidence.
     """
     _validate_state(spec, state)
+    if type(observation) is not TrainingObservation:
+        raise ValueError("exact training observation required")
+    # A previously valid frozen observation may have been altered with
+    # object.__setattr__. Snapshot its primitive fields at admission so a
+    # private-final split cannot masquerade as TRAIN through hostile equality.
+    observation = TrainingObservation(
+        observation.challenge_id, observation.seed, observation.level,
+        observation.score, observation.split,
+    )
     if observation.split != "train":
         raise ValueError("evaluation/control observations cannot advance curriculum")
     if observation.level != spec.levels[state.level_index]:
@@ -216,3 +244,52 @@ def record_training_result(
         and sum(o.score for o in window) / spec.window_size >= spec.promotion_score
     )
     return CurriculumState(state.level_index + int(promoted), history), promoted
+
+
+def record_scheduled_training_result(
+    spec: CurriculumSpec,
+    state: CurriculumState,
+    observation: TrainingObservation,
+    challenge_ids_by_level: Mapping[str, Sequence[str]],
+    *,
+    run_seed: int,
+) -> tuple[CurriculumState, bool]:
+    """Record an observed TRAIN result only for a catalog-issued challenge.
+
+    Replays the *entire* history against the same operator-pinned catalog and
+    seed. Checking just the next issued case would allow forged earlier visits
+    to determine the current cursor. An exact challenge ID, level, and derived
+    seed must match every issuance. Repeated IDs can be issued only with fresh
+    cycle seeds under the scheduler's ordinary rules.
+
+    The catalog and grader remain operator-trusted inputs. Passing this guard
+    proves schedule consistency of supplied metadata, NOT source custody,
+    grading authenticity, neural learning, independent examination, or
+    graduation authority.
+    """
+    _validate_state(spec, state)
+    if type(observation) is not TrainingObservation:
+        raise ValueError("exact training observation required")
+    observation = TrainingObservation(
+        observation.challenge_id, observation.seed, observation.level,
+        observation.score, observation.split,
+    )
+    replay = CurriculumState()
+    for index, previous in enumerate(state.observations):
+        expected = next_training_case(
+            spec, replay, challenge_ids_by_level, run_seed=run_seed,
+        )
+        if ((previous.level, previous.challenge_id, previous.seed)
+                != (expected.level, expected.challenge_id, expected.seed)):
+            raise ValueError(f"historical TRAIN visit {index} was not scheduled")
+        replay, _ = record_training_result(spec, replay, previous)
+    if replay != state:
+        raise ValueError("historical curriculum state differs from scheduled replay")
+
+    expected = next_training_case(
+        spec, state, challenge_ids_by_level, run_seed=run_seed,
+    )
+    if ((observation.level, observation.challenge_id, observation.seed)
+            != (expected.level, expected.challenge_id, expected.seed)):
+        raise ValueError("TRAIN observation does not match scheduled case")
+    return record_training_result(spec, state, observation)

@@ -7,7 +7,10 @@ import unittest
 
 from labyrinth.evaluation import score_response
 from labyrinth.hf_pilot import (
-    PilotConfig, SCHEMA, _prompt_commitment, _scoped_training_cases,
+    PilotConfig, SCHEMA, _arithmetic_semantic_commitments,
+    _arithmetic_history_witnesses,
+    _arithmetic_case_binding_records, _arithmetic_case_binding_root,
+    _prompt_commitment, _scoped_training_cases,
     _training_visit_indices, derange_answers,
     RESEARCH_ONLY_RESUME, SIGNED_DEVELOPMENT_RESUME,
 )
@@ -68,6 +71,8 @@ def scoped_pilot_fixture(*, cycle_index: int = 0):
         for arm in ("baseline", "sham", "candidate", "corrupted")
     }
     all_cases = train + heldout
+    witnesses = _arithmetic_history_witnesses(all_cases)
+    bindings = _arithmetic_case_binding_records(witnesses)
     report["resumed_journey"] = {
         "scope": scope.to_dict(), "scope_fingerprint": scope.fingerprint,
         "cycle_index": cycle_index, "weak_skills": [],
@@ -76,6 +81,10 @@ def scoped_pilot_fixture(*, cycle_index: int = 0):
         "historical_prompt_sha256": sorted(
             hashlib.sha256(case.prompt.encode()).hexdigest() for case in all_cases
         ),
+        "historical_arithmetic_sha256": sorted(_arithmetic_semantic_commitments(all_cases)),
+        "historical_arithmetic_witnesses_v1": witnesses,
+        "historical_arithmetic_case_bindings_v1": bindings,
+        "historical_arithmetic_binding_root_v1": _arithmetic_case_binding_root(bindings),
         "same_initial_lora_for_all_controls": True,
     }
     return report
@@ -120,6 +129,11 @@ class HfScopedReportAuditTests(unittest.TestCase):
             lambda report: report["training_case_ids"].__setitem__(0, "train-forged"),
             lambda report: report["heldout_case_ids"].__setitem__(0, "eval-forged"),
             lambda report: report["resumed_journey"]["historical_case_ids"].clear(),
+            lambda report: report["resumed_journey"].pop("historical_arithmetic_sha256"),
+            lambda report: report["resumed_journey"]["historical_arithmetic_sha256"].clear(),
+            lambda report: report["resumed_journey"].pop("historical_arithmetic_witnesses_v1"),
+            lambda report: report["resumed_journey"].pop("historical_arithmetic_case_bindings_v1"),
+            lambda report: report["resumed_journey"].__setitem__("historical_arithmetic_binding_root_v1", "f" * 64),
             lambda report: report["resumed_journey"].__setitem__("same_initial_lora_for_all_controls", False),
         )
         import copy

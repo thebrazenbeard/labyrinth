@@ -1,9 +1,12 @@
 """Offline, bounded pretrained MiniLM/LoRA development experiment.
 
 This is an opt-in *physical neural* probe, not a private final examination.
-It trains identical initial adapters with correct, inverted and zero-update
-labels; reloads the adapter and classification head across two cycles; and
-scores disjoint held-out and alternative-template examples.
+It records a genuinely untrained baseline and trains identical initial
+adapters in correct-label, corrupted-label and zero-update arms; reloads the
+adapter and classification head across two cycles; and scores disjoint
+held-out and alternative-template examples. The untrained baseline has no
+optimizer steps. The other three arms have matched forward/backward/optimizer
+calls, with the zero-update arm using a zero learning rate.
 
 Only cached model files are used. The supplied output run directory must not
 exist, and all artifacts remain there. The default is a read-only plan.
@@ -14,12 +17,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
 
 
-SCHEMA = "labyrinth.minilm-cpu-development.v1"
+SCHEMA = "labyrinth.minilm-cpu-development.v2"
 RUN_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -63,7 +67,12 @@ TRANSFER = (
     ("The new process prevented errors and earned trust.", 1),
     ("The new process caused errors and destroyed trust.", 0),
 )
+# Historical v1 helper API retained for source/tests expecting its exact names.
+# Only PHYSICAL_ARMS is used for new v2 execution and output.
 ARMS = ("correct", "zero_update", "inverted")
+PHYSICAL_ARMS = ("baseline", "zero_update", "correct_labels", "corrupted_labels")
+TRAINING_ARMS = PHYSICAL_ARMS[1:]
+PUBLIC_TRAIN_BATCH_SIZE = 4
 
 
 def validate_fixtures() -> dict[str, int]:
@@ -115,6 +124,110 @@ def comparison(accuracy: dict[str, float]) -> dict[str, Any]:
         "correct_outperforms_both": (accuracy["correct"] > accuracy["zero_update"]
                                       and accuracy["correct"] > accuracy["inverted"]),
     }
+
+
+def physical_comparison(accuracy: dict[str, float]) -> dict[str, Any]:
+    """Four-arm development comparison; not a private exam or causal proof."""
+    if (set(accuracy) != set(PHYSICAL_ARMS)
+            or any(type(v) not in (int, float) or not math.isfinite(v)
+                   or not 0 <= v <= 1 for v in accuracy.values())):
+        raise ValueError("four finite physical control accuracies are required")
+    correct = accuracy["correct_labels"]
+    return {
+        "correct_minus_baseline": correct - accuracy["baseline"],
+        "correct_minus_zero": correct - accuracy["zero_update"],
+        "correct_minus_corrupted": correct - accuracy["corrupted_labels"],
+        "correct_outperforms_all_controls": all(correct > accuracy[arm]
+                                                  for arm in PHYSICAL_ARMS
+                                                  if arm != "correct_labels"),
+    }
+
+
+def arm_contract(arm: str, learning_rate: float) -> dict[str, Any]:
+    """Describe executed work; never present the baseline as a matched sham."""
+    if arm not in PHYSICAL_ARMS:
+        raise ValueError(f"unknown physical arm: {arm}")
+    if type(learning_rate) not in (float, int) or not math.isfinite(learning_rate) or learning_rate <= 0:
+        raise ValueError("invalid physical optimizer learning rate")
+    trained = arm != "baseline"
+    return {
+        "trained": trained,
+        "optimizer_step": trained,
+        "learning_rate": 0.0 if arm in ("baseline", "zero_update") else float(learning_rate),
+        "invert_labels": arm == "corrupted_labels",
+        "actual_weight_updates_expected": arm in ("correct_labels", "corrupted_labels"),
+    }
+
+
+def training_batches(cycle: int, *, steps: int,
+                     batch_size: int = PUBLIC_TRAIN_BATCH_SIZE,
+                     invert_labels: bool = False) -> list[dict[str, Any]]:
+    """Public example-exposure receipts; one optimizer step has four visits."""
+    if (type(cycle) is not int or not 0 <= cycle < len(TRAIN)
+            or type(steps) is not int or not 1 <= steps <= 32
+            or type(batch_size) is not int or not 1 <= batch_size <= len(TRAIN[cycle])):
+        raise ValueError("invalid public training schedule")
+    schedule = []
+    for step in range(steps):
+        examples = []
+        for offset in range(batch_size):
+            index = (step * batch_size + offset) % len(TRAIN[cycle])
+            prompt, label = TRAIN[cycle][index]
+            examples.append({
+                "case_id": f"train-c{cycle}-r{index}",
+                "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                "structure_key": f"public-sentiment-cycle-{cycle}",
+                "target_label": label ^ int(invert_labels),
+            })
+        schedule.append({"step": step, "examples": examples})
+    return schedule
+
+
+def prediction_records(split: str, rows: tuple[tuple[str, int], ...],
+                       predicted: list[int]) -> list[dict[str, Any]]:
+    """Identify actual public predictions without asserting private provenance."""
+    if (split not in ("heldout", "transfer") or len(rows) != len(predicted)
+            or not rows):
+        raise ValueError("invalid public prediction coverage")
+    records = []
+    for index, ((prompt, label), response) in enumerate(zip(rows, predicted)):
+        if type(response) is not int or response not in (0, 1):
+            raise ValueError("public predictions must be binary labels")
+        records.append({
+            "case_id": f"{split}-r{index}",
+            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+            "response": str(response),
+            "predicted_label": response,
+            "expected_label": label,
+        })
+    return records
+
+
+def optimizer_learning_rate(arm: str, learning_rate: float) -> float:
+    """Keep the AdamW computation in the sham without changing any weights."""
+    if arm not in ARMS:
+        raise ValueError(f"unknown training arm: {arm}")
+    return 0.0 if arm == "zero_update" else learning_rate
+
+
+def reload_logit_delta(expected: list[list[float]], observed: list[list[float]],
+                       *, tolerance: float = 1e-5) -> float:
+    """Verify a restored model produces equivalent outputs, not merely hashes."""
+    if (not expected or len(expected) != len(observed)
+            or not math.isfinite(tolerance) or tolerance < 0):
+        raise RuntimeError("heldout reload logit shape/tolerance mismatch")
+    delta = 0.0
+    for before, after in zip(expected, observed):
+        if not before or len(before) != len(after):
+            raise RuntimeError("heldout reload logit shape mismatch")
+        for a, b in zip(before, after):
+            if (type(a) not in (int, float) or type(b) not in (int, float)
+                    or not math.isfinite(a) or not math.isfinite(b)):
+                raise RuntimeError("heldout reload logits must be finite numbers")
+            delta = max(delta, abs(a - b))
+    if delta > tolerance:
+        raise RuntimeError(f"heldout logits changed on checkpoint reload: {delta}")
+    return delta
 
 
 def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
@@ -175,31 +288,45 @@ def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
         pooled = (result.last_hidden_state * mask).sum(dim=1) / mask.sum(dim=1)
         return head(pooled)
 
-    def score(model: Any, head: Any, rows: tuple[tuple[str, int], ...]) -> float:
+    def score(model: Any, head: Any, rows: tuple[tuple[str, int], ...],
+              split: str) -> tuple[float, list[dict[str, Any]]]:
         model.eval()
         head.eval()
         with torch.no_grad():
             predictions = logits(model, head, [prompt for prompt, _ in rows]).argmax(dim=-1)
-        return sum(int(predictions[i].item() == label)
-                   for i, (_, label) in enumerate(rows)) / len(rows)
+        outputs = [int(predictions[i].item()) for i in range(len(rows))]
+        return (sum(int(outputs[i] == label)
+                    for i, (_, label) in enumerate(rows)) / len(rows),
+                prediction_records(split, rows, outputs))
+
+    def heldout_logits(model: Any, head: Any) -> list[list[float]]:
+        model.eval()
+        head.eval()
+        with torch.no_grad():
+            return logits(model, head, [prompt for prompt, _ in HELDOUT]).tolist()
 
     report: dict[str, Any] = {
         "schema": SCHEMA, "qualification": "PUBLIC_DEVELOPMENT_ONLY",
         "pretrained_origin": "CACHED_MODEL_ID_NOT_INDEPENDENTLY_ATTESTED",
-        "model_id": model_id, "seed": seed,
+        "model_id": model_id, "seed": seed, "run_id": root.name,
         "steps_per_cycle": steps_per_cycle, "learning_rate": learning_rate,
+        "physical_training_batch_size": PUBLIC_TRAIN_BATCH_SIZE,
         "fixture_sizes": validate_fixtures(), "arms": {},
         "harness_sha256": _sha_file(Path(__file__)),
         "device": "cpu", "torch_version": str(torch.__version__),
         "cpu_torch_threads": 2,
         "reload_method": "NEW_MODEL_OBJECT_SAME_PROCESS",
-        "zero_update_control": "SAME_FORWARD_BACKWARD_EXPOSURE_NO_OPTIMIZER_STEP",
+        "zero_update_control": "SAME_FORWARD_BACKWARD_ADAMW_STEP_WITH_ZERO_LR",
         "private_final_exam": "NOT_RUN", "graduation_authorized": False,
         "physical_model_byte_custody": "SELF_REPORTED",
+        "arm_contracts": {arm: arm_contract(arm, learning_rate)
+                          for arm in PHYSICAL_ARMS},
+        "baseline_compute_matched_to_training": False,
     }
     root.mkdir(mode=0o700)
-    for arm in ARMS:
+    for arm in PHYSICAL_ARMS:
         print(f"arm={arm} starting", flush=True)
+        contract = arm_contract(arm, learning_rate)
         arm_root = root / arm
         arm_root.mkdir()
         previous: Path | None = None
@@ -208,6 +335,7 @@ def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
         initial_adapter_digest = None
         preceding_after_digest = None
         preceding_adapter_digest = None
+        preceding_heldout_logits = None
         for cycle, rows in enumerate(TRAIN):
             model, head = create_model(previous)
             before = digest_state(model, head)
@@ -220,36 +348,46 @@ def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
             if (preceding_adapter_digest is not None
                     and adapter_before != preceding_adapter_digest):
                 raise RuntimeError("LoRA adapter value digest changed during reload")
-            baseline_heldout = score(model, head, HELDOUT)
-            params = [p for p in model.parameters() if p.requires_grad]
-            if not params:
-                raise RuntimeError("no trainable pretrained-model adapter parameters")
-            optimizer = torch.optim.AdamW(params + list(head.parameters()), lr=learning_rate)
-            model.train()
-            head.train()
-            visits = []
-            for step in range(steps_per_cycle):
-                batch = [rows[(step * 4 + offset) % len(rows)] for offset in range(4)]
-                visits.extend(hashlib.sha256(text.encode()).hexdigest() for text, _ in batch)
-                target = torch.tensor([label ^ int(arm == "inverted")
-                                       for _, label in batch], dtype=torch.long)
-                predicted = logits(model, head, [text for text, _ in batch])
-                loss = torch.nn.functional.cross_entropy(predicted, target)
-                optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                if arm != "zero_update":
-                    optimizer.step()
-                else:
+            reload_delta = (reload_logit_delta(preceding_heldout_logits,
+                                              heldout_logits(model, head))
+                            if preceding_heldout_logits is not None else None)
+            baseline_heldout, _ = score(model, head, HELDOUT, "heldout")
+            batches = (training_batches(cycle, steps=steps_per_cycle,
+                                        invert_labels=contract["invert_labels"])
+                       if contract["trained"] else [])
+            visits = [example["prompt_sha256"] for batch in batches
+                      for example in batch["examples"]]
+            changed_optimizer_steps = 0
+            if contract["optimizer_step"]:
+                params = [p for p in model.parameters() if p.requires_grad]
+                if not params:
+                    raise RuntimeError("no trainable pretrained-model adapter parameters")
+                optimizer = torch.optim.AdamW(params + list(head.parameters()),
+                                               lr=contract["learning_rate"])
+                model.train()
+                head.train()
+                indexed_rows = {f"train-c{cycle}-r{index}": prompt
+                                for index, (prompt, _) in enumerate(rows)}
+                for batch_receipt in batches:
+                    batch = [(indexed_rows[example["case_id"]], example["target_label"])
+                             for example in batch_receipt["examples"]]
+                    target = torch.tensor([label for _, label in batch], dtype=torch.long)
+                    predicted = logits(model, head, [text for text, _ in batch])
+                    loss = torch.nn.functional.cross_entropy(predicted, target)
                     optimizer.zero_grad(set_to_none=True)
+                    loss.backward()
+                    step_before = digest_state(model, head)
+                    optimizer.step()
+                    changed_optimizer_steps += int(digest_state(model, head) != step_before)
             after = digest_state(model, head)
             adapter_after = digest_adapter(model)
-            if arm == "zero_update" and after != before:
-                raise RuntimeError("zero-update arm unexpectedly mutated")
-            if arm == "zero_update" and adapter_after != adapter_before:
-                raise RuntimeError("zero-update LoRA adapter unexpectedly mutated")
-            if arm != "zero_update" and after == before:
+            if arm in ("baseline", "zero_update") and after != before:
+                raise RuntimeError("frozen control arm unexpectedly mutated")
+            if arm in ("baseline", "zero_update") and adapter_after != adapter_before:
+                raise RuntimeError("frozen control LoRA adapter unexpectedly mutated")
+            if contract["actual_weight_updates_expected"] and after == before:
                 raise RuntimeError("trained adapter/head did not change")
-            if arm != "zero_update" and adapter_after == adapter_before:
+            if contract["actual_weight_updates_expected"] and adapter_after == adapter_before:
                 raise RuntimeError("pretrained-model LoRA adapter did not learn")
             checkpoint = arm_root / f"cycle-{cycle}"
             checkpoint.mkdir()
@@ -258,6 +396,8 @@ def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
             save_file({key: tensor.detach().cpu().contiguous()
                        for key, tensor in head.state_dict().items()},
                       str(checkpoint / "head.safetensors"))
+            heldout_accuracy, heldout_predictions = score(model, head, HELDOUT, "heldout")
+            transfer_accuracy, transfer_predictions = score(model, head, TRANSFER, "transfer")
             cycle_results.append({
                 "cycle": cycle, "trainable_sha256_before": before,
                 "trainable_sha256_after": after,
@@ -265,38 +405,52 @@ def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
                 "lora_sha256_after": adapter_after,
                 "adapter_file_sha256": _sha_file(checkpoint / "adapter" / "adapter_model.safetensors"),
                 "head_file_sha256": _sha_file(checkpoint / "head.safetensors"),
-                "optimizer_updates": 0 if arm == "zero_update" else steps_per_cycle,
-                "forward_steps": steps_per_cycle,
-                "backward_steps": steps_per_cycle,
+                "optimizer_updates": changed_optimizer_steps,
+                "optimizer_step_calls": len(batches),
+                "compute_steps": len(batches),
+                "forward_steps": len(batches),
+                "backward_steps": len(batches),
+                "training_forward_steps": len(batches),
+                "training_backward_steps": len(batches),
+                "train_example_visits": len(visits),
+                "training_batches": batches,
                 "training_prompt_sha256": visits,
+                "heldout_reload_max_abs_logit_delta": reload_delta,
                 "heldout_accuracy_before": baseline_heldout,
-                "heldout_accuracy": score(model, head, HELDOUT),
-                "transfer_accuracy": score(model, head, TRANSFER),
+                "heldout_accuracy": heldout_accuracy,
+                "transfer_accuracy": transfer_accuracy,
+                "heldout_predictions": heldout_predictions,
+                "transfer_predictions": transfer_predictions,
             })
             preceding_after_digest = after
             preceding_adapter_digest = adapter_after
+            preceding_heldout_logits = heldout_logits(model, head)
             previous = checkpoint
             print(f"arm={arm} cycle={cycle} saved", flush=True)
         report["arms"][arm] = {"initial_trainable_sha256": initial_digest,
                                "initial_lora_sha256": initial_adapter_digest,
                                "cycles": cycle_results}
-    initial = {report["arms"][arm]["initial_trainable_sha256"] for arm in ARMS}
+    initial = {report["arms"][arm]["initial_trainable_sha256"] for arm in PHYSICAL_ARMS}
     if len(initial) != 1:
         raise RuntimeError("matched arms did not have identical initial trainable values")
-    if len({report["arms"][arm]["initial_lora_sha256"] for arm in ARMS}) != 1:
+    if len({report["arms"][arm]["initial_lora_sha256"] for arm in PHYSICAL_ARMS}) != 1:
         raise RuntimeError("matched arms did not start from the same LoRA adapter")
     for cycle in range(len(TRAIN)):
         exposures = {tuple(report["arms"][arm]["cycles"][cycle]["training_prompt_sha256"])
-                     for arm in ARMS}
+                     for arm in TRAINING_ARMS}
         if len(exposures) != 1:
             raise RuntimeError("matched arms did not receive identical training visits")
-    report["heldout"] = comparison({arm: report["arms"][arm]["cycles"][-1]["heldout_accuracy"]
-                                    for arm in ARMS})
-    report["transfer"] = comparison({arm: report["arms"][arm]["cycles"][-1]["transfer_accuracy"]
-                                     for arm in ARMS})
+        if report["arms"]["baseline"]["cycles"][cycle]["train_example_visits"] != 0:
+            raise RuntimeError("untrained baseline has training exposures")
+    report["heldout"] = physical_comparison({
+        arm: report["arms"][arm]["cycles"][-1]["heldout_accuracy"]
+        for arm in PHYSICAL_ARMS})
+    report["transfer"] = physical_comparison({
+        arm: report["arms"][arm]["cycles"][-1]["transfer_accuracy"]
+        for arm in PHYSICAL_ARMS})
     report["retention"] = {arm: (report["arms"][arm]["cycles"][1]["heldout_accuracy"]
                                   - report["arms"][arm]["cycles"][0]["heldout_accuracy"])
-                           for arm in ARMS}
+                           for arm in PHYSICAL_ARMS}
     report["learning_qualification"] = "NOT_ESTABLISHED_UNTIL_INDEPENDENT_EVALUATION"
     (root / "report.json").write_text(json.dumps(report, sort_keys=True, indent=2) + "\n",
                                        encoding="utf-8")

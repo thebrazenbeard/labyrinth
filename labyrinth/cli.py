@@ -237,7 +237,23 @@ def main(argv: list[str] | None = None) -> int:
                     "Objective text/rubric thresholds express operator intent, not generated tests or trained behavior."
                 )
             if args.materialize_training:
-                if scope.skills == ("arithmetic",):
+                if contract is not None:
+                    # A declaration is not permission to silently fall back to
+                    # scope-only tasks. Only an explicitly approved objective
+                    # binding may materialize executable TRAIN content.
+                    from .objective_contract import prepare_objective_program_room
+
+                    prepared = tuple(
+                        prepare_objective_program_room(contract, plan, room)
+                        for room in plan.rooms
+                    )
+                    report["training_provider"] = "approved_objective_program_focus_v1"
+                    report["training_views"] = [
+                        {**asdict(entry.trainee_view),
+                         "semantic_focus": dict(entry.challenge.metadata)["semantic_focus"]}
+                        for entry in prepared
+                    ]
+                elif scope.skills == ("arithmetic",):
                     from .taskmaster_routing import route_training_rooms
 
                     routed = route_training_rooms(scope, plan)
