@@ -184,6 +184,32 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('("tests.test_r51_pending_history_integrity", 17)', workflow)
         self.assertIn('or result.skipped', workflow)
 
+    def test_r53_measured_neural_cli_is_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"scripts/qualify_maze_conditioned_minilm_cpu.py"', event_paths)
+            self.assertIn('"tests/test_measured_cli_binding_r53.py"', event_paths)
+        self.assertIn('("tests.test_measured_cli_binding_r53", 10)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_q7_signed_source_precommit_is_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/final_exam_precommit.py"', event_paths)
+            self.assertIn('"tests/test_final_exam_precommit.py"', event_paths)
+        self.assertIn('("tests.test_final_exam_precommit", 13)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
     def test_graduation_auth_dependency_is_pinned_in_both_workflows(self):
         root = Path(__file__).resolve().parents[1]
         generic = (root / ".github/workflows/ci.yml").read_text()

@@ -152,6 +152,141 @@ class MeasuredNeuralExecutionRequest:
     fence: int
 
 
+MEASURED_CLI_SCHEMA = "labyrinth.measured-minilm-cli-source-schedule.v1"
+_MEASURED_CLI_FIELDS = frozenset((
+    "schema", "run_id", "candidate_artifact_sha256",
+    "predecessor_checkpoint_sha256", "scope_fingerprint", "fence",
+    "source_event_id", "source_exam_id", "weak_skill", "tactic",
+    "steps_per_cycle", "schedule_sha256", "arms", "ordered_exposures",
+))
+
+
+def _unique_json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    output: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in output:
+            raise ValueError("duplicate field in measured schedule")
+        output[key] = value
+    return output
+
+
+def export_measured_cli_schedule_json(schedule: Any) -> bytes:
+    """Serialize a source schedule; the resulting file is never a host credential.
+
+    The producer is expected to have verified signed development inputs with
+    ``propose_signed_neural_batch_schedule``. This export cannot preserve or
+    independently reverify those signatures; an external pin is mandatory.
+    """
+    from labyrinth.measured_neural_batch_binding import BoundMeasuredNeuralBatches
+    if type(schedule) is not BoundMeasuredNeuralBatches:
+        raise ValueError("typed measured schedule required")
+    data = {
+        "schema": MEASURED_CLI_SCHEMA,
+        "run_id": schedule.run_id,
+        "candidate_artifact_sha256": schedule.candidate_artifact_sha256,
+        "predecessor_checkpoint_sha256": schedule.predecessor_checkpoint_sha256,
+        "scope_fingerprint": schedule.scope_fingerprint,
+        "fence": schedule.fence,
+        "source_event_id": schedule.source_event_id,
+        "source_exam_id": schedule.source_exam_id,
+        "weak_skill": schedule.weak_skill,
+        "tactic": schedule.tactic,
+        "steps_per_cycle": schedule.steps_per_cycle,
+        "schedule_sha256": schedule.schedule_sha256,
+        "arms": list(schedule.arms),
+        "ordered_exposures": [
+            [row.exposure_id for row in batch] for batch in schedule.batches
+        ],
+    }
+    return (json.dumps(data, sort_keys=True, separators=(",", ":"),
+                       allow_nan=False) + "\n").encode("ascii")
+
+
+def load_measured_cli_schedule(
+    raw: bytes, *, scope: TrainingScopeSpec, steps_per_cycle: int,
+    expected_schedule_sha256: str, expected_run_id: str,
+    expected_candidate_artifact_sha256: str,
+    expected_predecessor_checkpoint_sha256: str, expected_fence: int,
+) -> tuple[MeasuredNeuralExecutionRequest, tuple[TrainingCycle, ...]]:
+    """Fail-closed, side-effect-free conversion of a pinned source JSON manifest.
+
+    All independent expected values must be supplied separately from ``raw``.
+    Comparisons verify source consistency, not physical execution or genuine
+    custody of the supplied expected pins. No model or optimizer is loaded.
+    """
+    if type(raw) is not bytes or not 1 <= len(raw) <= 65_536:
+        raise ValueError("measured schedule must be bounded JSON bytes")
+    try:
+        data = json.loads(raw.decode("utf-8"),
+                          object_pairs_hook=_unique_json_pairs,
+                          parse_constant=lambda _: (_ for _ in ()).throw(
+                              ValueError("nonfinite number in measured schedule")))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid measured schedule JSON") from exc
+    if (type(data) is not dict or frozenset(data) != _MEASURED_CLI_FIELDS
+            or data["schema"] != MEASURED_CLI_SCHEMA
+            or raw != (json.dumps(data, sort_keys=True, separators=(",", ":"),
+                                  allow_nan=False) + "\n").encode("ascii")):
+        raise ValueError("noncanonical or unexpected measured schedule fields")
+    if (type(data["weak_skill"]) is not str or data["weak_skill"] not in SKILLS
+            or type(data["tactic"]) is not str
+            or data["tactic"] not in ("practice", "contrast", "transfer")
+            or type(data["steps_per_cycle"]) is not int
+            or data["steps_per_cycle"] != steps_per_cycle
+            or type(data["source_event_id"]) is not str
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+                           data["source_event_id"], re.ASCII) is None
+            or type(data["source_exam_id"]) is not str
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+                           data["source_exam_id"], re.ASCII) is None
+            or type(data["arms"]) is not list
+            or tuple(data["arms"]) != PREREG_ARMS):
+        raise ValueError("invalid source identity or control-arm schedule")
+    visits = data["ordered_exposures"]
+    if (type(visits) is not list or len(visits) != steps_per_cycle
+            or any(type(batch) is not list or len(batch) != 4
+                   or any(type(item) is not str for item in batch)
+                   for batch in visits)):
+        raise ValueError("measured TRAIN schedule requires complete exact visits")
+    cycles = build_training_cycles(scope, weak_cycle_one=(data["weak_skill"],))
+    known = {row.exposure_id: row for row in cycles[1].examples}
+    try:
+        batches = tuple(tuple(known[item] for item in batch) for batch in visits)
+    except KeyError as exc:
+        raise ValueError("measured schedule references a non-TRAIN exposure") from exc
+    from labyrinth.measured_neural_batch_binding import (
+        BoundMeasuredNeuralBatches, verify_precommitted_neural_batch_schedule,
+    )
+    schedule = BoundMeasuredNeuralBatches(
+        run_id=data["run_id"],
+        candidate_artifact_sha256=data["candidate_artifact_sha256"],
+        predecessor_checkpoint_sha256=data["predecessor_checkpoint_sha256"],
+        scope_fingerprint=data["scope_fingerprint"], fence=data["fence"],
+        source_event_id=data["source_event_id"],
+        source_exam_id=data["source_exam_id"],
+        weak_skill=data["weak_skill"], tactic=data["tactic"],
+        steps_per_cycle=data["steps_per_cycle"], cycle=cycles[1],
+        batches=batches, schedule_sha256=data["schedule_sha256"],
+    )
+    verified = verify_precommitted_neural_batch_schedule(
+        schedule, training_cycles=cycles,
+        expected_schedule_sha256=expected_schedule_sha256,
+        expected_run_id=expected_run_id,
+        expected_candidate_artifact_sha256=expected_candidate_artifact_sha256,
+        expected_predecessor_checkpoint_sha256=expected_predecessor_checkpoint_sha256,
+        expected_scope_fingerprint=scope.fingerprint,
+        expected_fence=expected_fence,
+    )
+    return (MeasuredNeuralExecutionRequest(
+        schedule=verified,
+        independently_pinned_schedule_sha256=expected_schedule_sha256,
+        run_id=expected_run_id,
+        candidate_artifact_sha256=expected_candidate_artifact_sha256,
+        predecessor_checkpoint_sha256=expected_predecessor_checkpoint_sha256,
+        scope_fingerprint=scope.fingerprint, fence=expected_fence,
+    ), cycles)
+
+
 def default_scope() -> TrainingScopeSpec:
     return TrainingScopeSpec(
         objective_id=OBJECTIVE, domain="sentiment", skills=SKILLS,
@@ -1209,6 +1344,18 @@ def main(argv: list[str] | None = None) -> int:
                         help="opt-in v2 manifest and immediate-predecessor source journal; no host CAS/crash replay")
     parser.add_argument("--optimizer-v2-candidate-sha256",
                         help="operator-pinned candidate artifact SHA-256 required by v2 source journal")
+    parser.add_argument("--measured-schedule-file", type=Path,
+                        help="canonical source-only measured TRAIN schedule JSON; requires separate pinned identifiers")
+    parser.add_argument("--measured-schedule-sha256",
+                        help="separately pinned digest of the source schedule; not proof of host custody")
+    parser.add_argument("--measured-run-id",
+                        help="separately pinned measured-development candidate run")
+    parser.add_argument("--measured-candidate-sha256",
+                        help="separately pinned candidate artifact SHA-256")
+    parser.add_argument("--measured-predecessor-sha256",
+                        help="separately pinned predecessor checkpoint SHA-256")
+    parser.add_argument("--measured-fence", type=int,
+                        help="separately pinned source fence, not a host-issued grant")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args(argv)
     if (not 1 <= args.steps_per_cycle <= 16
@@ -1236,10 +1383,44 @@ def main(argv: list[str] | None = None) -> int:
             if args.scope_file.stat().st_size > 16_384:
                 raise ValueError("scope file exceeds 16 KiB")
             scope = parse_scope_json(args.scope_file.read_bytes())
-        cycles = build_training_cycles(
-            scope, weak_cycle_one=((args.weak_cycle_one,)
-                                   if args.weak_cycle_one else ()),
+        measured_request = None
+        measured_args = (
+            args.measured_schedule_file, args.measured_schedule_sha256,
+            args.measured_run_id, args.measured_candidate_sha256,
+            args.measured_predecessor_sha256, args.measured_fence,
         )
+        if any(value is not None for value in measured_args):
+            if any(value is None for value in measured_args):
+                raise ValueError("measured schedule requires all independent schedule/run/candidate/predecessor/fence pins")
+            if args.weak_cycle_one is not None:
+                raise ValueError("operator-declared weakness cannot override measured schedule")
+            if not args.preregistered_controls or optimizer_request is None:
+                raise ValueError("measured TRAIN requires five-arm and full optimizer continuity opt-ins")
+            if (optimizer_request.logical_run_id != args.measured_run_id
+                    or optimizer_request.prior_checkpoint_sha256
+                    != args.measured_predecessor_sha256
+                    or optimizer_request.fence != args.measured_fence
+                    or (optimizer_request.source_journal_v2
+                        and optimizer_request.candidate_artifact_sha256
+                        != args.measured_candidate_sha256)):
+                raise ValueError("measured and optimizer checkpoint/fence pins diverge")
+            if args.measured_schedule_file.stat().st_size > 65_536:
+                raise ValueError("measured TRAIN manifest exceeds 64 KiB")
+            measured_request, cycles = load_measured_cli_schedule(
+                args.measured_schedule_file.read_bytes(),
+                scope=scope, steps_per_cycle=args.steps_per_cycle,
+                expected_schedule_sha256=args.measured_schedule_sha256,
+                expected_run_id=args.measured_run_id,
+                expected_candidate_artifact_sha256=args.measured_candidate_sha256,
+                expected_predecessor_checkpoint_sha256=(
+                    args.measured_predecessor_sha256),
+                expected_fence=args.measured_fence,
+            )
+        else:
+            cycles = build_training_cycles(
+                scope, weak_cycle_one=((args.weak_cycle_one,)
+                                       if args.weak_cycle_one else ()),
+            )
         validation = validate_cycles(cycles)
         output = plan_output(args.output_parent, args.run_name)
         if not args.execute:
@@ -1255,8 +1436,16 @@ def main(argv: list[str] | None = None) -> int:
                     "train_label_counts": c.plan.counts_by_skill,
                 } for c in cycles],
                 "validation": validation, "model_id": MODEL_ID,
-                "weakness_feedback_provenance": "OPERATOR_DECLARED_NOT_MEASURED",
+                "weakness_feedback_provenance": (
+                    "EXTERNALLY_PINNED_SOURCE_SCHEDULE_HOST_UNATTESTED"
+                    if measured_request is not None
+                    else "OPERATOR_DECLARED_NOT_MEASURED"),
                 "public_development_only": True, "graduation_authorized": False,
+                **({"measured_schedule_sha256": (
+                    measured_request.independently_pinned_schedule_sha256),
+                    "measured_source_signatures_reverified_at_cli": False,
+                    "host_pin_custody_authenticated": False,
+                } if measured_request is not None else {}),
                 "full_optimizer_continuity": (
                     "V2_IMMEDIATE_PREDECESSOR_SOURCE_JOURNAL_ONLY"
                     if optimizer_request is not None and optimizer_request.source_journal_v2
@@ -1274,6 +1463,7 @@ def main(argv: list[str] | None = None) -> int:
             learning_rate=args.learning_rate,
             preregistered_controls=args.preregistered_controls,
             optimizer_continuity=optimizer_request,
+            measured_batches=measured_request,
         )
         print(json.dumps({
             "run_root": str(output),
