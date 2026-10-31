@@ -19,6 +19,7 @@ import json
 import math
 from pathlib import Path
 import random
+import re
 from typing import Any, Iterable
 
 from labyrinth.regenerative_maze import MazePlan, generate_maze_plan
@@ -93,6 +94,31 @@ class TrainingExample:
 class TrainingCycle:
     plan: MazePlan
     examples: tuple[TrainingExample, ...]
+
+
+@dataclass(frozen=True)
+class OptimizerContinuityRequest:
+    """Opt in to same-process AdamW continuity, not independent authority.
+
+    The predecessor digest and fence are caller-asserted values. This runner
+    cannot establish their ownership or freshness; it will never report them
+    as host-issued credentials or claim recovery after a process crash.
+    """
+
+    logical_run_id: str
+    prior_checkpoint_sha256: str
+    fence: int
+
+    def validate(self) -> None:
+        if (type(self.logical_run_id) is not str
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}",
+                                self.logical_run_id, re.ASCII) is None
+                or type(self.prior_checkpoint_sha256) is not str
+                or re.fullmatch(r"[0-9a-f]{64}",
+                                self.prior_checkpoint_sha256, re.ASCII) is None
+                or type(self.fence) is not int
+                or not 0 <= self.fence < 2**63 - 1):
+            raise ValueError("optimizer continuity requires bounded operator pins")
 
 
 def default_scope() -> TrainingScopeSpec:
@@ -498,6 +524,7 @@ def execute(
     cycles: tuple[TrainingCycle, ...], steps_per_cycle: int,
     learning_rate: float, model_id: str = MODEL_ID,
     preregistered_controls: bool = False,
+    optimizer_continuity: OptimizerContinuityRequest | None = None,
 ) -> dict[str, Any]:
     validate_scope(scope)
     validate_cycles(cycles)
@@ -515,6 +542,16 @@ def execute(
     if cycles != build_training_cycles(scope, weak_cycle_one=weak_skills):
         raise ValueError("untrusted training cycles diverged from declared Maze")
     active_arms = configured_arms(preregistered_controls)
+    if optimizer_continuity is not None:
+        if type(optimizer_continuity) is not OptimizerContinuityRequest:
+            raise ValueError("invalid optimizer continuity request")
+        optimizer_continuity.validate()
+        # The adapter reads this runner's source bytes to bind all visits and
+        # control-label assignments before restoring model or optimizer state.
+        from labyrinth.minilm_optimizer_state_resume import (
+            MazeOptimizerResumePlan, load_maze_optimizer_snapshot,
+            save_maze_optimizer_snapshot,
+        )
 
     import os
     os.environ["HF_HUB_OFFLINE"] = "1"
@@ -618,6 +655,15 @@ def execute(
             },
             "private_exam_independence": "NOT_ESTABLISHED",
         })
+    if optimizer_continuity is not None:
+        report.update({
+            "optimizer_continuity": "SELF_REPORTED_LOCAL_CYCLE_BOUNDARY",
+            "optimizer_checkpoint_pin_provenance": "SAME_PROCESS_SAVE_RECEIPT",
+            "optimizer_predecessor_pin_provenance": "OPERATOR_DECLARED_UNATTESTED",
+            "optimizer_external_monotonic_authority": "NOT_ESTABLISHED",
+            "optimizer_crash_resume": "NOT_TESTED",
+            "reload_method": "NEW_BASE_OBJECT_FULL_MODEL_OPTIMIZER_AND_RNG_RESTORE",
+        })
     run_root.mkdir(mode=0o700)
     (run_root / "maze_manifest.json").write_text(json.dumps({
         "schema": PREREG_SCHEMA if preregistered_controls else SCHEMA,
@@ -641,11 +687,17 @@ def execute(
         preceding_state = None
         preceding_lora = None
         preceding_frozen = None
+        prior_full_state_sha256: str | None = None
+        full_state_plan = None
         cycle_results = []
         for cycle in cycles:
             randomized_labels = (preregistered_randomized_labels(cycle, scope.seed)
                                  if arm == "randomized_labels" else None)
-            model, head, pretrained_base = create_model(previous)
+            # In the opt-in continuity branch a fresh pretrained object and
+            # freshly initialized head are restored from the *full* snapshot;
+            # retaining only LoRA/head would silently cold-start AdamW.
+            model, head, pretrained_base = create_model(
+                None if optimizer_continuity is not None else previous)
             if expected_base_digest is None:
                 expected_base_digest = pretrained_base
             else:
@@ -656,13 +708,6 @@ def execute(
             )
             if preceding_frozen is not None:
                 require_frozen_identity(preceding_frozen, frozen_before)
-            before = trainable_digest(model, head)
-            lora_before = adapter_digest(model)
-            if preceding_state is not None and before != preceding_state:
-                raise RuntimeError("adapter/head weights changed across maze regeneration")
-            if preceding_lora is not None and lora_before != preceding_lora:
-                raise RuntimeError("LoRA values failed checkpoint reload")
-            baseline_dev = score(model, head, PUBLIC_DEVELOPMENT)
             params = [p for p in model.parameters() if p.requires_grad]
             if not params:
                 raise RuntimeError("model has no trainable pretrained adapter")
@@ -670,6 +715,41 @@ def execute(
                 params + list(head.parameters()),
                 lr=optimizer_learning_rate(arm, learning_rate),
             )
+            restored_full_state_sha256 = None
+            if optimizer_continuity is not None:
+                if full_state_plan is None:
+                    full_state_plan = MazeOptimizerResumePlan(
+                        scope=scope, cycles=cycles, weak_cycle_one=weak_skills,
+                        arm=arm, steps_per_cycle=steps_per_cycle,
+                        learning_rate=learning_rate,
+                        logical_run_id=optimizer_continuity.logical_run_id,
+                        base_checkpoint_sha256=pretrained_base,
+                        prior_checkpoint_sha256=(
+                            optimizer_continuity.prior_checkpoint_sha256),
+                        fence=optimizer_continuity.fence,
+                    )
+                    full_state_plan.validate()
+                else:
+                    if previous is None or prior_full_state_sha256 is None:
+                        raise RuntimeError("missing prior full optimizer snapshot")
+                    # This digest was obtained by the SAME process and is not
+                    # an independently controlled external checkpoint pin.
+                    receipt = load_maze_optimizer_snapshot(
+                        previous / "optimizer-state", encoder=model, head=head,
+                        optimizer=optimizer, plan=full_state_plan,
+                        completed_steps=steps_per_cycle,
+                        independently_pinned_checkpoint_sha256=prior_full_state_sha256,
+                    )
+                    restored_full_state_sha256 = receipt.sha256
+                    if restored_full_state_sha256 != prior_full_state_sha256:
+                        raise RuntimeError("optimizer snapshot readback changed")
+            before = trainable_digest(model, head)
+            lora_before = adapter_digest(model)
+            if preceding_state is not None and before != preceding_state:
+                raise RuntimeError("adapter/head weights changed across maze regeneration")
+            if preceding_lora is not None and lora_before != preceding_lora:
+                raise RuntimeError("LoRA values failed checkpoint reload")
+            baseline_dev = score(model, head, PUBLIC_DEVELOPMENT)
             examples = cycle.examples
             visits = []
             model.train()
@@ -728,6 +808,22 @@ def execute(
                 "public_development_accuracy": score(model, head, PUBLIC_DEVELOPMENT),
                 "public_transfer_accuracy": score(model, head, PUBLIC_TRANSFER),
             }
+            if optimizer_continuity is not None:
+                completed_steps = (cycle.plan.cycle_index + 1) * steps_per_cycle
+                full_receipt = save_maze_optimizer_snapshot(
+                    checkpoint / "optimizer-state", encoder=model, head=head,
+                    optimizer=optimizer, plan=full_state_plan,
+                    completed_steps=completed_steps,
+                )
+                prior_full_state_sha256 = full_receipt.sha256
+                cycle_result.update({
+                    "full_optimizer_snapshot_sha256": full_receipt.sha256,
+                    "full_optimizer_state_file_sha256": _sha_file(
+                        checkpoint / "optimizer-state" / "state.safetensors"),
+                    "full_optimizer_completed_steps": completed_steps,
+                    "full_optimizer_predecessor_restore_sha256": restored_full_state_sha256,
+                    "optimizer_continuity_provenance": "LOCAL_RECEIPT_NO_HOST_FENCE",
+                })
             if preregistered_controls:
                 cycle_result.update({
                     "optimizer_step_invocations": 0 if arm == "zero_update"
@@ -840,6 +936,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--learning-rate", type=float, default=0.002)
     parser.add_argument("--preregistered-controls", action="store_true",
                         help="opt-in five-arm public probe; unsealed, not private qualification")
+    parser.add_argument("--full-optimizer-cycle-continuity", action="store_true",
+                        help="opt-in local full-state optimizer+RNG roundtrip; no host-authoritative pin or crash resume")
+    parser.add_argument("--optimizer-run-id",
+                        help="required caller-declared run ID for full optimizer continuity")
+    parser.add_argument("--optimizer-prior-sha256",
+                        help="required caller-declared predecessor checkpoint SHA-256; not independently attested")
+    parser.add_argument("--optimizer-fence", type=int,
+                        help="required caller-declared local fence; not host-owned")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args(argv)
     if (not 1 <= args.steps_per_cycle <= 16
@@ -847,6 +951,16 @@ def main(argv: list[str] | None = None) -> int:
             or not 0 < args.learning_rate <= 0.01):
         parser.error("steps must be 1..16 and finite learning rate in (0,.01]")
     try:
+        optimizer_request = None
+        optimizer_args = (args.optimizer_run_id, args.optimizer_prior_sha256,
+                          args.optimizer_fence)
+        if args.full_optimizer_cycle_continuity:
+            if any(value is None for value in optimizer_args):
+                raise ValueError("full optimizer continuity requires run ID, predecessor SHA and fence")
+            optimizer_request = OptimizerContinuityRequest(*optimizer_args)
+            optimizer_request.validate()
+        elif any(value is not None for value in optimizer_args):
+            raise ValueError("optimizer pins require --full-optimizer-cycle-continuity")
         scope = default_scope()
         if args.scope_file is not None:
             if args.scope_file.stat().st_size > 16_384:
@@ -873,6 +987,9 @@ def main(argv: list[str] | None = None) -> int:
                 "validation": validation, "model_id": MODEL_ID,
                 "weakness_feedback_provenance": "OPERATOR_DECLARED_NOT_MEASURED",
                 "public_development_only": True, "graduation_authorized": False,
+                "full_optimizer_continuity": (
+                    "LOCAL_RECEIPT_NO_HOST_FENCE" if optimizer_request is not None
+                    else "DISABLED"),
                 **({
                     "arms": list(configured_arms(True)),
                     "control_preregistration": "OPERATOR_REQUESTED_UNSEALED_SOURCE_ONLY",
@@ -884,6 +1001,7 @@ def main(argv: list[str] | None = None) -> int:
             steps_per_cycle=args.steps_per_cycle,
             learning_rate=args.learning_rate,
             preregistered_controls=args.preregistered_controls,
+            optimizer_continuity=optimizer_request,
         )
         print(json.dumps({
             "run_root": str(output),
