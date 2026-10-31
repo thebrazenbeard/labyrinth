@@ -237,6 +237,31 @@ class MinotaurGraduationTests(unittest.TestCase):
         self.assertEqual(decide_graduation(POLICY, graduated.state, None, None,
                          independent_evaluator_key=None).disposition, "BLOCKED")
 
+    def test_forged_objective_kind_cannot_recast_training_effect_as_mastery(self):
+        # A malicious equality operator previously made an invalid policy
+        # pass the allowlist, then compare equal to skill_mastery at the gate.
+        evidence = evaluated_receipt(controls_correct=True)
+        self.assertEqual(decision(evidence).disposition, "STAY")
+
+        class GhostKind(str):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class ProxyKind:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        for invalid in (GhostKind("not-an-approved-kind"), ProxyKind()):
+            with self.subTest(kind=type(invalid).__name__):
+                with self.assertRaises(ValueError):
+                    replace(POLICY, objective_kind=invalid)
+
     def test_sample_threshold_alone_does_not_prove_skill_mastery(self):
         evidence = evaluated_receipt(controls_correct=True)
         for trials in evidence["slices"].values():

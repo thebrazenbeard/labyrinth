@@ -26,7 +26,7 @@ from labyrinth.neural_resume_checkpoint import (
     FullCheckpointError, _context_json, _json_bytes, _manifest_digest,
     load_full_checkpoint, save_full_checkpoint,
 )
-from test_maze_crash_resume_journal import binding, context, fake_bytes_snapshot
+from tests.test_maze_crash_resume_journal import binding, context, fake_bytes_snapshot
 
 
 def versioned_context(cycle: int, predecessor: str) -> FullCheckpointContextV2:

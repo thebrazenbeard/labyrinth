@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "labyrinth/minotaur_*.py"
+      - "labyrinth/signed_minotaur_pair_r25.py"
       - "labyrinth/toy_backend.py"
       - "labyrinth/runner.py"
       - "labyrinth/training_scope.py"
@@ -64,7 +65,17 @@ on:
       - "scripts/qualify_minilm*.py"
       - "scripts/qualify_model_bytes_provenance.py"
       - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
+      - "scripts/qualify_v2_weight_updates_cpu_r25.py"
+      - "scripts/qualify_v2_checkpoint_cpu_r22.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_signed_minotaur_pair_r25.py"
+      - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
+      - "tests/test_v2_checkpoint_cpu_smoke_r22.py"
+      - "tests/test_fullstate_physical_gate_r8.py"
+      - "tests/test_optimizer_runner_v2_r19.py"
+      - "tests/test_checkpoint_manifest_v2_r19.py"
+      - "tests/test_r33_signed_pair_ci_membership.py"
+      - "tests/test_r33_physical_neural_ci_contract.py"
       - "tests/test_adaptive_corridors.py"
       - "tests/test_journey_policy_runner.py"
       - "tests/test_journey_challenges.py"
@@ -132,6 +143,7 @@ on:
     branches: [main]
     paths:
       - "labyrinth/minotaur_*.py"
+      - "labyrinth/signed_minotaur_pair_r25.py"
       - "labyrinth/toy_backend.py"
       - "labyrinth/runner.py"
       - "labyrinth/training_scope.py"
@@ -192,7 +204,17 @@ on:
       - "scripts/qualify_minilm*.py"
       - "scripts/qualify_model_bytes_provenance.py"
       - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
+      - "scripts/qualify_v2_weight_updates_cpu_r25.py"
+      - "scripts/qualify_v2_checkpoint_cpu_r22.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_signed_minotaur_pair_r25.py"
+      - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
+      - "tests/test_v2_checkpoint_cpu_smoke_r22.py"
+      - "tests/test_fullstate_physical_gate_r8.py"
+      - "tests/test_optimizer_runner_v2_r19.py"
+      - "tests/test_checkpoint_manifest_v2_r19.py"
+      - "tests/test_r33_signed_pair_ci_membership.py"
+      - "tests/test_r33_physical_neural_ci_contract.py"
       - "tests/test_adaptive_corridors.py"
       - "tests/test_journey_policy_runner.py"
       - "tests/test_journey_challenges.py"
@@ -371,6 +393,12 @@ jobs:
               ("tests.test_qualify_maze_measured_tactics_cpu", 4),
               ("tests.test_qualify_maze_multiseed_protocol_cpu", 21),
               ("tests.test_qualify_maze_prereg_controls_cpu", 5),
+              ("tests.test_signed_minotaur_pair_r25", 10),
+              ("tests.test_qualify_v2_weight_updates_cpu_r25", 18),
+              ("tests.test_v2_checkpoint_cpu_smoke_r22", 5),
+              ("tests.test_fullstate_physical_gate_r8", 1),
+              ("tests.test_optimizer_runner_v2_r19", 7),
+              ("tests.test_checkpoint_manifest_v2_r19", 6),
           )
           for module_name, min_count in new_required:
               suite = unittest.defaultTestLoader.loadTestsFromName(module_name)
@@ -378,5 +406,37 @@ jobs:
               if (result.testsRun < min_count or not result.wasSuccessful()
                       or result.skipped):
                   raise SystemExit(f"required CPU source/custody tests failed or skipped: {module_name}")
+          PY
+          # These explicitly execute real toy CPU weight updates and a
+          # regenerated-Maze full-state checkpoint/reload. Successful source
+          # preflight alone is insufficient; physical evidence stays NONAUTHORIZING.
+          python - <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          probes = (
+              ("scripts.qualify_v2_weight_updates_cpu_r25", (
+                  "actual_trainable_tensor_updates_both_cycles",
+                  "frozen_base_weights_unchanged",
+                  "adamw_moments_advanced_both_cycles",
+              )),
+              ("scripts.qualify_v2_checkpoint_cpu_r22", (
+                  "optimizer_fullstate_continuity_matches_uninterrupted_toy",
+                  "final_fresh_fullstate_restore_verified",
+              )),
+          )
+          for module, proofs in probes:
+              result = subprocess.run(
+                  [sys.executable, "-m", module, "--execute"],
+                  check=True, capture_output=True, text=True, timeout=180,
+              )
+              evidence = json.loads(result.stdout)
+              if (evidence.get("physical_cpu_toy_executed") is not True
+                      or any(evidence.get(proof) is not True for proof in proofs)
+                      or evidence.get("pretrained_model_loaded") is not False
+                      or evidence.get("graduation_authorized") is not False):
+                  raise SystemExit(f"toy CPU evidence incomplete/noncompliant: {module}")
+              print(f"required source-only toy CPU execution PASS: {module}")
           PY
           python -m unittest tests.test_hf_scoped_report_audit tests.test_hf_program_scope tests.test_objective_contract tests.test_reserved_structural_transfer -v

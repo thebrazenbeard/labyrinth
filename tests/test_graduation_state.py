@@ -87,6 +87,51 @@ class GraduationStateTests(unittest.TestCase):
             initialize_campaign(self.database.parent / "missing" / "child.sqlite3",
                                 POLICY, state_key=STATE_KEY)
 
+    def test_forged_mastery_objective_cannot_initialize_persisted_campaign(self):
+        from dataclasses import replace
+
+        class GhostKind(str):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        # The previous constructor accepted this forged invalid kind, and
+        # the persistent decision path promoted a mastery claim to GRADUATED
+        # despite correct-label learning-effect controls showing no gain.
+        with self.assertRaises(ValueError):
+            replace(POLICY, objective_kind=GhostKind("not-an-approved-kind"))
+        self.assertFalse(self.database.exists())
+
+        initialize_campaign(self.database, POLICY, state_key=STATE_KEY)
+        self.assertEqual(self.decide(evaluated_receipt(controls_correct=True)).disposition,
+                         "STAY")
+
+    def test_ancestor_symlink_cannot_redirect_custodian_database(self):
+        actual_root = Path(self.temp.name) / "actual"
+        actual_root.mkdir()
+        custodian_dir = actual_root / "custodian"
+        custodian_dir.mkdir()
+        alias = Path(self.temp.name) / "redirected"
+        try:
+            alias.symlink_to(actual_root, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks unavailable on this host")
+
+        redirected = alias / "custodian" / "campaign.sqlite3"
+        self.assertFalse(redirected.parent.is_symlink())
+        with self.assertRaisesRegex(ValueError, "symlink|junction"):
+            initialize_campaign(redirected, POLICY, state_key=STATE_KEY)
+        self.assertFalse((custodian_dir / "campaign.sqlite3").exists())
+
+        real = custodian_dir / "campaign.sqlite3"
+        initialize_campaign(real, POLICY, state_key=STATE_KEY)
+        raw, signature = independently_signed(evaluated_receipt())
+        with self.assertRaisesRegex(ValueError, "symlink|junction"):
+            decide_campaign(redirected, POLICY, raw, signature,
+                            independent_evaluator_key=KEY, state_key=STATE_KEY)
+
     def test_two_fresh_processes_cannot_spend_same_signed_attempt(self):
         initialize_campaign(self.database, POLICY, state_key=STATE_KEY)
         raw, signature = independently_signed(evaluated_receipt(candidate_correct=False))
