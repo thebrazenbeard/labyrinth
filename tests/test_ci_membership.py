@@ -218,6 +218,44 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('"cryptography==50.0.2"', neural)
         self.assertIn('cryptography.__version__ == "50.0.2"', neural)
 
+    def test_r57_source_boundaries_are_required_not_optional_in_neural_cpu_ci(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        boundaries = (
+            "labyrinth/minotaur_policy_learning.py",
+            "labyrinth/retention_sample_planning_r57.py",
+            "labyrinth/rezon_pointer_mapping_r57.py",
+            "scripts/verify_minilm_fresh_process_r57.py",
+            "tests/test_r57_minotaur_policy_regression.py",
+            "tests/test_retention_sample_planning_r57.py",
+            "tests/test_rezon_pointer_mapping_r57.py",
+            "tests/test_fresh_process_eval_manifest_r57.py",
+        )
+        for name, manifest in paths_by_trigger.items():
+            for path in boundaries:
+                with self.subTest(trigger=name, path=path):
+                    self.assertIn(f'      - "{path}"', manifest)
+
+        for module_name, minimum in (
+            ("tests.test_r57_minotaur_policy_regression", 2),
+            ("tests.test_retention_sample_planning_r57", 10),
+            ("tests.test_rezon_pointer_mapping_r57", 10),
+            ("tests.test_fresh_process_eval_manifest_r57", 10),
+        ):
+            with self.subTest(module=module_name):
+                self.assertIn(f'("{module_name}", {minimum})', workflow)
+
+        # The pinned runner must reject all skips, including optional skips,
+        # and never silently substitute missing modules or counts.
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+
     def test_l12_l14_neural_and_custody_boundaries_are_required_in_cpu_ci(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()

@@ -320,7 +320,22 @@ class MinotaurTrainingPolicy:
         self._counts[outcome.skill][outcome.tactic][key] += 1
         self._case_ids.append(outcome.case_id)
         self._prompt_sha256.append(outcome.prompt_sha256)
-        after = self.model_hash
+        try:
+            payload = self._validated_payload()
+            after = hashlib.sha256(_canonical(payload)).hexdigest()
+            # A valid observation must not create a policy that cannot be
+            # persisted by save_policy/load_policy. Long admitted case IDs
+            # can exhaust the byte cap before MAX_TRAIN_OUTCOMES is reached.
+            encoded = _canonical({**payload, "integrity_sha256": after}) + b"\n"
+            if len(encoded) > MAX_POLICY_JSON_BYTES:
+                raise ValueError("taskmaster checkpoint exceeds size cap")
+        except Exception:
+            # Keep the whole TRAIN observation atomic on persistence-budget
+            # failure, including the anti-replay commitments and histogram.
+            self._prompt_sha256.pop()
+            self._case_ids.pop()
+            self._counts[outcome.skill][outcome.tactic][key] -= 1
+            raise
         return {"mode": mode, "updated": True, "before_hash": before, "after_hash": after}
 
     def propose_room(self, metadata: Mapping[str, str | int]) -> dict[str, object]:

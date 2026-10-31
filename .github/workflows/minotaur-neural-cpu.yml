@@ -37,6 +37,7 @@ on:
       - "labyrinth/signed_exam_lineage.py"
       - "labyrinth/neural_run_binding.py"
       - "labyrinth/retention_qualification.py"
+      - "labyrinth/retention_sample_planning_r57.py"
       - "labyrinth/measured_weakness_feedback.py"
       - "labyrinth/atomic_artifact_publication.py"
       - "labyrinth/preregistered_control_matrix.py"
@@ -58,6 +59,7 @@ on:
       - "labyrinth/five_arm_experiment_contract.py"
       - "labyrinth/five_arm_statistical_screen.py"
       - "labyrinth/evidence_pointer.py"
+      - "labyrinth/rezon_pointer_mapping_r57.py"
       - "labyrinth/final_exam_precommit.py"
       - "labyrinth/train_exposure_attestation.py"
       - "labyrinth/maze_crash_resume_journal.py"
@@ -68,12 +70,17 @@ on:
       - "scripts/qualify_neural_journey_e2e_cpu.py"
       - "scripts/qualify_taskmaster_counterfactual_cpu.py"
       - "scripts/qualify_minilm*.py"
+      - "scripts/verify_minilm_fresh_process_r57.py"
       - "scripts/qualify_model_bytes_provenance.py"
       - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
       - "scripts/qualify_v2_weight_updates_cpu_r25.py"
       - "scripts/qualify_v2_checkpoint_cpu_r22.py"
       - "scripts/qualify_toy_cpu_evidence_r36.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_r57_minotaur_policy_regression.py"
+      - "tests/test_retention_sample_planning_r57.py"
+      - "tests/test_rezon_pointer_mapping_r57.py"
+      - "tests/test_fresh_process_eval_manifest_r57.py"
       - "tests/test_independent_holdout.py"
       - "tests/test_signed_minotaur_pair_r25.py"
       - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
@@ -193,6 +200,7 @@ on:
       - "labyrinth/signed_exam_lineage.py"
       - "labyrinth/neural_run_binding.py"
       - "labyrinth/retention_qualification.py"
+      - "labyrinth/retention_sample_planning_r57.py"
       - "labyrinth/measured_weakness_feedback.py"
       - "labyrinth/atomic_artifact_publication.py"
       - "labyrinth/preregistered_control_matrix.py"
@@ -214,6 +222,7 @@ on:
       - "labyrinth/five_arm_experiment_contract.py"
       - "labyrinth/five_arm_statistical_screen.py"
       - "labyrinth/evidence_pointer.py"
+      - "labyrinth/rezon_pointer_mapping_r57.py"
       - "labyrinth/final_exam_precommit.py"
       - "labyrinth/train_exposure_attestation.py"
       - "labyrinth/maze_crash_resume_journal.py"
@@ -224,12 +233,17 @@ on:
       - "scripts/qualify_neural_journey_e2e_cpu.py"
       - "scripts/qualify_taskmaster_counterfactual_cpu.py"
       - "scripts/qualify_minilm*.py"
+      - "scripts/verify_minilm_fresh_process_r57.py"
       - "scripts/qualify_model_bytes_provenance.py"
       - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
       - "scripts/qualify_v2_weight_updates_cpu_r25.py"
       - "scripts/qualify_v2_checkpoint_cpu_r22.py"
       - "scripts/qualify_toy_cpu_evidence_r36.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_r57_minotaur_policy_regression.py"
+      - "tests/test_retention_sample_planning_r57.py"
+      - "tests/test_rezon_pointer_mapping_r57.py"
+      - "tests/test_fresh_process_eval_manifest_r57.py"
       - "tests/test_independent_holdout.py"
       - "tests/test_signed_minotaur_pair_r25.py"
       - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
@@ -434,6 +448,12 @@ jobs:
               ("tests.test_measured_cli_binding_r53", 10),
               ("tests.test_evidence_pointer", 8),
               ("tests.test_final_exam_precommit", 13),
+              # R57 patches are source-only. Every boundary test is mandatory:
+              # skipped or missing cases must fail this pinned CPU workflow.
+              ("tests.test_r57_minotaur_policy_regression", 2),
+              ("tests.test_retention_sample_planning_r57", 10),
+              ("tests.test_rezon_pointer_mapping_r57", 10),
+              ("tests.test_fresh_process_eval_manifest_r57", 10),
               ("tests.test_signed_minotaur_pair_r25", 10),
               ("tests.test_qualify_v2_weight_updates_cpu_r25", 18),
               ("tests.test_v2_checkpoint_cpu_smoke_r22", 5),
