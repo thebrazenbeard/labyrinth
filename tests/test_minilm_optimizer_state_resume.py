@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import replace
 import importlib.util
 from pathlib import Path
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -22,6 +23,7 @@ from labyrinth.neural_resume_checkpoint import FullCheckpointError, save_full_ch
 from scripts.qualify_maze_conditioned_minilm_cpu import (
     PREREG_ARMS, build_training_cycles, default_scope,
 )
+from scripts import qualify_maze_conditioned_minilm_cpu as canonical_maze_module
 
 
 def plan(**changes) -> MazeOptimizerResumePlan:
@@ -43,6 +45,130 @@ def plan(**changes) -> MazeOptimizerResumePlan:
 
 
 class MazeFullStateSourceTests(unittest.TestCase):
+    def test_module_duplicate_cli_cycles_match_exact_frozen_schema_only(self):
+        # `python -m scripts.qualify_maze_conditioned_minilm_cpu` creates
+        # TrainingCycle in __main__, not the importable canonical module. The
+        # valid CLI records must bind identically without allowing duck-typed
+        # payload substitution or looser `==` on primitive fields.
+        source = Path(canonical_maze_module.__file__)
+        clone_name = "_independent_maze_cli_class_identity_probe"
+        spec = importlib.util.spec_from_file_location(clone_name, source)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        clone = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, {clone_name: clone}):
+            spec.loader.exec_module(clone)
+            self.assertIsNot(clone.TrainingCycle,
+                             canonical_maze_module.TrainingCycle)
+            scope = default_scope()
+            weak = ("negative_polarity",)
+            cloned_cycles = clone.build_training_cycles(
+                scope, weak_cycle_one=weak)
+            authentic = plan(scope=scope, cycles=cloned_cycles,
+                             weak_cycle_one=weak)
+            authentic.validate()
+            self.assertEqual(authentic.exposures(), plan().exposures())
+            altered = replace(
+                cloned_cycles[1],
+                examples=(replace(cloned_cycles[1].examples[0], label=True),)
+                + cloned_cycles[1].examples[1:],
+            )
+            with self.assertRaises(ValueError):
+                plan(scope=scope, weak_cycle_one=weak,
+                     cycles=(cloned_cycles[0], altered)).validate()
+
+    def test_signed_measured_batches_commit_actual_visits_across_five_arms(self):
+        from tests.test_measured_neural_batch_binding import (
+            BoundNeuralMeasuredBatchesTests,
+        )
+
+        fixture = BoundNeuralMeasuredBatchesTests(
+            "test_actual_four_key_signed_development_produces_bound_five_arm_schedule")
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        schedule = fixture.pinned(fixture.proposal())
+        common = dict(
+            scope=fixture.signed.scope, cycles=fixture.signed.cycles,
+            weak_cycle_one=(schedule.weak_skill,),
+            steps_per_cycle=schedule.steps_per_cycle,
+            logical_run_id=schedule.run_id,
+            prior_checkpoint_sha256=fixture.prev, fence=schedule.fence,
+            measured_cycle_one=schedule,
+            measured_schedule_sha256=schedule.schedule_sha256,
+            measured_candidate_artifact_sha256=schedule.candidate_artifact_sha256,
+        )
+        controls = {
+            arm: plan(**dict(common, arm=arm)) for arm in PREREG_ARMS
+        }
+        for item in controls.values():
+            item.validate()
+        # The recorded cycle-one optimizer exposure commitment must match
+        # the actual measured batches, not the default batch selector.
+        correct = controls["correct"]
+        self.assertEqual(len(correct._spec()["measured_schedule_source_sha256"]), 64)
+        self.assertEqual(correct._spec()["measured_candidate_artifact_sha256"],
+                         schedule.candidate_artifact_sha256)
+        default = plan(**{**common, "arm": "correct",
+                          "measured_cycle_one": None,
+                          "measured_schedule_sha256": None,
+                          "measured_candidate_artifact_sha256": None})
+        self.assertNotEqual(correct.exposures(), default.exposures())
+        first_cycle_visit_count = 4 * schedule.steps_per_cycle
+        for arm, current in controls.items():
+            observed = current.exposures()[first_cycle_visit_count:]
+            self.assertEqual(len(observed), first_cycle_visit_count)
+            self.assertEqual(
+                [occurrence for occurrence, _ in observed],
+                [occurrence for occurrence, _ in correct.exposures()[first_cycle_visit_count:]],
+                msg=arm,
+            )
+            self.assertNotEqual(current.checkpoint_run_id,
+                                default.checkpoint_run_id)
+        self.assertNotEqual(controls["correct"].exposures(),
+                            controls["inverted"].exposures())
+        self.assertNotEqual(controls["correct"].exposures(),
+                            controls["randomized_labels"].exposures())
+        self.assertEqual(controls["correct"].exposures(),
+                         controls["zero_lr"].exposures())
+
+    def test_measured_schedule_cannot_be_bypassed_by_new_local_pin(self):
+        from tests.test_measured_neural_batch_binding import (
+            BoundNeuralMeasuredBatchesTests,
+        )
+
+        fixture = BoundNeuralMeasuredBatchesTests(
+            "test_actual_four_key_signed_development_produces_bound_five_arm_schedule")
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        schedule = fixture.pinned(fixture.proposal())
+        common = dict(
+            scope=fixture.signed.scope, cycles=fixture.signed.cycles,
+            weak_cycle_one=(schedule.weak_skill,), arm="correct",
+            steps_per_cycle=schedule.steps_per_cycle,
+            logical_run_id=schedule.run_id,
+            prior_checkpoint_sha256=fixture.prev, fence=schedule.fence,
+            measured_cycle_one=schedule,
+            measured_schedule_sha256=schedule.schedule_sha256,
+            measured_candidate_artifact_sha256=schedule.candidate_artifact_sha256,
+        )
+        mutations = (
+            dict(measured_schedule_sha256="f" * 64),
+            dict(measured_schedule_sha256=None),
+            dict(measured_candidate_artifact_sha256="f" * 64),
+            dict(measured_candidate_artifact_sha256=None),
+            dict(measured_cycle_one=None),
+            dict(logical_run_id="foreign-run"),
+            dict(prior_checkpoint_sha256="f" * 64),
+            dict(fence=8),
+            dict(steps_per_cycle=4),
+            dict(weak_cycle_one=("positive_polarity",)),
+            dict(measured_cycle_one=replace(schedule, batches=schedule.batches[::-1])),
+            dict(measured_cycle_one=replace(schedule, graduation_authorized=True)),
+        )
+        for changed in mutations:
+            with self.subTest(changed=tuple(changed)), self.assertRaises(ValueError):
+                plan(**dict(common, **changed)).validate()
+
     def test_actual_regenerated_maze_binds_complete_ordered_exposure_stream(self):
         current = plan()
         current.validate()

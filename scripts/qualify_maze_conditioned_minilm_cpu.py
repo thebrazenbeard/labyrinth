@@ -121,6 +121,24 @@ class OptimizerContinuityRequest:
             raise ValueError("optimizer continuity requires bounded operator pins")
 
 
+@dataclass(frozen=True)
+class MeasuredNeuralExecutionRequest:
+    """Caller-supplied external pins for an opt-in signed TRAIN schedule.
+
+    Supplying these values does not establish that an independent host owns
+    them. The runner verifies the exact signed-source schedule before loading
+    the neural backend, then uses one schedule for all five matched arms.
+    """
+
+    schedule: Any
+    independently_pinned_schedule_sha256: str
+    run_id: str
+    candidate_artifact_sha256: str
+    predecessor_checkpoint_sha256: str
+    scope_fingerprint: str
+    fence: int
+
+
 def default_scope() -> TrainingScopeSpec:
     return TrainingScopeSpec(
         objective_id=OBJECTIVE, domain="sentiment", skills=SKILLS,
@@ -264,6 +282,24 @@ def select_training_batch(cycle: TrainingCycle, step: int) -> tuple[TrainingExam
         raise ValueError("step must be a nonnegative integer and cycle nonempty")
     return tuple(cycle.examples[(step * 4 + offset) % len(cycle.examples)]
                  for offset in range(4))
+
+
+def select_executed_training_batch(
+    cycle: TrainingCycle, step: int, arm: str,
+    verified_measured_schedule: Any | None = None,
+) -> tuple[TrainingExample, ...]:
+    """The actual neural loop selector, shared with source custody tests.
+
+    ``verified_measured_schedule`` is only admitted after execute() has
+    revalidated its externally pinned digest and full signed-source identity.
+    It changes regenerated cycle one's TRAIN ordering, never the control arm
+    label assignment or the first-cycle training distribution.
+    """
+    if verified_measured_schedule is None or cycle.plan.cycle_index == 0:
+        return select_training_batch(cycle, step)
+    if cycle.plan.cycle_index != 1 or cycle != verified_measured_schedule.cycle:
+        raise ValueError("measured neural batch applied to foreign Maze cycle")
+    return verified_measured_schedule.batch_for_arm(arm, step)
 
 
 def plan_signed_measured_sentiment_batches(
@@ -525,6 +561,7 @@ def execute(
     learning_rate: float, model_id: str = MODEL_ID,
     preregistered_controls: bool = False,
     optimizer_continuity: OptimizerContinuityRequest | None = None,
+    measured_batches: MeasuredNeuralExecutionRequest | None = None,
 ) -> dict[str, Any]:
     validate_scope(scope)
     validate_cycles(cycles)
@@ -542,10 +579,41 @@ def execute(
     if cycles != build_training_cycles(scope, weak_cycle_one=weak_skills):
         raise ValueError("untrusted training cycles diverged from declared Maze")
     active_arms = configured_arms(preregistered_controls)
+    verified_measured_schedule = None
+    if measured_batches is not None:
+        if (type(measured_batches) is not MeasuredNeuralExecutionRequest
+                or not preregistered_controls):
+            raise ValueError("measured neural TRAIN batches require typed five-arm opt-in")
+        # Import lazily to avoid a module cycle: the source planner imports
+        # this probe's immutable TrainingCycle/TrainingExample definitions.
+        from labyrinth.measured_neural_batch_binding import (
+            verify_precommitted_neural_batch_schedule,
+        )
+        verified_measured_schedule = verify_precommitted_neural_batch_schedule(
+            measured_batches.schedule, training_cycles=cycles,
+            expected_schedule_sha256=(
+                measured_batches.independently_pinned_schedule_sha256),
+            expected_run_id=measured_batches.run_id,
+            expected_candidate_artifact_sha256=(
+                measured_batches.candidate_artifact_sha256),
+            expected_predecessor_checkpoint_sha256=(
+                measured_batches.predecessor_checkpoint_sha256),
+            expected_scope_fingerprint=measured_batches.scope_fingerprint,
+            expected_fence=measured_batches.fence,
+        )
+        if (verified_measured_schedule.steps_per_cycle != steps_per_cycle
+                or weak_skills != (verified_measured_schedule.weak_skill,)):
+            raise ValueError("signed weakness and step count must match regenerated Maze")
     if optimizer_continuity is not None:
         if type(optimizer_continuity) is not OptimizerContinuityRequest:
             raise ValueError("invalid optimizer continuity request")
         optimizer_continuity.validate()
+        if (measured_batches is not None
+                and (optimizer_continuity.logical_run_id != measured_batches.run_id
+                     or optimizer_continuity.prior_checkpoint_sha256
+                     != measured_batches.predecessor_checkpoint_sha256
+                     or optimizer_continuity.fence != measured_batches.fence)):
+            raise ValueError("optimizer and measured schedule custody pins diverge")
         # The adapter reads this runner's source bytes to bind all visits and
         # control-label assignments before restoring model or optimizer state.
         from labyrinth.minilm_optimizer_state_resume import (
@@ -664,6 +732,21 @@ def execute(
             "optimizer_crash_resume": "NOT_TESTED",
             "reload_method": "NEW_BASE_OBJECT_FULL_MODEL_OPTIMIZER_AND_RNG_RESTORE",
         })
+    if verified_measured_schedule is not None:
+        report.update({
+            "weakness_feedback_provenance": "SIGNED_DEVELOPMENT_SOURCE_HOST_UNATTESTED",
+            "measured_neural_training_schedule": "VERIFIED_PRECOMMITTED_SOURCE_ONLY",
+            "measured_neural_training_schedule_sha256": (
+                verified_measured_schedule.schedule_sha256),
+            "measured_neural_training_source_event_id": (
+                verified_measured_schedule.source_event_id),
+            "measured_neural_training_source_exam_id": (
+                verified_measured_schedule.source_exam_id),
+            "measured_neural_training_tactic": verified_measured_schedule.tactic,
+            "measured_neural_control_arms": list(PREREG_ARMS),
+            "measured_neural_external_pin_attested": False,
+            "measured_neural_model_execution_attested": False,
+        })
     run_root.mkdir(mode=0o700)
     (run_root / "maze_manifest.json").write_text(json.dumps({
         "schema": PREREG_SCHEMA if preregistered_controls else SCHEMA,
@@ -727,6 +810,13 @@ def execute(
                         prior_checkpoint_sha256=(
                             optimizer_continuity.prior_checkpoint_sha256),
                         fence=optimizer_continuity.fence,
+                        measured_cycle_one=verified_measured_schedule,
+                        measured_schedule_sha256=(
+                            measured_batches.independently_pinned_schedule_sha256
+                            if measured_batches is not None else None),
+                        measured_candidate_artifact_sha256=(
+                            measured_batches.candidate_artifact_sha256
+                            if measured_batches is not None else None),
                     )
                     full_state_plan.validate()
                 else:
@@ -755,7 +845,8 @@ def execute(
             model.train()
             head.train()
             for step in range(steps_per_cycle):
-                batch = select_training_batch(cycle, step)
+                batch = select_executed_training_batch(
+                    cycle, step, arm, verified_measured_schedule)
                 visits.extend(row.exposure_id for row in batch)
                 labels = torch.tensor(
                     training_batch_labels(batch, arm, randomized_labels),
@@ -808,6 +899,17 @@ def execute(
                 "public_development_accuracy": score(model, head, PUBLIC_DEVELOPMENT),
                 "public_transfer_accuracy": score(model, head, PUBLIC_TRANSFER),
             }
+            if verified_measured_schedule is not None:
+                cycle_result.update({
+                    "measured_neural_training_applied": (
+                        cycle.plan.cycle_index == 1),
+                    "measured_neural_training_schedule_sha256": (
+                        verified_measured_schedule.schedule_sha256
+                        if cycle.plan.cycle_index == 1 else None),
+                    "training_visit_exposure_ids_sha256": hashlib.sha256(
+                        (json.dumps(visits, separators=(",", ":")) + "\n").encode("ascii")
+                    ).hexdigest(),
+                })
             if optimizer_continuity is not None:
                 completed_steps = (cycle.plan.cycle_index + 1) * steps_per_cycle
                 full_receipt = save_maze_optimizer_snapshot(
@@ -1015,4 +1117,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # `python -m scripts.qualify_maze_conditioned_minilm_cpu` executes these
+    # dataclasses under __main__, while the signed batch and optimizer modules
+    # import the canonical qualified module. Reimporting would manufacture a
+    # second TrainingExample/TrainingCycle class and reject authentic rows.
+    # Preserve ONE module identity or fail closed on an existing different
+    # definition. This is not a trusted module-substitution authorization.
+    import sys
+    _canonical_module = "scripts.qualify_maze_conditioned_minilm_cpu"
+    _loaded = sys.modules.get(_canonical_module)
+    if _loaded is not None and _loaded is not sys.modules["__main__"]:
+        raise SystemExit("conflicting pretrained MiniLM runner module identity")
+    sys.modules[_canonical_module] = sys.modules["__main__"]
     raise SystemExit(main())

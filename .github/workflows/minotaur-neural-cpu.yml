@@ -54,6 +54,8 @@ on:
       - "labyrinth/external_monotonic_authority_contract.py"
       - "labyrinth/measured_neural_batch_binding.py"
       - "labyrinth/train_exposure_attestation.py"
+      - "labyrinth/maze_crash_resume_journal.py"
+      - "labyrinth/pinned_model_inference_receipt.py"
       - "scripts/qualify_hf_regenerative.py"
       - "scripts/qualify_maze_conditioned_minilm_cpu.py"
       - "scripts/qualify_maze_multiseed_protocol_cpu.py"
@@ -104,6 +106,9 @@ on:
       - "tests/test_measured_neural_batch_binding.py"
       - "tests/test_minilm_runner_optimizer_optin.py"
       - "tests/test_train_exposure_attestation.py"
+      - "tests/test_maze_crash_resume_journal.py"
+      - "tests/test_minilm_measured_batches_optin.py"
+      - "tests/test_pinned_model_inference_receipt.py"
       - "tests/test_qualify_maze_measured_tactics_cpu.py"
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
       - "tests/test_qualify_maze_prereg_controls_cpu.py"
@@ -176,6 +181,8 @@ on:
       - "labyrinth/external_monotonic_authority_contract.py"
       - "labyrinth/measured_neural_batch_binding.py"
       - "labyrinth/train_exposure_attestation.py"
+      - "labyrinth/maze_crash_resume_journal.py"
+      - "labyrinth/pinned_model_inference_receipt.py"
       - "scripts/qualify_hf_regenerative.py"
       - "scripts/qualify_maze_conditioned_minilm_cpu.py"
       - "scripts/qualify_maze_multiseed_protocol_cpu.py"
@@ -226,6 +233,9 @@ on:
       - "tests/test_measured_neural_batch_binding.py"
       - "tests/test_minilm_runner_optimizer_optin.py"
       - "tests/test_train_exposure_attestation.py"
+      - "tests/test_maze_crash_resume_journal.py"
+      - "tests/test_minilm_measured_batches_optin.py"
+      - "tests/test_pinned_model_inference_receipt.py"
       - "tests/test_qualify_maze_measured_tactics_cpu.py"
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
       - "tests/test_qualify_maze_prereg_controls_cpu.py"
@@ -344,12 +354,15 @@ jobs:
               ("tests.test_arithmetic_retention_admission", 8),
               ("tests.test_development_event_reservation_service", 15),
               ("tests.test_measured_sentiment_corridors", 5),
-              ("tests.test_minilm_optimizer_state_resume", 12),
+              ("tests.test_minilm_optimizer_state_resume", 15),
               ("tests.test_sealed_semantic_exam_protocol", 17),
               ("tests.test_external_monotonic_authority_contract", 13),
               ("tests.test_measured_neural_batch_binding", 6),
               ("tests.test_minilm_runner_optimizer_optin", 5),
               ("tests.test_train_exposure_attestation", 10),
+              ("tests.test_maze_crash_resume_journal", 13),
+              ("tests.test_minilm_measured_batches_optin", 7),
+              ("tests.test_pinned_model_inference_receipt", 12),
               ("tests.test_qualify_maze_measured_tactics_cpu", 4),
               ("tests.test_qualify_maze_multiseed_protocol_cpu", 21),
               ("tests.test_qualify_maze_prereg_controls_cpu", 5),

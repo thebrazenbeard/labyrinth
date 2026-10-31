@@ -7,15 +7,16 @@ checkpoint, and completed optimizer cursor before restoring any parameters.
 
 Unlike the ordinary Maze runner, this adapter preserves AdamW moments, step
 counters and Python/NumPy/Torch RNG through the existing safetensors/strict
-JSON substrate. It does not alter that runner or prove that a physical MiniLM
-run has used this interface. No host-owned checkpoint fence, event replay
-protection, signed examiner or independent graduation authority is installed.
+JSON substrate. The runner has a separate opt-in invocation path, but physical
+pretrained MiniLM execution of that integration has not been established.
+No host-owned checkpoint fence, event replay protection, signed examiner or
+independent graduation authority is installed.
 No optimizer scheduler is supported by this bounded runner.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from hashlib import sha256
 import json
 import math
@@ -30,6 +31,10 @@ from .neural_resume_checkpoint import (
     load_full_checkpoint, save_full_checkpoint,
 )
 from .training_scope import TrainingScopeSpec
+from .measured_neural_batch_binding import (
+    BoundMeasuredNeuralBatches, verify_precommitted_neural_batch_schedule,
+)
+from . import measured_neural_batch_binding as measured_source
 from scripts.qualify_maze_conditioned_minilm_cpu import (
     PREREG_ARMS, TrainingCycle, build_training_cycles,
     optimizer_learning_rate, preregistered_randomized_labels,
@@ -41,6 +46,33 @@ from scripts import qualify_maze_conditioned_minilm_cpu as maze_runner
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}\Z", re.ASCII)
 _SHA = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _DOMAIN = b"labyrinth.minilm-maze-optimizer-resume.v1\0"
+
+
+def _frozen_generated_shape(value: Any) -> Any:
+    """Compare a regenerated Maze across Python -m module identities.
+
+    `python -m scripts.qualify_maze_conditioned_minilm_cpu` instantiates its
+    frozen TrainingCycle/TrainingExample records in `__main__`, while this
+    module imports the same implementation under its canonical module name.
+    Dataclass equality rejects those otherwise identical records. We compare
+    the *complete frozen schema and primitive types* to a newly generated
+    canonical Maze instead; arbitrary duck-typed objects, extra fields,
+    bool-for-int substitutions, reordered rooms or altered gold all fail.
+    """
+    if type(value) is tuple:
+        return ("tuple", tuple(_frozen_generated_shape(item) for item in value))
+    if is_dataclass(value) and not isinstance(value, type):
+        params = getattr(type(value), "__dataclass_params__", None)
+        if params is None or not params.frozen:
+            raise ValueError("regenerated Maze record must be immutable")
+        return (
+            "frozen-record", type(value).__name__,
+            tuple((item.name, _frozen_generated_shape(getattr(value, item.name)))
+                  for item in fields(value)),
+        )
+    if type(value) in (str, int, bool, float, type(None)):
+        return (type(value).__name__, value)
+    raise ValueError("unsupported regenerated Maze record type")
 
 
 def _expected_adamw_group_options(plan: "MazeOptimizerResumePlan") -> dict[str, Any]:
@@ -91,12 +123,22 @@ class MazeOptimizerResumePlan:
     base_checkpoint_sha256: str
     prior_checkpoint_sha256: str
     fence: int
+    # Optional signed-development schedule for regenerated cycle one. The
+    # second digest is an explicit caller-provided precommit, not a proof of
+    # independent host custody. Default contexts remain on the original
+    # generated Maze exposure schedule.
+    measured_cycle_one: BoundMeasuredNeuralBatches | None = None
+    measured_schedule_sha256: str | None = None
+    measured_candidate_artifact_sha256: str | None = None
 
     def validate(self) -> None:
         validate_scope(self.scope)
-        if (type(self.weak_cycle_one) is not tuple
-                or self.cycles != build_training_cycles(
-                    self.scope, weak_cycle_one=self.weak_cycle_one)):
+        if type(self.weak_cycle_one) is not tuple:
+            raise ValueError("resume plan requires tuple of regenerated weaknesses")
+        canonical_cycles = build_training_cycles(
+            self.scope, weak_cycle_one=self.weak_cycle_one)
+        if (_frozen_generated_shape(self.cycles)
+                != _frozen_generated_shape(canonical_cycles)):
             raise ValueError("resume plan does not match authentic regenerated Maze")
         if type(self.arm) is not str or self.arm not in PREREG_ARMS:
             raise ValueError("unsupported neural control arm")
@@ -116,6 +158,31 @@ class MazeOptimizerResumePlan:
             raise ValueError("pinned base and learner predecessor digests required")
         if type(self.fence) is not int or not 0 <= self.fence < 2**63 - 1:
             raise ValueError("bounded external fence required")
+        if self.measured_cycle_one is None:
+            if (self.measured_schedule_sha256 is not None
+                    or self.measured_candidate_artifact_sha256 is not None):
+                raise ValueError("measured candidate/schedule pin supplied without signed schedule")
+        else:
+            if (type(self.measured_cycle_one) is not BoundMeasuredNeuralBatches
+                    or type(self.measured_schedule_sha256) is not str
+                    or _SHA.fullmatch(self.measured_schedule_sha256) is None
+                    or type(self.measured_candidate_artifact_sha256) is not str
+                    or _SHA.fullmatch(self.measured_candidate_artifact_sha256) is None):
+                raise ValueError("typed measured schedule and independent pins required")
+            schedule = self.measured_cycle_one
+            if (schedule.steps_per_cycle != self.steps_per_cycle
+                    or schedule.weak_skill not in self.weak_cycle_one):
+                raise ValueError("signed weakness or step count differs from Maze plan")
+            verify_precommitted_neural_batch_schedule(
+                schedule, training_cycles=self.cycles,
+                expected_schedule_sha256=self.measured_schedule_sha256,
+                expected_run_id=self.logical_run_id,
+                expected_candidate_artifact_sha256=(
+                    self.measured_candidate_artifact_sha256),
+                expected_predecessor_checkpoint_sha256=self.prior_checkpoint_sha256,
+                expected_scope_fingerprint=self.scope.fingerprint,
+                expected_fence=self.fence,
+            )
 
     def _spec(self) -> dict[str, Any]:
         # Bind the two executable source files that interpret this schedule.
@@ -123,7 +190,7 @@ class MazeOptimizerResumePlan:
         # persisted optimizer identity using old source-level semantics.
         trainer_sha = sha256(Path(maze_runner.__file__).read_bytes()).hexdigest()
         adapter_sha = sha256(Path(__file__).read_bytes()).hexdigest()
-        return {
+        specification = {
             "scope_fingerprint": self.scope.fingerprint,
             "objective_id": self.scope.objective_id,
             "weak_cycle_one": list(self.weak_cycle_one),
@@ -132,6 +199,20 @@ class MazeOptimizerResumePlan:
             "trainer_source_sha256": trainer_sha,
             "resume_source_sha256": adapter_sha,
         }
+        if self.measured_cycle_one is not None:
+            # Schedule hash covers source exam/event, candidate artifact,
+            # four-key lineage, exact regenerated TRAIN roster and visit order.
+            # Commit those identities into every saved checkpoint context.
+            specification.update({
+                "measured_cycle_one_schedule_sha256": self.measured_schedule_sha256,
+                "measured_candidate_artifact_sha256": (
+                    self.measured_candidate_artifact_sha256),
+                "measured_source_event_id": self.measured_cycle_one.source_event_id,
+                "measured_source_exam_id": self.measured_cycle_one.source_exam_id,
+                "measured_schedule_source_sha256": sha256(
+                    Path(measured_source.__file__).read_bytes()).hexdigest(),
+            })
+        return specification
 
     @property
     def plan_sha256(self) -> str:
@@ -162,7 +243,11 @@ class MazeOptimizerResumePlan:
             randomized = (preregistered_randomized_labels(cycle, self.scope.seed)
                           if self.arm == "randomized_labels" else None)
             for step in range(self.steps_per_cycle):
-                for offset, row in enumerate(select_training_batch(cycle, step)):
+                batch = (self.measured_cycle_one.batch_for_arm(self.arm, step)
+                         if self.measured_cycle_one is not None
+                         and cycle.plan.cycle_index == 1
+                         else select_training_batch(cycle, step))
+                for offset, row in enumerate(batch):
                     assigned = (randomized[row.exposure_id] if randomized is not None
                                 else row.label ^ int(self.arm == "inverted"))
                     label_hash = sha256(_DOMAIN + _canonical({
