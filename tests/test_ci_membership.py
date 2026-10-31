@@ -311,10 +311,19 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "labyrinth/rezon_receipt_binding_r69.py",
             "labyrinth/schedule_pin_boundary_w2.py",
             "labyrinth/graduation_state_external_custody_w4.py",
+            "labyrinth/q7_temporal_custody_source.py",
+            "labyrinth/q8_host_authority_probe.py",
+            "scripts/experiments/q5_multiseed_campaign.py",
+            "docs/qualification/REZON_RECEIPT_BINDING_R69.md",
+            "docs/qualification/Q7_TEMPORAL_CUSTODY_SOURCE.md",
+            "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md",
             "tests/test_private_wheel_cli_checkpoint_r70.py",
             "tests/test_rezon_receipt_binding_r69.py",
             "tests/test_schedule_pin_boundary_w2.py",
             "tests/test_graduation_state_external_custody_w4.py",
+            "tests/test_q5_multiseed_campaign.py",
+            "tests/test_q7_temporal_custody_source.py",
+            "tests/test_q8_host_authority_probe.py",
         )
         for trigger, manifest in path_groups.items():
             for path in paths:
@@ -326,6 +335,9 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             ("tests.test_rezon_receipt_binding_r69", 5),
             ("tests.test_schedule_pin_boundary_w2", 6),
             ("tests.test_graduation_state_external_custody_w4", 9),
+            ("tests.test_q5_multiseed_campaign", 9),
+            ("tests.test_q7_temporal_custody_source", 8),
+            ("tests.test_q8_host_authority_probe", 14),
         ):
             with self.subTest(module=module):
                 self.assertIn(f'("{module}", {minimum})', workflow)
