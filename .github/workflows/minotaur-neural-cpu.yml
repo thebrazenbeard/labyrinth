@@ -68,6 +68,7 @@ on:
       - "labyrinth/evidence_pointer.py"
       - "labyrinth/rezon_pointer_mapping_r57.py"
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
+      - "labyrinth/rezon_toy_pair_consumer_r76.py"
       - "labyrinth/final_exam_precommit.py"
       - "labyrinth/q5_evaluation_preregistration_r68.py"
       - "labyrinth/q5_signed_data_witness_r72.py"
@@ -96,6 +97,7 @@ on:
       - "tests/test_retention_transfer_cohort_r68.py"
       - "tests/test_rezon_pointer_mapping_r57.py"
       - "tests/test_rezon_two_adapter_source_partition_r68.py"
+      - "tests/test_rezon_toy_pair_consumer_r76.py"
       - "tests/test_q5_evaluation_preregistration_r68.py"
       - "tests/test_q5_signed_data_witness_r72.py"
       - "tests/test_q7_precommit_summary_immutability_r68.py"
@@ -252,6 +254,7 @@ on:
       - "labyrinth/evidence_pointer.py"
       - "labyrinth/rezon_pointer_mapping_r57.py"
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
+      - "labyrinth/rezon_toy_pair_consumer_r76.py"
       - "labyrinth/final_exam_precommit.py"
       - "labyrinth/q5_evaluation_preregistration_r68.py"
       - "labyrinth/q5_signed_data_witness_r72.py"
@@ -280,6 +283,7 @@ on:
       - "tests/test_retention_transfer_cohort_r68.py"
       - "tests/test_rezon_pointer_mapping_r57.py"
       - "tests/test_rezon_two_adapter_source_partition_r68.py"
+      - "tests/test_rezon_toy_pair_consumer_r76.py"
       - "tests/test_q5_evaluation_preregistration_r68.py"
       - "tests/test_q5_signed_data_witness_r72.py"
       - "tests/test_q7_precommit_summary_immutability_r68.py"
@@ -507,6 +511,10 @@ jobs:
               # exact source bytes, NOT independent signer custody, chronology,
               # durable event consumption, learning or graduation.
               ("tests.test_q5_signed_data_witness_r72", 9),
+              # R76 local two-toy Rezon consumer binds distinct live toy
+              # parameter digests to source partitions. NOT distributed
+              # inference, model identity/permissions, or graduation.
+              ("tests.test_rezon_toy_pair_consumer_r76", 9),
               ("tests.test_retention_transfer_cohort_r68", 8),
               ("tests.test_q7_precommit_summary_immutability_r68", 2),
               ("tests.test_q8_external_acceptance_source_r68", 9),

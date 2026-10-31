@@ -374,6 +374,27 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('or result.skipped', workflow)
         self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
 
+    def test_r76_two_live_toy_rezon_consumer_has_no_skip_cpu_gate_on_both_triggers(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        path_groups = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for trigger, event_paths in path_groups.items():
+            for path in (
+                "labyrinth/rezon_toy_pair_consumer_r76.py",
+                "tests/test_rezon_toy_pair_consumer_r76.py",
+            ):
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertIn(f'      - "{path}"', event_paths)
+        self.assertIn('("tests.test_rezon_toy_pair_consumer_r76", 9)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+        self.assertIn('R76 local two-toy Rezon consumer', workflow)
+
     def test_r60_private_wheel_contract_is_required_by_both_cpu_ci_triggers(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
