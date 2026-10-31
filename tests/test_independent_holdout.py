@@ -5,10 +5,12 @@ All model responses are synthetic. No test here attests neural execution.
 
 from dataclasses import replace
 import hashlib
+import hmac
+import json
 import unittest
 
 from labyrinth.independent_holdout import (
-    ArmRun, ExamCase, TrainingExposure, case_commitment, private_gold_seal,
+    ArmRun, ExamCase, InferenceClaim, TrainingExposure, case_commitment, private_gold_seal,
     evaluate_holdout,
 )
 
@@ -74,6 +76,66 @@ class IndependentHoldoutTests(unittest.TestCase):
         self.assertEqual(result.candidate_accuracy, 1.0)
         self.assertEqual(result.retention_drop, 0.0)
         self.assertTrue(all(p <= .05 for p in result.paired_p_values.values()))
+
+    def test_private_final_split_cannot_impersonate_heldout_in_direct_evaluator(self):
+        class ForgedHeldout(str):
+            def __eq__(self, other):
+                return other == "heldout"
+
+            def __hash__(self):
+                return hash("heldout")
+
+        cases, exposure, arms, before = _fixture()
+        for case in cases:
+            if case.split == "heldout":
+                object.__setattr__(case, "split", ForgedHeldout("private_final"))
+        # Build the two commitments from raw bytes, without invoking the
+        # prevalidating helpers; the target must be evaluate_holdout itself.
+        public = [(case.case_id, str(case.split), case.skill,
+                   hashlib.sha256(case.prompt.encode()).hexdigest(), case.structure_key)
+                  for case in sorted(cases, key=lambda case: case.case_id)]
+        commitment = hashlib.sha256(
+            b"labyrinth.evaluator-public-manifest.v1\0" +
+            json.dumps(public, ensure_ascii=False, separators=(",", ":")).encode()
+        ).hexdigest()
+        private = [(case.case_id, case.answer)
+                   for case in sorted(cases, key=lambda case: case.case_id)]
+        gold_seal = hmac.new(
+            EXAMINER_KEY,
+            b"labyrinth.evaluator-gold.v1\0" +
+            json.dumps(private, separators=(",", ":")).encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        with self.assertRaisesRegex(ValueError, "split"):
+            evaluate_holdout(cases, commitment, exposure, arms, before,
+                             examiner_gold_seal=gold_seal,
+                             examiner_key=EXAMINER_KEY)
+
+    def test_private_final_arm_cannot_impersonate_baseline(self):
+        class ForgedBaseline(str):
+            def __eq__(self, other):
+                return other == "baseline"
+
+            def __hash__(self):
+                return hash("baseline")
+
+        cases, exposure, arms, before = _fixture()
+        object.__setattr__(arms[0], "name", ForgedBaseline("private_final"))
+        with self.assertRaisesRegex(ValueError, "arm"):
+            _evaluate(cases=cases, exposure=exposure, arms=arms, before=before)
+
+    def test_private_final_inference_arm_cannot_impersonate_baseline(self):
+        class ForgedBaseline(str):
+            def __eq__(self, other):
+                return other == "baseline"
+
+            def __hash__(self):
+                return hash("baseline")
+
+        claim = InferenceClaim(ForgedBaseline("private_final"), "pid-1",
+                               "a" * 64, "b" * 64, "c" * 64)
+        with self.assertRaisesRegex(ValueError, "arm"):
+            claim.validate()
 
     def test_public_prompt_manifest_mutation_is_rejected(self):
         cases, exposure, arms, before = _fixture()

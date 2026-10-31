@@ -54,7 +54,7 @@ class ExamCaseResult:
     def __post_init__(self) -> None:
         _identifier(self.case_id, "case_id")
         _identifier(self.skill, "skill")
-        if self.split not in _REQUIRED_SLICES:
+        if type(self.split) is not str or self.split not in _REQUIRED_SLICES:
             raise ValueError("Minotaur exam accepts heldout and transfer only")
         _score(self.score, "score")
         _score(self.baseline_score, "baseline_score")
@@ -82,7 +82,7 @@ class MinotaurExamReceipt:
     def __post_init__(self) -> None:
         for label in ("exam_id", "objective_id", "evaluator_id"):
             _identifier(getattr(self, label), label)
-        if self.exam_kind != "development":
+        if type(self.exam_kind) is not str or self.exam_kind != "development":
             raise ValueError("private final exams must use the separate signed graduation gate")
         if type(self.cycle_index) is not int or self.cycle_index < 0:
             raise ValueError("cycle_index must be nonnegative integer")

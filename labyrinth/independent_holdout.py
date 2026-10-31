@@ -67,7 +67,7 @@ class ExamCase:
         _identifier(self.case_id, "case ID")
         _identifier(self.skill, "skill")
         _identifier(self.structure_key, "structure key")
-        if self.split not in _SPLITS:
+        if type(self.split) is not str or self.split not in _SPLITS:
             raise ValueError("unknown evaluator split")
         if type(self.prompt) is not str or not 1 <= len(self.prompt) <= 8192:
             raise ValueError("invalid private exam prompt")
@@ -119,7 +119,7 @@ class ArmRun:
     responses: tuple[tuple[str, str], ...]
 
     def validate(self) -> None:
-        if self.name not in _ARMS:
+        if type(self.name) is not str or self.name not in _ARMS:
             raise ValueError("unknown evaluation arm")
         for field in ("base_sha256", "initial_adapter_sha256", "final_adapter_sha256"):
             _digest(getattr(self, field), field)
@@ -171,7 +171,7 @@ class InferenceClaim:
     inference_report_sha256: str
 
     def validate(self) -> None:
-        if self.arm_name not in _ARMS:
+        if type(self.arm_name) is not str or self.arm_name not in _ARMS:
             raise ValueError("unknown inference claim arm")
         _identifier(self.process_id, "fresh process claim")
         for field in ("adapter_sha256", "predictions_sha256", "inference_report_sha256"):

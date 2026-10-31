@@ -144,6 +144,34 @@ class MinotaurExamTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluate_minotaur(make_scope(), receipt)
 
+    def test_mutated_private_final_case_cannot_impersonate_heldout(self):
+        class ForgedHeldout(str):
+            def __eq__(self, other):
+                return other == "heldout"
+
+            def __hash__(self):
+                return hash("heldout")
+
+        receipt = make_receipt()
+        for case in receipt.cases:
+            if case.split == "heldout":
+                object.__setattr__(case, "split", ForgedHeldout("private_final"))
+        with self.assertRaises(ValueError):
+            evaluate_minotaur(make_scope(), receipt)
+
+    def test_mutated_private_final_exam_kind_cannot_impersonate_development(self):
+        class ForgedDevelopment(str):
+            def __eq__(self, other):
+                return other == "development"
+
+            def __ne__(self, other):
+                return not self.__eq__(other)
+
+        receipt = make_receipt()
+        object.__setattr__(receipt, "exam_kind", ForgedDevelopment("private_final"))
+        with self.assertRaises(ValueError):
+            evaluate_minotaur(make_scope(), receipt)
+
     def test_cycle_must_fit_predeclared_limit(self):
         with self.assertRaises(ValueError):
             evaluate_minotaur(make_scope(), make_receipt(cycle_index=make_scope().max_cycles))

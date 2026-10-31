@@ -64,6 +64,21 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
                       workflow)
         self.assertIn('or result.skipped', workflow)
 
+    def test_direct_evaluator_rejects_forged_private_final_in_required_cpu_suite(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        for event_paths in (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        ):
+            self.assertIn('"labyrinth/minotaur_*.py"', event_paths)
+            self.assertIn('"tests/test_minotaur_*.py"', event_paths)
+            self.assertIn('"labyrinth/independent_holdout.py"', event_paths)
+            self.assertIn('"tests/test_independent_holdout.py"', event_paths)
+        self.assertIn('("tests.test_minotaur_exam", 16)', workflow)
+        self.assertIn('("tests.test_independent_holdout", 18)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
     def test_r36_toy_evidence_is_required_and_archived_as_non_authorizing_artifact(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()

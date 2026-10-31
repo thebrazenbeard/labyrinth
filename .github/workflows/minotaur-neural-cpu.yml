@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "labyrinth/minotaur_*.py"
+      - "labyrinth/independent_holdout.py"
       - "labyrinth/signed_minotaur_pair_r25.py"
       - "labyrinth/toy_backend.py"
       - "labyrinth/runner.py"
@@ -70,6 +71,7 @@ on:
       - "scripts/qualify_v2_checkpoint_cpu_r22.py"
       - "scripts/qualify_toy_cpu_evidence_r36.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_independent_holdout.py"
       - "tests/test_signed_minotaur_pair_r25.py"
       - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
       - "tests/test_v2_checkpoint_cpu_smoke_r22.py"
@@ -149,6 +151,7 @@ on:
     branches: [main]
     paths:
       - "labyrinth/minotaur_*.py"
+      - "labyrinth/independent_holdout.py"
       - "labyrinth/signed_minotaur_pair_r25.py"
       - "labyrinth/toy_backend.py"
       - "labyrinth/runner.py"
@@ -215,6 +218,7 @@ on:
       - "scripts/qualify_v2_checkpoint_cpu_r22.py"
       - "scripts/qualify_toy_cpu_evidence_r36.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_independent_holdout.py"
       - "tests/test_signed_minotaur_pair_r25.py"
       - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
       - "tests/test_v2_checkpoint_cpu_smoke_r22.py"
@@ -414,6 +418,8 @@ jobs:
               ("tests.test_minotaur_exam_intake_guard_r36", 10),
               ("tests.test_r40_face_minotaur_primitive_boundary", 6),
               ("tests.test_r42_complete_maze_primitive_boundary", 5),
+              ("tests.test_minotaur_exam", 16),
+              ("tests.test_independent_holdout", 18),
               ("tests.test_fullstate_physical_gate_r8", 1),
               ("tests.test_optimizer_runner_v2_r19", 7),
               ("tests.test_checkpoint_manifest_v2_r19", 6),
