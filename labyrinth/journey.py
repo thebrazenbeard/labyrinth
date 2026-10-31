@@ -178,9 +178,65 @@ def _validate_state(state: JourneyState) -> None:
         raise ValueError("active maze must follow the previous completed attempts")
     if state.phase == AWAITING_EXAM and len(state.attempts) != state.cycle_index:
         raise ValueError("exam must follow the previous completed attempts")
+    if state.phase == AWAITING_EXAM:
+        # A copied frozen state can carry plausible but fabricated pending
+        # claims. They must be the exact TRAIN evidence just appended by the
+        # completed maze, with the predecessor linked to the prior checkpoint.
+        # This is source-level consistency, not independently signed custody.
+        case_count = len(state.pending_training_case_ids)
+        if case_count != len(state.maze.rooms):
+            raise ValueError("pending training room count does not match canonical maze")
+        if state.used_training_case_ids[-case_count:] != state.pending_training_case_ids:
+            raise ValueError("pending training case history does not match completed maze")
+        if (state.used_training_prompt_sha256[-case_count:]
+                != state.pending_training_prompt_sha256):
+            raise ValueError("pending training prompt history does not match completed maze")
+        predecessor = (state.attempts[-1].checkpoint_after_sha256 if state.attempts
+                       else state.baseline_checkpoint_sha256)
+        if state.pending_checkpoint_before_sha256 != predecessor:
+            raise ValueError("pending checkpoint predecessor does not match prior cycle")
     if (state.phase in (DEVELOPMENT_PASSED_PENDING_PRIVATE_QUALIFICATION, EXHAUSTED)
             and len(state.attempts) != state.cycle_index + 1):
         raise ValueError("finished journey requires terminal attempt")
+    # No phase may erase completed TRAIN exposure from the accumulated audit
+    # trail. The current cycle joins that trail only after complete_maze() and
+    # is pending until Minotaur makes a terminal decision for the cycle.
+    completed_case_ids = tuple(
+        case_id for attempt in state.attempts for case_id in attempt.training_case_ids
+    )
+    completed_prompts = tuple(
+        prompt for attempt in state.attempts for prompt in attempt.training_prompt_sha256
+    )
+    pending_cases = state.pending_training_case_ids if state.phase == AWAITING_EXAM else ()
+    pending_prompts = state.pending_training_prompt_sha256 if state.phase == AWAITING_EXAM else ()
+    if (state.used_training_case_ids != completed_case_ids + pending_cases
+            or state.used_training_prompt_sha256 != completed_prompts + pending_prompts):
+        raise ValueError("accumulated training history does not match recorded maze cycles")
+    # Each completed attempt must represent the full deterministic maze at its
+    # cycle, and the checkpoint chain must not silently fork or replay. These
+    # are in-process source consistency checks, not attestations of real
+    # checkpoint bytes, trusted exam results or host anti-rollback authority.
+    preceding_checkpoint = state.baseline_checkpoint_sha256
+    for index, attempt in enumerate(state.attempts):
+        prior_weak_skills = (() if index == 0
+                             else state.attempts[index - 1].weak_skills)
+        completed_maze = generate_maze_plan(
+            state.scope, index, weak_skills=prior_weak_skills,
+        )
+        expected_count = len(completed_maze.rooms)
+        if (len(attempt.training_case_ids) != expected_count
+                or len(attempt.training_prompt_sha256) != expected_count):
+            raise ValueError("completed maze room count differs from recorded TRAIN evidence")
+        if attempt.checkpoint_before_sha256 != preceding_checkpoint:
+            raise ValueError("completed checkpoint predecessor differs from journey ancestry")
+        if attempt.checkpoint_after_sha256 == preceding_checkpoint:
+            raise ValueError("completed checkpoint did not change from its predecessor")
+        preceding_checkpoint = attempt.checkpoint_after_sha256
+    if state.phase == AWAITING_EXAM:
+        if state.checkpoint_sha256 == state.pending_checkpoint_before_sha256:
+            raise ValueError("unchanged pending training checkpoint cannot enter exam")
+    elif state.checkpoint_sha256 != preceding_checkpoint:
+        raise ValueError("current checkpoint ancestry contradicts the last completed cycle")
     if any(attempt.exam_status != "FAIL" for attempt in state.attempts[:state.cycle_index]):
         raise ValueError("every prior cycle must have a failed development exam")
     if (state.phase == DEVELOPMENT_PASSED_PENDING_PRIVATE_QUALIFICATION

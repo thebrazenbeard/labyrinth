@@ -145,6 +145,45 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('("tests.test_five_arm_experiment_contract", 39)', workflow)
         self.assertIn('or result.skipped', workflow)
 
+    def test_five_arm_statistical_screen_is_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/five_arm_statistical_screen.py"', event_paths)
+            self.assertIn('"tests/test_five_arm_statistical_screen.py"', event_paths)
+        self.assertIn('("tests.test_five_arm_statistical_screen", 8)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_source_only_evidence_pointer_is_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/evidence_pointer.py"', event_paths)
+            self.assertIn('"tests/test_evidence_pointer.py"', event_paths)
+        self.assertIn('("tests.test_evidence_pointer", 8)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_r51_journey_history_integrity_is_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/journey.py"', event_paths)
+            self.assertIn('"tests/test_r51_pending_history_integrity.py"', event_paths)
+        self.assertIn('("tests.test_r51_pending_history_integrity", 17)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
     def test_graduation_auth_dependency_is_pinned_in_both_workflows(self):
         root = Path(__file__).resolve().parents[1]
         generic = (root / ".github/workflows/ci.yml").read_text()

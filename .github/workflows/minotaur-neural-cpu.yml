@@ -56,6 +56,8 @@ on:
       - "labyrinth/external_monotonic_authority_contract.py"
       - "labyrinth/measured_neural_batch_binding.py"
       - "labyrinth/five_arm_experiment_contract.py"
+      - "labyrinth/five_arm_statistical_screen.py"
+      - "labyrinth/evidence_pointer.py"
       - "labyrinth/train_exposure_attestation.py"
       - "labyrinth/maze_crash_resume_journal.py"
       - "labyrinth/pinned_model_inference_receipt.py"
@@ -133,6 +135,9 @@ on:
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
       - "tests/test_qualify_maze_prereg_controls_cpu.py"
       - "tests/test_five_arm_experiment_contract.py"
+      - "tests/test_five_arm_statistical_screen.py"
+      - "tests/test_r51_pending_history_integrity.py"
+      - "tests/test_evidence_pointer.py"
       - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
       - "tests/test_qualify_neural_journey_e2e_cpu.py"
       - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
@@ -204,6 +209,8 @@ on:
       - "labyrinth/external_monotonic_authority_contract.py"
       - "labyrinth/measured_neural_batch_binding.py"
       - "labyrinth/five_arm_experiment_contract.py"
+      - "labyrinth/five_arm_statistical_screen.py"
+      - "labyrinth/evidence_pointer.py"
       - "labyrinth/train_exposure_attestation.py"
       - "labyrinth/maze_crash_resume_journal.py"
       - "labyrinth/pinned_model_inference_receipt.py"
@@ -281,6 +288,9 @@ on:
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
       - "tests/test_qualify_maze_prereg_controls_cpu.py"
       - "tests/test_five_arm_experiment_contract.py"
+      - "tests/test_five_arm_statistical_screen.py"
+      - "tests/test_r51_pending_history_integrity.py"
+      - "tests/test_evidence_pointer.py"
       - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
       - "tests/test_qualify_neural_journey_e2e_cpu.py"
       - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
@@ -413,6 +423,9 @@ jobs:
               ("tests.test_qualify_maze_multiseed_protocol_cpu", 21),
               ("tests.test_qualify_maze_prereg_controls_cpu", 5),
               ("tests.test_five_arm_experiment_contract", 39),
+              ("tests.test_five_arm_statistical_screen", 8),
+              ("tests.test_r51_pending_history_integrity", 17),
+              ("tests.test_evidence_pointer", 8),
               ("tests.test_signed_minotaur_pair_r25", 10),
               ("tests.test_qualify_v2_weight_updates_cpu_r25", 18),
               ("tests.test_v2_checkpoint_cpu_smoke_r22", 5),
