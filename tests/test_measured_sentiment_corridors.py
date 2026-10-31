@@ -38,11 +38,14 @@ def synthetic_feedback(scope, *, tactic="practice", weak="negative_polarity"):
         exam_id="synthetic-development-exam", event_id="synthetic-development-event",
         from_cycle=0, to_cycle=1, roster_sha256="a" * 64,
     )
+    weak_scores = {"practice": (0, 1), "contrast": (0, 0),
+                   "transfer": (1, 0)}
+    heldout_weak, transfer_weak = weak_scores[tactic]
     obs = tuple(SkillDevelopmentObservation(
-        skill=skill, heldout_correct=0 if skill == weak else 2,
-        heldout_total=2, heldout_errors=2 if skill == weak else 0,
-        transfer_correct=0 if skill == weak else 2,
-        transfer_total=2, transfer_errors=2 if skill == weak else 0,
+        skill=skill, heldout_correct=heldout_weak if skill == weak else 2,
+        heldout_total=2, heldout_errors=2 - heldout_weak if skill == weak else 0,
+        transfer_correct=transfer_weak if skill == weak else 2,
+        transfer_total=2, transfer_errors=2 - transfer_weak if skill == weak else 0,
         uncertain=skill == weak, weak=skill == weak,
         suggested_train_tactic=tactic if skill == weak else None,
     ) for skill in SKILLS)
@@ -143,6 +146,87 @@ class MeasuredSentimentCorridorTests(unittest.TestCase):
         wrong_scope = replace(self.scope, seed=self.scope.seed + 1)
         with self.assertRaises(ValueError):
             plan_measured_sentiment_corridor(wrong_scope, feedback)
+
+    def test_approved_tactic_must_derive_from_scored_development_rates(self):
+        # The aggregate counts are equal (0/2 for both splits), so contrast
+        # is the only tactic derivable from this synthetic signed projection.
+        legitimate = synthetic_feedback(self.scope, tactic="contrast")
+        forged = replace(legitimate, observations=tuple(
+            replace(row, suggested_train_tactic="practice") if row.weak else row
+            for row in legitimate.observations
+        ))
+        with self.assertRaisesRegex(ValueError, "tactic.*score|score.*tactic"):
+            plan_measured_sentiment_corridor(self.scope, forged)
+
+        class ForgedCount(int):
+            def __lt__(self, other):
+                return False
+
+            def __gt__(self, other):
+                return False
+
+        for changes in (
+            {"heldout_correct": ForgedCount(0)},
+            {"heldout_correct": True},
+            {"heldout_total": 0},
+            {"heldout_errors": 1},
+            {"transfer_correct": 3},
+        ):
+            with self.subTest(changes=changes), self.assertRaisesRegex(
+                ValueError, "scored development aggregate"
+            ):
+                tampered = replace(legitimate, observations=tuple(
+                    replace(row, **changes) if row.weak else row
+                    for row in legitimate.observations
+                ))
+                plan_measured_sentiment_corridor(self.scope, tampered)
+
+    def test_subclassed_skill_exam_event_and_cycle_cannot_redirect_train(self):
+        baseline = synthetic_feedback(self.scope, tactic="contrast")
+
+        class GhostStr(str):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class GhostInt(int):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        for spoofed in (
+            replace(baseline, observations=tuple(
+                replace(o, skill=GhostStr("private_final")) if o.weak else o
+                for o in baseline.observations)),
+            replace(baseline, exam_id=GhostStr("private-exam")),
+            replace(baseline, event_id=GhostStr("private-event")),
+            replace(baseline, from_cycle=GhostInt(999)),
+            replace(baseline, to_cycle=GhostInt(999)),
+            replace(baseline, remediation=replace(
+                baseline.remediation, exam_id=GhostStr("private-exam"))),
+            replace(baseline, remediation=replace(
+                baseline.remediation, from_cycle=GhostInt(999))),
+        ):
+            with self.subTest(spoofed=spoofed), self.assertRaises(ValueError):
+                plan_measured_sentiment_corridor(self.scope, spoofed)
+
+    def test_forged_maze_equality_cannot_launder_foreign_plan(self):
+        class FakeMaze:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        feedback = synthetic_feedback(self.scope, tactic="contrast")
+        forged = replace(feedback, remediation=replace(
+            feedback.remediation, maze=FakeMaze()))
+        with self.assertRaisesRegex(ValueError, "Maze|measured"):
+            plan_measured_sentiment_corridor(self.scope, forged)
 
     def test_insufficient_steps_fail_closed_instead_of_omitting_cases(self):
         with self.assertRaisesRegex(ValueError, "every TRAIN case"):

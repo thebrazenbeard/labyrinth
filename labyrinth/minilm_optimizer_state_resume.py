@@ -30,6 +30,7 @@ from .neural_resume_checkpoint import (
     _safe_snapshot_dir, _strict_json, _trainable_and_groups,
     load_full_checkpoint, save_full_checkpoint,
 )
+from . import neural_resume_checkpoint as checkpoint_source
 from .training_scope import TrainingScopeSpec
 from .measured_neural_batch_binding import (
     BoundMeasuredNeuralBatches, verify_precommitted_neural_batch_schedule,
@@ -185,11 +186,12 @@ class MazeOptimizerResumePlan:
             )
 
     def _spec(self) -> dict[str, Any]:
-        # Bind the two executable source files that interpret this schedule.
-        # A changed trainer or resume adapter cannot silently claim the same
-        # persisted optimizer identity using old source-level semantics.
+        # Bind the trainer, Maze resume adapter, and delegated checkpoint
+        # serializer/loader. Changes to full-state optimizer/RNG encoding or
+        # restore validation must change the persisted run identity too.
         trainer_sha = sha256(Path(maze_runner.__file__).read_bytes()).hexdigest()
         adapter_sha = sha256(Path(__file__).read_bytes()).hexdigest()
+        checkpoint_sha = sha256(Path(checkpoint_source.__file__).read_bytes()).hexdigest()
         specification = {
             "scope_fingerprint": self.scope.fingerprint,
             "objective_id": self.scope.objective_id,
@@ -198,6 +200,7 @@ class MazeOptimizerResumePlan:
             "learning_rate": float(self.learning_rate),
             "trainer_source_sha256": trainer_sha,
             "resume_source_sha256": adapter_sha,
+            "checkpoint_substrate_source_sha256": checkpoint_sha,
         }
         if self.measured_cycle_one is not None:
             # Schedule hash covers source exam/event, candidate artifact,

@@ -20,6 +20,7 @@ from labyrinth.minilm_optimizer_state_resume import (
     save_maze_optimizer_snapshot, _require_complete_adamw_state,
 )
 from labyrinth.neural_resume_checkpoint import FullCheckpointError, save_full_checkpoint
+from labyrinth import neural_resume_checkpoint as checkpoint_source
 from scripts.qualify_maze_conditioned_minilm_cpu import (
     PREREG_ARMS, build_training_cycles, default_scope,
 )
@@ -45,6 +46,18 @@ def plan(**changes) -> MazeOptimizerResumePlan:
 
 
 class MazeFullStateSourceTests(unittest.TestCase):
+    def test_checkpoint_substrate_source_change_invalidates_resume_plan_identity(self):
+        # The delegated serializer/loader interprets optimizer and RNG bytes.
+        # A change there must alter the persistent run identity, even if the
+        # visible Maze trainer and wrapper source remain byte-identical.
+        prior = plan().plan_sha256
+        with tempfile.TemporaryDirectory() as temp:
+            replacement = Path(temp) / "different_neural_resume_checkpoint.py"
+            replacement.write_bytes(Path(checkpoint_source.__file__).read_bytes()
+                                    + b"\n# changed checkpoint decoder contract\n")
+            with patch.object(checkpoint_source, "__file__", str(replacement)):
+                self.assertNotEqual(plan().plan_sha256, prior)
+
     def test_module_duplicate_cli_cycles_match_exact_frozen_schema_only(self):
         # `python -m scripts.qualify_maze_conditioned_minilm_cpu` creates
         # TrainingCycle in __main__, not the importable canonical module. The

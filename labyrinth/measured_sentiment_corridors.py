@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from .measured_weakness_feedback import MeasuredRemediation
 from .minotaur_development_feedback import (
-    MinotaurDevelopmentFeedback, SkillDevelopmentObservation,
+    MinotaurDevelopmentFeedback, SkillDevelopmentObservation, _tactic,
 )
 from .training_scope import TrainingScopeSpec
 from scripts.qualify_maze_conditioned_minilm_cpu import (
@@ -91,7 +91,15 @@ def plan_measured_sentiment_corridor(
             or feedback.matched_control_benefit_verified):
         raise ValueError("bounded in-process signed development feedback required")
     remediation = feedback.remediation
+    # Check primitive identities before comparisons; str/int subclasses can
+    # make private exams or unrelated Maze cycles compare equal to this run.
     if (type(remediation) is not MeasuredRemediation
+            or any(type(value) is not str for value in (
+                feedback.exam_id, feedback.event_id,
+                remediation.exam_id, remediation.event_id))
+            or any(type(value) is not int for value in (
+                feedback.from_cycle, feedback.to_cycle,
+                remediation.from_cycle, remediation.to_cycle))
             or feedback.exam_id != remediation.exam_id
             or feedback.event_id != remediation.event_id
             or feedback.from_cycle != remediation.from_cycle
@@ -107,24 +115,46 @@ def plan_measured_sentiment_corridor(
     if (type(feedback.observations) is not tuple
             or len(feedback.observations) != len(SKILLS)
             or any(type(obs) is not SkillDevelopmentObservation
+                   or type(obs.skill) is not str
                    for obs in feedback.observations)
             or tuple(obs.skill for obs in feedback.observations) != SKILLS):
         raise ValueError("per-polarity measured development scores required")
     weak = remediation.weak_skills[0]
     for observation in feedback.observations:
         expected_weak = observation.skill == weak
+        # This projection carries scored aggregates. An approved but
+        # independently substituted tactic must not silently route a
+        # different TRAIN batch; derive the choice from those same counts.
+        for prefix in ("heldout", "transfer"):
+            correct = getattr(observation, prefix + "_correct")
+            total = getattr(observation, prefix + "_total")
+            errors = getattr(observation, prefix + "_errors")
+            if (type(correct) is not int or type(total) is not int
+                    or type(errors) is not int or total < 1
+                    or not 0 <= correct <= total
+                    or errors != total - correct):
+                raise ValueError("invalid scored development aggregate")
+        expected_tactic = (_tactic(
+            observation.heldout_correct, observation.heldout_total,
+            observation.transfer_correct, observation.transfer_total,
+        ) if expected_weak else None)
         if (observation.weak is not expected_weak
                 or (observation.suggested_train_tactic is not None
                     and type(observation.suggested_train_tactic) is not str)
                 or (observation.suggested_train_tactic in APPROVED_TACTICS)
-                is not expected_weak):
-            raise ValueError("weakness/tactic projection is inconsistent")
+                is not expected_weak
+                or observation.suggested_train_tactic != expected_tactic):
+            raise ValueError("weakness tactic does not match scored development aggregate")
     tactic = next(obs.suggested_train_tactic for obs in feedback.observations
                   if obs.skill == weak)
     if type(tactic) is not str or tactic not in APPROVED_TACTICS:
         raise ValueError("unapproved polarity training tactic")
     cycle = build_training_cycles(scope, weak_cycle_one=(weak,))[1]
-    if (cycle.plan != remediation.maze
+    # Do not give an arbitrary object its __eq__/__ne__ say over the signed
+    # Maze identity. A proxy that always compares equal can launder a foreign
+    # private plan into the TRAIN corridor.
+    if (type(remediation.maze) is not type(cycle.plan)
+            or cycle.plan != remediation.maze
             or cycle.plan.scope_fingerprint != scope.fingerprint
             or cycle.plan.objective_id != scope.objective_id
             or cycle.plan.cycle_index != feedback.to_cycle):
