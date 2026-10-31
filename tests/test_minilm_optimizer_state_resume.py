@@ -116,14 +116,16 @@ class MazeFullStateSourceTests(unittest.TestCase):
             current.context(4), replace(current, prior_checkpoint_sha256="f"*64).context(4))
 
     def test_no_side_effects_if_optional_cpu_backend_missing(self):
-        if importlib.util.find_spec("torch") is not None:
-            self.skipTest("Torch is installed; optional physical suite exercises backend")
         with tempfile.TemporaryDirectory() as temp:
             destination = Path(temp) / "checkpoint"
-            with self.assertRaisesRegex(FullCheckpointError, "torch"):
-                save_maze_optimizer_snapshot(
-                    destination, encoder=object(), head=object(), optimizer=object(),
-                    plan=plan(), completed_steps=2)
+            # Exercise the missing-optional-backend path even on the pinned
+            # neural-CPU CI runner where Torch is installed. Otherwise this
+            # supposedly mandatory test skips and violates the no-skip gate.
+            with patch.dict("sys.modules", {"torch": None}):
+                with self.assertRaisesRegex(FullCheckpointError, "torch"):
+                    save_maze_optimizer_snapshot(
+                        destination, encoder=object(), head=object(), optimizer=object(),
+                        plan=plan(), completed_steps=2)
             self.assertFalse(destination.exists())
 
     def test_duplicate_saved_adamw_group_ids_rejected_without_torch(self):
