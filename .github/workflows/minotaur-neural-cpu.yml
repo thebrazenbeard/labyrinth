@@ -288,15 +288,17 @@ jobs:
           python-version: "3.12"
       - name: Install pinned CPU neural dependencies
         run: |
-          python -m pip install --disable-pip-version-check -e . "numpy==2.5.4" "safetensors==0.8.0"
+          python -m pip install --disable-pip-version-check -e . "numpy==2.5.4" "safetensors==0.8.0" "cryptography==50.0.2"
           python -m pip install --disable-pip-version-check --extra-index-url https://download.pytorch.org/whl/cpu "torch==2.5.1+cpu"
       - name: Require CPU PyTorch and pinned versions
         run: |
           python - <<'PY'
+          import cryptography
           import numpy
           import safetensors
           import torch
 
+          assert cryptography.__version__ == "50.0.2", cryptography.__version__
           assert numpy.__version__ == "2.5.4", numpy.__version__
           assert safetensors.__version__ == "0.8.0", safetensors.__version__
           assert torch.__version__ == "2.5.1+cpu", torch.__version__
