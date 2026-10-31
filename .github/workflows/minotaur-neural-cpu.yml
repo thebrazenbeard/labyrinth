@@ -108,6 +108,7 @@ on:
       - "tests/test_train_exposure_attestation.py"
       - "tests/test_maze_crash_resume_journal.py"
       - "tests/test_minilm_measured_batches_optin.py"
+      - "tests/test_signed_minotaur_tactic_neural_selection.py"
       - "tests/test_pinned_model_inference_receipt.py"
       - "tests/test_qualify_maze_measured_tactics_cpu.py"
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
@@ -235,6 +236,7 @@ on:
       - "tests/test_train_exposure_attestation.py"
       - "tests/test_maze_crash_resume_journal.py"
       - "tests/test_minilm_measured_batches_optin.py"
+      - "tests/test_signed_minotaur_tactic_neural_selection.py"
       - "tests/test_pinned_model_inference_receipt.py"
       - "tests/test_qualify_maze_measured_tactics_cpu.py"
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
@@ -362,6 +364,7 @@ jobs:
               ("tests.test_train_exposure_attestation", 10),
               ("tests.test_maze_crash_resume_journal", 13),
               ("tests.test_minilm_measured_batches_optin", 7),
+              ("tests.test_signed_minotaur_tactic_neural_selection", 2),
               ("tests.test_pinned_model_inference_receipt", 12),
               ("tests.test_qualify_maze_measured_tactics_cpu", 4),
               ("tests.test_qualify_maze_multiseed_protocol_cpu", 21),
