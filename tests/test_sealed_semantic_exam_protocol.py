@@ -216,6 +216,24 @@ class SealedSemanticProtocolTests(unittest.TestCase):
                 build_sealed_plan(**{**self.settings,
                                      "cases": (changed,) + self.cases[1:]})
 
+    def test_subclassed_training_split_cannot_impersonate_private_transfer(self):
+        class ForgedSplit(str):
+            def __eq__(self, other):
+                return other == "transfer"
+
+            def __ne__(self, other):
+                return not self.__eq__(other)
+
+            __hash__ = str.__hash__
+
+        contaminated = replace(self.cases[0], split=ForgedSplit("training"))
+        self.assertEqual(str(contaminated.split), "training")
+        with self.assertRaisesRegex(SealedExamError, "split"):
+            build_sealed_plan(**{
+                **self.settings,
+                "cases": (contaminated,) + self.cases[1:],
+            })
+
     def test_missing_arm_duplicate_job_and_posthoc_budget_rejected(self):
         complete = self.submissions()
         for rows in (

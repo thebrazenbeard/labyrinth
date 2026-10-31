@@ -21,8 +21,13 @@ class CurriculumSpec:
     distinct_challenges_required: int = 3
 
     def __post_init__(self) -> None:
-        if not self.levels or any(not isinstance(level, str) or not level for level in self.levels):
-            raise ValueError("levels must contain nonempty strings")
+        # A frozen dataclass does not freeze a caller-owned list or a string
+        # subclass with adversarial comparison/hash operations. Both can
+        # redirect subsequent curriculum stages after the plan was accepted.
+        if type(self.levels) is not tuple or not self.levels or any(
+            type(level) is not str or not level for level in self.levels
+        ):
+            raise ValueError("levels must be an immutable tuple of nonempty strings")
         if len(set(self.levels)) != len(self.levels):
             raise ValueError("levels must be unique")
         if type(self.window_size) is not int or self.window_size < 1:
@@ -31,7 +36,9 @@ class CurriculumSpec:
             1 <= self.distinct_challenges_required <= self.window_size
         ):
             raise ValueError("distinct_challenges_required must be within the window")
-        if isinstance(self.promotion_score, bool) or not isinstance(self.promotion_score, (int, float)) or not (
+        # Preserve the numeric comparison boundary: float/int subclasses can
+        # override comparisons and cause zero-score observations to promote.
+        if type(self.promotion_score) not in (int, float) or not (
             math.isfinite(self.promotion_score) and 0 <= self.promotion_score <= 1
         ):
             raise ValueError("promotion_score must be finite and between 0 and 1")
@@ -46,13 +53,18 @@ class TrainingObservation:
     split: str = "train"
 
     def __post_init__(self) -> None:
-        if not isinstance(self.challenge_id, str) or not self.challenge_id:
+        if type(self.challenge_id) is not str or not self.challenge_id:
             raise ValueError("challenge_id must be nonempty")
         if type(self.seed) is not int or self.seed < 0:
             raise ValueError("seed must be a nonnegative integer")
-        if not isinstance(self.level, str) or not self.level:
+        if type(self.level) is not str or not self.level:
             raise ValueError("level must be nonempty")
-        if isinstance(self.score, bool) or not isinstance(self.score, (int, float)) or not (
+        # Split membership governs the TRAIN/evaluation boundary. A str
+        # subclass can override equality to claim that a private-final
+        # observation is TRAIN, so accept only a primitive string here.
+        if type(self.split) is not str:
+            raise ValueError("split must be a plain string")
+        if type(self.score) not in (int, float) or not (
             math.isfinite(self.score) and 0 <= self.score <= 1
         ):
             raise ValueError("score must be finite and between 0 and 1")
@@ -159,7 +171,7 @@ def next_training_case(
     if (
         not ids
         or isinstance(ids, str)
-        or any(not isinstance(item, str) or not item for item in ids)
+        or any(type(item) is not str or not item for item in ids)
         or len(set(ids)) != len(ids)
         or len(ids) < spec.distinct_challenges_required
     ):

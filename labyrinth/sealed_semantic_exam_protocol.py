@@ -203,6 +203,11 @@ def _validate_bank(cases: tuple[SealedSituation, ...],
     for case in cases:
         _identifier(case.case_id, "private case")
         _identifier(case.semantic_key, "semantic key")
+        # Partition membership is an exam custody boundary. A str subclass
+        # can override equality/hash to impersonate a transfer or retention
+        # row while its serialized underlying value is actually TRAIN.
+        if type(case.split) is not str:
+            raise SealedExamError("private split must be an exact string")
         try:
             family = canonical_family_id(case.family_id)
         except ValueError as exc:
