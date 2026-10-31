@@ -1,11 +1,13 @@
 """Incompatible HF pilot receipts must never be relabelled as resume proof."""
 
 from copy import deepcopy
+from dataclasses import asdict, replace
 import unittest
 
 from labyrinth.checkpoint_schema_bridge import (
     classify_checkpoint_report, require_v3_adapter_preflight,
 )
+from labyrinth.hf_pilot import SCHEMA as EXPOSURE_SCHEMA
 
 
 SHA = "a" * 64
@@ -29,6 +31,57 @@ def _v3_report():
 
 
 class CheckpointSchemaBridgeTests(unittest.TestCase):
+    def test_current_exposure_schema_routes_only_to_strict_adapter_preflight(self):
+        report = _v3_report()
+        report["schema"] = EXPOSURE_SCHEMA
+        plan = classify_checkpoint_report(report)
+        self.assertEqual(plan.source_schema, EXPOSURE_SCHEMA)
+        self.assertEqual(plan.source_optimizer, "adamw")
+        self.assertEqual(plan.status, "V3_ADAPTER_PREFLIGHT_REQUIRED")
+        self.assertTrue(plan.may_call_v3_preflight)
+        self.assertFalse(plan.bytes_authenticated)
+        self.assertFalse(plan.optimizer_restart_supported)
+        self.assertFalse(plan.graduation_authorized)
+        self.assertEqual(require_v3_adapter_preflight(report), plan)
+        self.assertEqual(classify_checkpoint_report(report, continuity="mid_cycle").status,
+                         "MID_CYCLE_STATE_UNAVAILABLE")
+        self.assertEqual(classify_checkpoint_report(report, target_optimizer="mezo").status,
+                         "CROSS_OPTIMIZER_MIGRATION_REQUIRED")
+
+    def test_current_exposure_schema_cannot_disguise_mezo_v4_metadata(self):
+        for schema in ("labyrinth.hf-lora-pilot.v3", EXPOSURE_SCHEMA):
+            disguised = _v3_report()
+            disguised["schema"] = schema
+            disguised["config"].update(optimizer="mezo", zo_epsilon=0.001)
+            with self.subTest(schema=schema), self.assertRaisesRegex(ValueError, "AdamW.*MeZO"):
+                classify_checkpoint_report(disguised)
+
+    def test_classifier_cannot_forge_physical_optimizer_or_graduation_flags(self):
+        plan = classify_checkpoint_report(_v3_report())
+        for field in ("optimizer_restart_supported", "bytes_authenticated",
+                      "graduation_authorized"):
+            with self.subTest(field=field):
+                self.assertIs(getattr(plan, field), False)
+                with self.assertRaises(TypeError):
+                    replace(plan, **{field: True})
+                with self.assertRaises(TypeError):
+                    type(plan)(**{**asdict(plan), field: True})
+                with self.assertRaises(AttributeError):
+                    object.__setattr__(plan, field, True)
+                self.assertIs(getattr(plan, field), False)
+
+    def test_preflight_routing_hint_cannot_be_set_independently_of_plan_status(self):
+        plan = classify_checkpoint_report(_v3_report())
+        self.assertTrue(plan.may_call_v3_preflight)
+        with self.assertRaises(TypeError):
+            replace(plan, may_call_v3_preflight=False)
+        with self.assertRaises(TypeError):
+            type(plan)(**{**asdict(plan), "may_call_v3_preflight": False})
+        with self.assertRaises(AttributeError):
+            object.__setattr__(plan, "may_call_v3_preflight", False)
+        incompatible = replace(plan, status="CROSS_OPTIMIZER_MIGRATION_REQUIRED")
+        self.assertFalse(incompatible.may_call_v3_preflight)
+
     def test_v3_is_only_eligible_for_full_preflight_not_attested_resume(self):
         result = classify_checkpoint_report(_v3_report())
         self.assertEqual(result.status, "V3_ADAPTER_PREFLIGHT_REQUIRED")

@@ -7,7 +7,7 @@ import unittest
 
 from labyrinth.evaluation import score_response
 from labyrinth.hf_pilot import (
-    PilotConfig, SCHEMA, _arithmetic_semantic_commitments,
+    PilotConfig, PRE_EXPOSURE_SCHEMA, _arithmetic_semantic_commitments,
     _arithmetic_history_witnesses,
     _arithmetic_case_binding_records, _arithmetic_case_binding_root,
     _prompt_commitment, _scoped_training_cases,
@@ -31,7 +31,7 @@ def scoped_pilot_fixture(*, cycle_index: int = 0):
         seed=13, train_count=2, eval_count=2, tiers=(1,), steps=2,
     )
     train, heldout, plan = _scoped_training_cases(config, scope, cycle_index, ())
-    report["schema"] = SCHEMA
+    report["schema"] = PRE_EXPOSURE_SCHEMA
     report["config"]["answer_only"] = True
     report["initial_persistent_buffers_sha256"] = "9" * 64
     report["training_case_ids"] = [case.id for case in train]
@@ -93,14 +93,14 @@ def scoped_pilot_fixture(*, cycle_index: int = 0):
 class HfScopedReportAuditTests(unittest.TestCase):
     def test_honest_scoped_v3_report_does_not_fail_unscoped_case_replay(self):
         report = scoped_pilot_fixture()
-        result = audit_hf_report(report)
+        result = audit_hf_report(report, allow_legacy=True)
         self.assertEqual(result["status"], "PASS", result)
         self.assertEqual(result["checked_trials"], 8)
         self.assertFalse(result["authenticated_model_execution"])
 
     def test_scoped_successor_reports_incomplete_without_predecessor_custody(self):
         report = scoped_pilot_fixture(cycle_index=1)
-        result = audit_hf_report(report)
+        result = audit_hf_report(report, allow_legacy=True)
         self.assertEqual(result["status"], "INCOMPLETE", result)
         self.assertTrue(any("predecessor custody" in item for item in result["unchecked"]))
 
@@ -113,13 +113,13 @@ class HfScopedReportAuditTests(unittest.TestCase):
             with self.subTest(authority=authority):
                 report = scoped_pilot_fixture(cycle_index=1)
                 report["resumed_journey"]["development_resume_authority"] = authority
-                result = audit_hf_report(report)
+                result = audit_hf_report(report, allow_legacy=True)
                 self.assertEqual(result["status"], "INCOMPLETE", result)
                 self.assertTrue(any(expected in entry for entry in result["unchecked"]))
 
         bootstrap = scoped_pilot_fixture(cycle_index=0)
         bootstrap["resumed_journey"]["development_resume_authority"] = SIGNED_DEVELOPMENT_RESUME
-        self.assertEqual(audit_hf_report(bootstrap)["status"], "FAIL")
+        self.assertEqual(audit_hf_report(bootstrap, allow_legacy=True)["status"], "FAIL")
 
     def test_scoped_scope_room_and_case_forgery_fail(self):
         fixture = scoped_pilot_fixture()
@@ -141,7 +141,7 @@ class HfScopedReportAuditTests(unittest.TestCase):
             with self.subTest(mutation=mutate):
                 report = copy.deepcopy(fixture)
                 mutate(report)
-                self.assertEqual(audit_hf_report(report)["status"], "FAIL")
+                self.assertEqual(audit_hf_report(report, allow_legacy=True)["status"], "FAIL")
 
 
 if __name__ == "__main__":

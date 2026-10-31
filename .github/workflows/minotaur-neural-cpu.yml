@@ -18,13 +18,16 @@ on:
       - "labyrinth/minotaur_model.py"
       - "labyrinth/minotaur_policy_learning.py"
       - "labyrinth/minotaur_measured_toy_bridge_r72.py"
+      - "labyrinth/minotaur_hf_roster_bridge.py"
       - "labyrinth/adaptive_corridors.py"
       - "labyrinth/journey_policy_runner.py"
       - "labyrinth/journey_challenges.py"
       - "labyrinth/semantic_chambers.py"
       - "labyrinth/hf_development_transition.py"
       - "labyrinth/hf_resume_bridge.py"
+      - "labyrinth/checkpoint_schema_bridge.py"
       - "labyrinth/hf_pilot.py"
+      - "labyrinth/cli.py"
       - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
@@ -93,6 +96,9 @@ on:
       - "tests/test_r68_minotaur_policy_concurrency.py"
       - "tests/test_r72_minotaur_registry_transition.py"
       - "tests/test_minotaur_measured_toy_bridge_r72.py"
+      - "tests/test_minotaur_hf_roster_bridge.py"
+      - "tests/test_q5_toy_authority_combination_r79.py"
+      - "tests/test_optimizer_lifecycle_r8.py"
       - "tests/test_retention_sample_planning_r57.py"
       - "tests/test_retention_transfer_cohort_r68.py"
       - "tests/test_rezon_pointer_mapping_r57.py"
@@ -122,6 +128,7 @@ on:
       - "tests/test_semantic_chambers.py"
       - "tests/test_hf_development_transition.py"
       - "tests/test_hf_resume_bridge.py"
+      - "tests/test_checkpoint_schema_bridge.py"
       - "tests/test_hf_regenerative_harness.py"
       - "tests/test_hf_pilot.py"
       - "tests/test_neural_resume_checkpoint.py"
@@ -204,13 +211,16 @@ on:
       - "labyrinth/minotaur_model.py"
       - "labyrinth/minotaur_policy_learning.py"
       - "labyrinth/minotaur_measured_toy_bridge_r72.py"
+      - "labyrinth/minotaur_hf_roster_bridge.py"
       - "labyrinth/adaptive_corridors.py"
       - "labyrinth/journey_policy_runner.py"
       - "labyrinth/journey_challenges.py"
       - "labyrinth/semantic_chambers.py"
       - "labyrinth/hf_development_transition.py"
       - "labyrinth/hf_resume_bridge.py"
+      - "labyrinth/checkpoint_schema_bridge.py"
       - "labyrinth/hf_pilot.py"
+      - "labyrinth/cli.py"
       - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
@@ -279,6 +289,9 @@ on:
       - "tests/test_r68_minotaur_policy_concurrency.py"
       - "tests/test_r72_minotaur_registry_transition.py"
       - "tests/test_minotaur_measured_toy_bridge_r72.py"
+      - "tests/test_minotaur_hf_roster_bridge.py"
+      - "tests/test_q5_toy_authority_combination_r79.py"
+      - "tests/test_optimizer_lifecycle_r8.py"
       - "tests/test_retention_sample_planning_r57.py"
       - "tests/test_retention_transfer_cohort_r68.py"
       - "tests/test_rezon_pointer_mapping_r57.py"
@@ -308,6 +321,7 @@ on:
       - "tests/test_semantic_chambers.py"
       - "tests/test_hf_development_transition.py"
       - "tests/test_hf_resume_bridge.py"
+      - "tests/test_checkpoint_schema_bridge.py"
       - "tests/test_hf_regenerative_harness.py"
       - "tests/test_hf_pilot.py"
       - "tests/test_neural_resume_checkpoint.py"
@@ -529,6 +543,27 @@ jobs:
               # The runner must bind its predecessor to observe()'s atomic
               # policy receipt, not a separate mutable model_hash read.
               ("tests.test_journey_policy_runner", 8),
+              # R80 source-only Minotaur->HF TRAIN roster and optimizer exposure
+              # must be tested without skips. This does NOT witness a physical
+              # pretrained optimizer, online learning, or graduation authority.
+              ("tests.test_minotaur_hf_roster_bridge", 6),
+              ("tests.test_hf_pilot", 28),
+              # Explicit exposure-v1 reports are strict by default: remove the
+              # marker/ledger, downgrade schema, or resume incorrectly -> FAIL.
+              # Older v2/v3 reports require explicit allow_legacy opt-in.
+              ("tests.test_hf_report_audit", 17),
+              ("tests.test_hf_resume_bridge", 24),
+              # Metadata classification may route exposure.v1 to the actual
+              # strict preflight, never silently bypass ledger validation;
+              # MeZO v4 cannot masquerade as AdamW through a schema rename.
+              ("tests.test_checkpoint_schema_bridge", 8),
+              ("tests.test_hf_scoped_report_audit", 4),
+              ("tests.test_hf_event_recovery", 10),
+              ("tests.test_hf_journey_resume_integration", 10),
+              ("tests.test_optimizer_lifecycle_r8", 9),
+              # The signed Q5 source pass plus observed toy updates can never
+              # be composed into physical examination/graduation authority.
+              ("tests.test_q5_toy_authority_combination_r79", 2),
               # R60 installed-wheel import contract: package-private MiniLM
               # implementation, no global scripts namespace, no import side effects.
               ("tests.test_private_wheel_minilm_contract_r60", 1),

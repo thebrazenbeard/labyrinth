@@ -33,7 +33,10 @@ from .runner import _source_state, load_json
 
 
 LEGACY_SCHEMA = "labyrinth.hf-lora-pilot.v2"
-SCHEMA = "labyrinth.hf-lora-pilot.v3"
+PRE_EXPOSURE_SCHEMA = "labyrinth.hf-lora-pilot.v3"
+# PR #60's incompatible MeZO receipt already used the bare `.v4` identifier.
+# Keep the matched LoRA lineage explicit instead of silently reusing it.
+SCHEMA = "labyrinth.hf-lora-pilot.v3-exposure.v1"
 EVAL_SCHEMA = "labyrinth.hf-lora-reload-eval.v2"
 EVAL_SEED_XOR = 0x5C18A7
 # Bounded deterministic attempts only; if a public heldout split cannot be
@@ -768,6 +771,18 @@ def _training_visit_indices(train: list[Challenge], *, seed: int, steps: int) ->
     return indices
 
 
+def _training_visit_exposures(train: list[Challenge], *, seed: int,
+                              steps: int) -> tuple[tuple[str, str], ...]:
+    """Derive the full ordered public TRAIN roster before optimizer execution.
+
+    This is a source-level schedule, not an independently hosted commitment.
+    """
+    return tuple(
+        (train[index].id, hashlib.sha256(train[index].prompt.encode("utf-8")).hexdigest())
+        for index in _training_visit_indices(train, seed=seed, steps=steps)
+    )
+
+
 def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
                  labels: list[str], config: PilotConfig, *,
                  learning_rate: float | None = None,
@@ -783,11 +798,23 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
     ``optimizer`` plus ``rng_policy='preserve'`` instead leaves the caller's
     AdamW moments and process RNG untouched. It requires a cursor and exact
     scheduled (case ID, public prompt digest) exposure slice, preventing a
-    resumed segment from replaying the schedule's first examples. The caller
-    must independently pin the prior cursor, catalog, source and RNG to its
-    journal and keep control branches separate; this private seam alone is
-    not full-state resume authority.
+    resumed segment from replaying the schedule's first examples. Fresh
+    optimizer arms may also supply a precomputed exact visit roster; the
+    training loop checks it before each update and records each completed
+    optimizer exposure in the loop, rather than rebuilding a claimed stream
+    from the schedule afterward. The caller must independently pin the prior
+    cursor, catalog, source and RNG to its journal and keep control branches
+    separate; this private seam alone is not full-state resume authority or
+    an independently authenticated physical TRAIN witness.
     """
+    # Snapshot the public catalog and label sequence before invoking any
+    # tokenizer/optimizer callback. Mutable caller lists must not be able to
+    # redirect encoded supervision while restoring the original pinned case
+    # IDs/prompts before the per-step source-ledger checks. Challenge objects
+    # themselves are immutable; this is still only a same-process guard, not
+    # an independently witnessed physical optimizer exposure.
+    train = tuple(train)
+    labels = tuple(labels)
     if len(train) != len(labels) or not train:
         raise ValueError("training supervision must match every training case")
     if scheduler is not None:
@@ -796,7 +823,7 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
     if not external_optimizer:
         if rng_policy != "seed_for_control":
             raise ValueError("preserved RNG requires an externally restored optimizer")
-        if visit_cursor is not None or expected_visit_exposures is not None:
+        if visit_cursor is not None:
             raise ValueError("exposure cursor is only for externally restored candidate training")
     else:
         if rng_policy != "preserve":
@@ -805,18 +832,11 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
             raise ValueError("externally restored optimizer is CPU-only")
         if learning_rate is not None:
             raise ValueError("externally restored optimizer does not admit learning-rate controls")
-        if labels != [case.answer for case in train]:
+        if labels != tuple(case.answer for case in train):
             raise ValueError("externally restored optimizer is only for correct-label candidate training")
         if (type(visit_cursor) is not int or visit_cursor < 0
                 or visit_cursor + config.steps > 100000):
             raise ValueError("externally restored exposure cursor is missing or out of bounds")
-        if (type(expected_visit_exposures) is not tuple
-                or len(expected_visit_exposures) != config.steps
-                or any(type(pair) is not tuple or len(pair) != 2
-                       or type(pair[0]) is not str or type(pair[1]) is not str
-                       or not re.fullmatch(r"[0-9a-f]{64}", pair[1])
-                       for pair in expected_visit_exposures)):
-            raise ValueError("externally restored exposure slice is missing or malformed")
         if any(case.split != "train" for case in train) or len({case.id for case in train}) != len(train):
             raise ValueError("externally restored training catalog is invalid")
         if not isinstance(optimizer, torch.optim.AdamW):
@@ -843,18 +863,29 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
                 or {id(parameter) for parameter in optimizer_params}
                 != {id(parameter) for parameter in trainable}):
             raise ValueError("externally restored optimizer does not own the model's trainable parameters")
+    if expected_visit_exposures is not None:
+        if (type(expected_visit_exposures) is not tuple
+                or len(expected_visit_exposures) != config.steps
+                or any(type(pair) is not tuple or len(pair) != 2
+                       or type(pair[0]) is not str or type(pair[1]) is not str
+                       or not re.fullmatch(r"[0-9a-f]{64}", pair[1])
+                       for pair in expected_visit_exposures)):
+            raise ValueError("pinned TRAIN exposure slice is malformed")
+    elif external_optimizer:
+        raise ValueError("externally restored exposure slice is missing")
     if optimizer is None:
         indices = _training_visit_indices(train, seed=config.seed, steps=config.steps)
     else:
         full_indices = _training_visit_indices(train, seed=config.seed,
                                                steps=visit_cursor + config.steps)
         indices = full_indices[visit_cursor:]
-        actual_exposures = tuple(
+    if expected_visit_exposures is not None:
+        actual_schedule = tuple(
             (train[index].id, hashlib.sha256(train[index].prompt.encode("utf-8")).hexdigest())
             for index in indices
         )
-        if actual_exposures != expected_visit_exposures:
-            raise ValueError("externally restored exposure schedule differs from pinned slice")
+        if actual_schedule != expected_visit_exposures:
+            raise ValueError("TRAIN exposure schedule differs from pinned slice")
     prepared = [_encode_pair(tokenizer, case.prompt, answer, config.max_tokens,
                              answer_only=config.answer_only)
                 for case, answer in zip(train, labels)]
@@ -873,7 +904,12 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
                                       lr=config.learning_rate if learning_rate is None else learning_rate)
     token_total = 0
     losses: list[float] = []
+    completed_exposures: list[tuple[str, str]] = []
     for step in range(config.steps):
+        case = train[indices[step]]
+        exposure = (case.id, hashlib.sha256(case.prompt.encode("utf-8")).hexdigest())
+        if expected_visit_exposures is not None and exposure != expected_visit_exposures[step]:
+            raise RuntimeError("TRAIN exposure changed before optimizer step")
         inputs, target = prepared[indices[step]]
         ids = torch.tensor([inputs], dtype=torch.long, device=config.device)
         targets = torch.tensor([target], dtype=torch.long, device=config.device)
@@ -889,16 +925,17 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
         for parameter in model.parameters():
             if parameter.requires_grad and not bool(torch.isfinite(parameter).all()):
                 raise RuntimeError("non-finite trained LoRA parameter")
+        completed_exposures.append(exposure)
         value = float(loss.detach().cpu().item())
         losses.append(value)
         token_total += len(inputs)
     result = {"steps": config.steps, "example_visits": config.steps,
-              "visited_case_ids": [train[index].id for index in indices],
+              "visited_case_ids": [case_id for case_id, _ in completed_exposures],
+              "visited_exposures": completed_exposures,
               "input_tokens_seen": token_total, "losses": losses}
     if external_optimizer:
         result["visit_cursor_before"] = visit_cursor
         result["visit_cursor_after"] = visit_cursor + config.steps
-        result["visited_exposures"] = list(actual_exposures)
     return result
 
 
@@ -1030,6 +1067,13 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
                 config, scope, cycle_index, weak_skills, prior_report,
                 allow_unscoped_predecessor=allow_unscoped_predecessor,
             )
+    # Pin the exact ordered source TRAIN roster once, before loading a model or
+    # invoking any optimizer arm. All three arms must consume this same roster.
+    # Independent schedule custody and physical optimizer witnessing remain
+    # outside this source-only pilot.
+    ordered_train_exposures = _training_visit_exposures(
+        train, seed=config.seed, steps=config.steps,
+    )
     corrupted_answers = derange_answers(train)
     torch, auto_model, auto_tokenizer, peft_parts, device = _deps(config.device)
     cuda_headroom = _device_headroom(torch, device, weights)
@@ -1088,7 +1132,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     # unchanged, then start the candidate from the same initialization.
     sham_training = _train_steps(
         model, tokenizer, torch, train, [c.answer for c in train], config,
-        learning_rate=0.0,
+        learning_rate=0.0, expected_visit_exposures=ordered_train_exposures,
     )
     if _parameter_digest(model, torch) != initial_digest:
         raise RuntimeError("zero-LR placebo changed trainable adapter parameters")
@@ -1105,7 +1149,10 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     )
     if _parameter_digest(model, torch) != initial_digest:
         raise RuntimeError("zero-LR placebo evaluation changed initial LoRA tensor values")
-    correct_training = _train_steps(model, tokenizer, torch, train, [c.answer for c in train], config)
+    correct_training = _train_steps(
+        model, tokenizer, torch, train, [c.answer for c in train], config,
+        expected_visit_exposures=ordered_train_exposures,
+    )
     trained_digest = _parameter_digest(model, torch)
     if trained_digest == initial_digest:
         raise RuntimeError("no trainable LoRA parameter changed; refusing learning claim")
@@ -1141,7 +1188,13 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "restoration before corrupted-label training",
     )
-    corrupted_training = _train_steps(model, tokenizer, torch, train, corrupted_answers, config)
+    corrupted_training = _train_steps(
+        model, tokenizer, torch, train, corrupted_answers, config,
+        expected_visit_exposures=ordered_train_exposures,
+    )
+    if any(tuple(training["visited_exposures"]) != ordered_train_exposures
+           for training in (sham_training, correct_training, corrupted_training)):
+        raise RuntimeError("optimizer TRAIN exposure differs across controlled arms")
     corrupted_digest = _parameter_digest(model, torch)
     _assert_frozen_state(
         model, torch, initial_frozen_digest, initial_buffer_digest,
@@ -1168,6 +1221,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
                              "transformers": package_version("transformers"),
                              "peft": package_version("peft")},
         "candidate_adapter_sha256": candidate_adapter_manifest,
+        "optimizer_exposure_recording": "in-loop-completed-optimizer-step.v1:source-only",
         "training_case_ids": [c.id for c in train],
         "heldout_case_ids": [c.id for c in heldout],
         "heldout_public_prompt_sha256": _prompt_commitment(heldout),
@@ -1190,6 +1244,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         "fresh_process_reload": "NOT RUN: execute `python -m labyrinth.hf_pilot eval` separately",
         "limitations": ["Finite public templates are not evidence of general reasoning transfer.",
                         "One-seed and small-N pilot; do not generalize accuracy deltas.",
+                        "TRAIN exposure is source-recorded at optimizer steps, not independently host-witnessed.",
                         "The zero-LR sham matches visits and optimizer steps but not guaranteed hardware timing.",
                         "Only the adapter was persisted; base weights remain unchanged.",
                         "Same-process scores do not qualify independent checkpoint reload."],
@@ -1349,8 +1404,12 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     root = Path(run_dir).expanduser().resolve(strict=True)
     source = root / "pilot_report.json"
     report = load_json(source)
-    if report.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
+    if report.get("schema") not in (SCHEMA, PRE_EXPOSURE_SCHEMA, LEGACY_SCHEMA):
         raise ValueError("unknown training pilot report schema")
+    if report["schema"] == SCHEMA:
+        from .hf_report_audit import audit_hf_report
+        if audit_hf_report(report)["status"] == "FAIL":
+            raise ValueError("saved current exposure ledger failed strict source audit")
     source_state = report.get("source")
     if not isinstance(source_state, dict) or source_state.get("source_tree_sha256") != _source_state()["source_tree_sha256"]:
         raise ValueError("source revision changed since training")

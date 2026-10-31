@@ -9,7 +9,9 @@ import random
 import unittest
 from unittest.mock import patch
 
-from labyrinth.hf_pilot import PilotConfig, _train_steps, _training_visit_indices
+from labyrinth.hf_pilot import (
+    PilotConfig, _train_steps, _training_visit_exposures, _training_visit_indices,
+)
 from labyrinth.maze import Challenge
 
 
@@ -149,6 +151,62 @@ class HFExternallyOwnedOptimizer(unittest.TestCase):
                          uninterrupted["visited_case_ids"])
         self.assertNotEqual(second["visited_case_ids"], first["visited_case_ids"])
         self.assertEqual(optimizer.steps, 8)
+        self.assertEqual(
+            first["visited_exposures"] + second["visited_exposures"],
+            uninterrupted["visited_exposures"],
+        )
+
+    def test_fresh_optimizer_records_completed_exposures_in_step_loop(self):
+        cases, config = inputs()
+        model, torch = Model(), Torch()
+        precommitted = _training_visit_exposures(cases, seed=config.seed,
+                                                 steps=config.steps)
+        with patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])):
+            completed = _train_steps(
+                model, object(), torch, cases, [c.answer for c in cases], config,
+                expected_visit_exposures=precommitted,
+            )
+        self.assertEqual(completed["visited_exposures"], list(precommitted))
+        self.assertEqual(completed["visited_case_ids"], [pair[0] for pair in precommitted])
+        self.assertEqual(AdamW.created, 1)
+
+    def test_mutating_caller_train_list_during_encoding_cannot_change_encoded_catalog(self):
+        cases, config = inputs()
+        original = cases[1]
+        pinned = _training_visit_exposures(cases, seed=config.seed, steps=config.steps)
+        seen_prompts = []
+
+        def encode_and_mutate(_tokenizer, prompt, _answer, _max_tokens, *, answer_only):
+            seen_prompts.append(prompt)
+            if len(seen_prompts) == 1:
+                cases[1] = cases[0]
+            else:
+                cases[1] = original
+            return ([1], [1])
+
+        with patch("labyrinth.hf_pilot._encode_pair", side_effect=encode_and_mutate):
+            result = _train_steps(
+                Model(), object(), Torch(), cases, ["5", "6"], config,
+                expected_visit_exposures=pinned,
+            )
+        self.assertEqual(seen_prompts, ["Question 0", "Question 1"])
+        self.assertEqual(result["visited_exposures"], list(pinned))
+
+    def test_fresh_optimizer_rejects_altered_case_or_prompt_before_update(self):
+        cases, config = inputs()
+        precommitted = _training_visit_exposures(cases, seed=config.seed,
+                                                 steps=config.steps)
+        wrong_case = (("forged-case", precommitted[0][1]), *precommitted[1:])
+        wrong_prompt = ((precommitted[0][0], "0" * 64), *precommitted[1:])
+        with patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])):
+            for wrong in (wrong_case, wrong_prompt):
+                with self.subTest(wrong=wrong):
+                    AdamW.created = 0
+                    with self.assertRaisesRegex(ValueError, "pinned slice"):
+                        _train_steps(Model(), object(), Torch(), cases,
+                                     [c.answer for c in cases], config,
+                                     expected_visit_exposures=wrong)
+                    self.assertEqual(AdamW.created, 0)
 
     def test_external_optimizer_requires_preserve_rng_and_correct_labels(self):
         model, torch = Model(), Torch()

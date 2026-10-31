@@ -395,6 +395,53 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
         self.assertIn('R76 local two-toy Rezon consumer', workflow)
 
+    def test_r80_hf_train_roster_and_source_authority_boundary_are_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        path_groups = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        paths = (
+            "labyrinth/minotaur_hf_roster_bridge.py",
+            "labyrinth/hf_pilot.py",
+            "labyrinth/cli.py",
+            "labyrinth/hf_report_audit.py",
+            "labyrinth/hf_resume_bridge.py",
+            "labyrinth/checkpoint_schema_bridge.py",
+            "labyrinth/journey_policy_runner.py",
+            "tests/test_minotaur_hf_roster_bridge.py",
+            "tests/test_q5_toy_authority_combination_r79.py",
+            "tests/test_optimizer_lifecycle_r8.py",
+            "tests/test_hf_report_audit.py",
+            "tests/test_hf_resume_bridge.py",
+            "tests/test_checkpoint_schema_bridge.py",
+            "tests/test_hf_scoped_report_audit.py",
+            "tests/test_hf_event_recovery.py",
+        )
+        for trigger, event_paths in path_groups.items():
+            for path in paths:
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertIn(f'      - "{path}"', event_paths)
+        for module_name, expected in (
+            ("tests.test_minotaur_hf_roster_bridge", 6),
+            ("tests.test_hf_pilot", 28),
+            ("tests.test_hf_report_audit", 17),
+            ("tests.test_hf_resume_bridge", 24),
+            ("tests.test_checkpoint_schema_bridge", 8),
+            ("tests.test_hf_scoped_report_audit", 4),
+            ("tests.test_hf_event_recovery", 10),
+            ("tests.test_hf_journey_resume_integration", 10),
+            ("tests.test_optimizer_lifecycle_r8", 9),
+            ("tests.test_q5_toy_authority_combination_r79", 2),
+        ):
+            self.assertIn(f'("{module_name}", {expected})', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+        self.assertIn('This does NOT witness a physical', workflow)
+
     def test_r60_private_wheel_contract_is_required_by_both_cpu_ci_triggers(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()

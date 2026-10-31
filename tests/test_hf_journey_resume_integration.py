@@ -165,7 +165,7 @@ class ResumeIntegrationTests(unittest.TestCase):
 
     def test_scoped_reload_reconstructs_the_recorded_cycle_diagnostic(self):
         from labyrinth.hf_pilot import (
-            SCHEMA, _metadata_digest, _prompt_commitment, _weights_digest,
+            PRE_EXPOSURE_SCHEMA, SCHEMA, _metadata_digest, _prompt_commitment, _weights_digest,
         )
         from labyrinth.runner import _source_state
 
@@ -179,7 +179,7 @@ class ResumeIntegrationTests(unittest.TestCase):
         _, unscoped = training_cases(config)
         self.assertNotEqual([case.id for case in diagnostic], [case.id for case in unscoped])
         report = {
-            "schema": SCHEMA, "source": _source_state(),
+            "schema": PRE_EXPOSURE_SCHEMA, "source": _source_state(),
             "config": {**asdict(config), "tiers": list(config.tiers)},
             "base_weights_sha256": _weights_digest([self.base / "model.safetensors"]),
             "model_metadata_sha256": _metadata_digest(self.base),
@@ -200,6 +200,10 @@ class ResumeIntegrationTests(unittest.TestCase):
             report["heldout_case_ids"] = [case.id for case in unscoped]
             report_path.write_text(json.dumps(report), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "heldout generation differs"):
+                reload_evaluate(run_dir, run_dir / "reload.json")
+            report["schema"] = SCHEMA
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "current exposure ledger"):
                 reload_evaluate(run_dir, run_dir / "reload.json")
 
     def test_unsupported_skill_is_not_misrepresented_by_tier_four_diagnostic(self):
@@ -291,11 +295,14 @@ class ResumeIntegrationTests(unittest.TestCase):
         model = Model()
         visits = []
         evaluated_ids = []
-        def fake_train(current, _tokenizer, _torch, train, labels, config, *, learning_rate=None):
+        def fake_train(current, _tokenizer, _torch, train, labels, config, *,
+                       learning_rate=None, expected_visit_exposures=None):
             visits.append(("sham" if learning_rate == 0 else "correct" if labels == [c.answer for c in train] else "corrupt", current.value))
             if learning_rate != 0:
                 current.value = trained if labels == [c.answer for c in train] else corrupt
-            return {"steps": config.steps, "visited_case_ids": [c.id for c in train]}
+            return {"steps": config.steps,
+                    "visited_case_ids": [case_id for case_id, _ in expected_visit_exposures],
+                    "visited_exposures": list(expected_visit_exposures)}
 
         def fake_score(_model, _tokenizer, _torch, cases, **_kwargs):
             evaluated_ids.append(tuple(case.id for case in cases))

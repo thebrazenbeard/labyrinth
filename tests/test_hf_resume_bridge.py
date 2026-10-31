@@ -15,7 +15,7 @@ import unittest
 from unittest import mock
 
 from labyrinth.hf_pilot import (
-    PilotConfig, SCHEMA, _adapter_manifest, _checkpoint_manifest,
+    PilotConfig, PRE_EXPOSURE_SCHEMA, _adapter_manifest, _checkpoint_manifest,
     _sha_file, _source_state,
 )
 from labyrinth.hf_resume_bridge import (
@@ -52,7 +52,7 @@ class ResumeBridgeTests(unittest.TestCase):
         self.frozen_sha = "b" * 64
         self.buffer_sha = "c" * 64
         self.prior_report = {
-            "schema": SCHEMA,
+            "schema": PRE_EXPOSURE_SCHEMA,
             "source": _source_state(),
             "config": asdict(self.previous_config),
             "base_weights_sha256": _checkpoint_manifest(self.base, [self.base / "model.safetensors"])["weights"],
@@ -211,6 +211,12 @@ class ResumeBridgeTests(unittest.TestCase):
         self.prior_report["schema"] = "labyrinth.hf-lora-pilot.v4"
         self._rewrite_report()
         with self.assertRaisesRegex(ValueError, "only current v3"):
+            preflight_resume(self.config, self.prior, self.context)
+
+    def test_current_exposure_schema_cannot_resume_without_required_optimizer_ledger(self):
+        self.prior_report["schema"] = "labyrinth.hf-lora-pilot.v3-exposure.v1"
+        self._rewrite_report()
+        with self.assertRaisesRegex(ValueError, "exposure ledger"):
             preflight_resume(self.config, self.prior, self.context)
 
     def test_incompatible_lora_rank_is_refused(self):

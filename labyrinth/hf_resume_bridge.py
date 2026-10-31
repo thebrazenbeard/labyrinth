@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .hf_pilot import (
-    PilotConfig, SCHEMA, _adapter_manifest, _assert_adapter_unchanged,
+    PilotConfig, PRE_EXPOSURE_SCHEMA, SCHEMA, _adapter_manifest, _assert_adapter_unchanged,
     _assert_checkpoint_unchanged, _buffer_digest, _checkpoint_manifest,
     _deps, _device_headroom, _frozen_parameter_digest, _load_base,
     _lora_value_digest, _parameter_digest, _sha_file, _source_state,
@@ -171,9 +171,10 @@ def preflight_resume(
 ) -> ResumeSource:
     """Verify predecessor bytes and new output path before loading weights.
 
-    Requires the previous local v3 HF pilot report. This is intentionally
-    strict: pilot v2 and PR #60's changed v4 schema are not silently accepted.
-    An explicit adapter-metadata migration/requalification is needed later.
+    Accepts prior matched LoRA v3 reports and the source-ledger variant only.
+    PR #60's incompatible MeZO v4 receipt remains deliberately excluded.
+    The new variant must survive strict in-loop exposure audit; legacy v3
+    retains its explicit source/report-hash caveats, not optimizer attestation.
     """
     if type(context) is not ResumeContext:
         raise ValueError("expected ResumeContext")
@@ -193,8 +194,12 @@ def preflight_resume(
     if observed_report_digest != context.predecessor_report_sha256:
         raise ValueError("prior report bytes differ from operator-pinned identity")
     report = load_json(source_file, strict=True)
-    if type(report) is not dict or report.get("schema") != SCHEMA:
+    if type(report) is not dict or report.get("schema") not in (SCHEMA, PRE_EXPOSURE_SCHEMA):
         raise ValueError("only current v3 LoRA pilot reports can be resumed")
+    if report["schema"] == SCHEMA:
+        from .hf_report_audit import audit_hf_report
+        if audit_hf_report(report)["status"] == "FAIL":
+            raise ValueError("current exposure ledger report failed strict source audit")
     if (type(report.get("source")) is not dict
             or report["source"].get("source_tree_sha256") != _source_state()["source_tree_sha256"]):
         raise ValueError("predecessor source implementation differs from current source")

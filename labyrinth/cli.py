@@ -89,6 +89,7 @@ def _parser() -> argparse.ArgumentParser:
     audit.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
     hf_audit = subcommands.add_parser("audit-hf-report", help="Offline internal consistency audit of a saved HF LoRA pilot")
     hf_audit.add_argument("--input", metavar="JSON", required=True, help="Saved HF pilot report")
+    hf_audit.add_argument("--allow-legacy", action="store_true", help="Explicitly audit old v2/v3 reports without the current exposure ledger; internal consistency only")
     hf_audit.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
     rg = subcommands.add_parser("benchmark-rg", help="Optional Reasoning Gym development-only scoring; not sealed evaluation")
     rg.add_argument("--dataset", required=True, help="Registered reasoning-gym task identifier")
@@ -193,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
             report = audit_report(load_json(args.input, strict=True),
                                   artifact=load_json(args.artifact, strict=True) if args.artifact else None)
         elif args.command == "audit-hf-report":
-            report = audit_hf_report(load_json(args.input, strict=True))
+            report = audit_hf_report(load_json(args.input, strict=True), allow_legacy=args.allow_legacy)
         elif args.command == "train-toy":
             report = run_toy_experiment(
                 seed=args.seed, train_count=args.train_count, eval_count=args.eval_count,

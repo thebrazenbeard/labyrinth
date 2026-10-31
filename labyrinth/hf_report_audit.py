@@ -13,7 +13,7 @@ from typing import Any
 
 from .evaluation import score_response
 from .hf_pilot import (
-    LEGACY_SCHEMA, SCHEMA, PilotConfig,
+    LEGACY_SCHEMA, PRE_EXPOSURE_SCHEMA, SCHEMA, PilotConfig,
     RESEARCH_ONLY_RESUME, SIGNED_DEVELOPMENT_RESUME, _prompt_commitment,
     _arithmetic_semantic_commitments, _historical_arithmetic_case_count,
     _arithmetic_history_witnesses, _verified_arithmetic_history_witnesses,
@@ -31,6 +31,7 @@ CONFIG_FIELDS = frozenset({
 MATCHED_CONFIG_FIELDS = CONFIG_FIELDS | {"answer_only"}
 PILOT_KIND = "local HF causal-LM PEFT LoRA supervised parameter update"
 RELOAD_NOTE = "NOT RUN: execute `python -m labyrinth.hf_pilot eval` separately"
+EXPOSURE_MARKER = "in-loop-completed-optimizer-step.v1:source-only"
 
 
 def _integer(value: Any, low: int, high: int) -> bool:
@@ -52,7 +53,7 @@ def _digest_map(value: Any) -> bool:
                     for name, digest in value.items()))
 
 
-def audit_hf_report(report: Any) -> dict[str, Any]:
+def audit_hf_report(report: Any, *, allow_legacy: bool = False) -> dict[str, Any]:
     failures: list[str] = []
     unknown: list[str] = []
     checked_trials = 0
@@ -66,24 +67,34 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
         if message not in unknown and len(unknown) < 40:
             unknown.append(message)
 
+    current_schema = type(report) is dict and report.get("schema") == SCHEMA
+
     def result() -> dict[str, Any]:
         return {
             "schema": AUDIT_SCHEMA,
             "status": "FAIL" if failures else "INCOMPLETE" if unknown else "PASS",
             "meaning": "internal_consistency_only", "authenticated_model_execution": False,
+            "evidence_contract": (
+                "v3-exposure-v1-complete-in-loop-source-ledger-required" if current_schema
+                else "legacy-internal-consistency-only"
+            ),
             "checked_trials": checked_trials, "unverifiable_trials": unverifiable_trials,
             "failures": failures, "unchecked": unknown,
             "limitations": [
                 "Self-reported training, optimizer steps, hashes and model execution are unauthenticated.",
                 "A self-consistent fabricated pilot report can pass this audit without neural inference.",
                 "PASS is neither checkpoint verification nor evidence of learned reasoning.",
+                "Legacy v2/v3 reports are accepted only under explicit compatibility mode and lack required in-loop exposure proof."
+                if not current_schema else "v3-exposure.v1 in-loop proof is trainer-reported source data, not independent attestation.",
             ],
         }
 
-    if not isinstance(report, dict) or report.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
-        fail("invalid HF pilot report schema")
+    allowed_schemas = ((SCHEMA, PRE_EXPOSURE_SCHEMA, LEGACY_SCHEMA)
+                       if allow_legacy else (SCHEMA,))
+    if type(report) is not dict or report.get("schema") not in allowed_schemas:
+        fail("invalid or unapproved legacy HF pilot report schema")
         return result()
-    matched = report["schema"] == SCHEMA
+    matched = report["schema"] in (SCHEMA, PRE_EXPOSURE_SCHEMA)
     source = report.get("source")
     if not isinstance(source, dict) or not _digest(source.get("source_tree_sha256")):
         fail("missing or malformed HF pilot source fingerprint")
@@ -286,6 +297,15 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
         else:
             expected_indices = [i % len(train) for i in range(steps)]
         expected_visits = [train[i].id for i in expected_indices]
+        expected_exposures = [
+            [train[i].id, hashlib.sha256(train[i].prompt.encode("utf-8")).hexdigest()]
+            for i in expected_indices
+        ]
+        exposure_marker = report.get("optimizer_exposure_recording")
+        if current_schema and exposure_marker != EXPOSURE_MARKER:
+            fail("v3-exposure.v1 requires explicit optimizer in-loop exposure recording marker")
+        elif exposure_marker is not None and exposure_marker != EXPOSURE_MARKER:
+            fail("unsupported optimizer exposure recording marker")
         for arm in arms:
             record = training[arm]
             if not isinstance(record, dict) or record.get("visited_case_ids") != expected_visits:
@@ -299,6 +319,17 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
                     or any(type(v) not in (float, int) or v < 0 or v > 1e12 or not math.isfinite(v)
                            for v in record["losses"])):
                 fail(f"{arm}: invalid declared training steps/tokens/losses")
+            # Historical pilots lack the in-loop ledger. When present, it
+            # must match the exact public source roster, including prompts;
+            # this is internal consistency, never physical attestation.
+            reported_exposures = record.get("visited_exposures")
+            if current_schema or exposure_marker is not None or reported_exposures is not None:
+                if (type(reported_exposures) is not list
+                        or len(reported_exposures) != len(expected_exposures)
+                        or any(type(pair) not in (list, tuple)
+                               or len(pair) != 2 or list(pair) != expected
+                               for pair, expected in zip(reported_exposures, expected_exposures))):
+                    fail(f"{arm}: optimizer TRAIN exposure roster mismatch")
     evaluations = report.get("evaluations")
     if not isinstance(evaluations, dict) or set(evaluations) != set(ARMS):
         fail("expected baseline/sham/candidate/corrupted evaluations")

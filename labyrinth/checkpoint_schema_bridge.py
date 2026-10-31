@@ -1,6 +1,8 @@
 """Source-only compatibility boundary for v3 LoRA and experimental v4 MeZO reports.
 
-PR #62's resume bridge verifies *v3 AdamW LoRA* report and adapter bytes.
+PR #62's resume bridge verifies *v3 AdamW LoRA* report and adapter bytes;
+the newer v3-exposure.v1 report uses the same AdamW adapter format with a
+strict in-loop TRAIN exposure ledger checked by the real resume preflight.
 Draft PR #60 emits *v4 MeZO LoRA* reports but does not provide an integrated
 v4 resume verifier here. A schema rename cannot constitute a migration.
 
@@ -19,8 +21,9 @@ import math
 import re
 from typing import Any
 
+from .hf_pilot import PRE_EXPOSURE_SCHEMA as V3_SCHEMA, SCHEMA as V3_EXPOSURE_SCHEMA
 
-V3_SCHEMA = "labyrinth.hf-lora-pilot.v3"
+
 V4_MEZO_SCHEMA = "labyrinth.hf-lora-pilot.v4"
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -32,10 +35,27 @@ class CheckpointCompatibility:
     target_optimizer: str
     continuity: str
     status: str
-    may_call_v3_preflight: bool
-    optimizer_restart_supported: bool = False
-    bytes_authenticated: bool = False
-    graduation_authorized: bool = False
+
+    @property
+    def may_call_v3_preflight(self) -> bool:
+        # A routing hint, not a trusted authorization. Compute from status so
+        # callers cannot construct an internally contradictory plan.
+        return self.status == "V3_ADAPTER_PREFLIGHT_REQUIRED"
+
+    # Explicitly non-authorizing source metadata. These are not dataclass
+    # fields: callers cannot constructor-inject/replace them with True, even
+    # when they hold this ordinary Python result object in the same process.
+    @property
+    def optimizer_restart_supported(self) -> bool:
+        return False
+
+    @property
+    def bytes_authenticated(self) -> bool:
+        return False
+
+    @property
+    def graduation_authorized(self) -> bool:
+        return False
 
 
 def _digest(value: Any, field: str) -> None:
@@ -62,7 +82,8 @@ def classify_checkpoint_report(
 
     ``adapter_boundary`` means a *completed-cycle* adapter may be considered
     for a new cycle only after the ordinary v3 ``preflight_resume`` verifies
-    actual bytes, source pin, objective and cycle. ``mid_cycle`` requires a
+    actual bytes, source pin, objective, strict exposure ledger (when required)
+    and cycle. ``mid_cycle`` requires a
     separate complete optimizer/RNG/cursor/fence checkpoint, unavailable in
     either report format. v4 MeZO remains blocked from this v3 bridge even
     when the next optimizer is also MeZO.
@@ -72,7 +93,7 @@ def classify_checkpoint_report(
     if target_optimizer not in ("adamw", "mezo") or type(target_optimizer) is not str:
         raise ValueError("target_optimizer must be adamw or mezo")
     if (type(report) is not dict or type(report.get("schema")) is not str
-            or report.get("schema") not in (V3_SCHEMA, V4_MEZO_SCHEMA)):
+            or report.get("schema") not in (V3_SCHEMA, V3_EXPOSURE_SCHEMA, V4_MEZO_SCHEMA)):
         raise ValueError("unknown or malformed HF pilot report schema")
     schema = report["schema"]
     source = report.get("source")
@@ -94,9 +115,11 @@ def classify_checkpoint_report(
     if type(config.get("answer_only")) is not bool:
         raise ValueError("missing or invalid config.answer_only")
 
-    if schema == V3_SCHEMA:
-        # The v3 format has an implicit AdamW optimizer. A renamed v4 report
-        # must not be imported by merely changing its schema string.
+    if schema in (V3_SCHEMA, V3_EXPOSURE_SCHEMA):
+        # Both v3 formats have an implicit AdamW optimizer. For exposure.v1,
+        # this classifier provides only a metadata plan; actual preflight
+        # must reject missing/renamed/reordered source optimizer ledgers.
+        # A renamed v4 receipt cannot be imported by schema substitution.
         if "optimizer" in config or "zo_epsilon" in config:
             raise ValueError("v3 AdamW report cannot contain MeZO optimizer metadata")
         optimizer = "adamw"
@@ -134,7 +157,6 @@ def classify_checkpoint_report(
         target_optimizer=target_optimizer,
         continuity=continuity,
         status=status,
-        may_call_v3_preflight=(status == "V3_ADAPTER_PREFLIGHT_REQUIRED"),
     )
 
 
@@ -144,8 +166,9 @@ def require_v3_adapter_preflight(
     """Reject unsupported imports; callers MUST still run real v3 preflight.
 
     Returning this plan is never an authorization to load a checkpoint on its
-    own. In particular v4 MeZO needs a separate source-and-bytes-qualified
-    native loader and cannot be mechanically migrated to v3.
+    own. In particular, v3-exposure.v1 still requires strict source-ledger
+    validation in the real preflight. v4 MeZO needs a separate source-and-
+    bytes-qualified native loader and cannot be mechanically migrated to v3.
     """
     result = classify_checkpoint_report(report, target_optimizer=target_optimizer)
     if not result.may_call_v3_preflight:

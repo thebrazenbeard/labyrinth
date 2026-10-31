@@ -27,6 +27,7 @@ from .adaptive_corridors import (
 from .journey_challenges import TraineeRoomView
 from .journey import JourneyState, TrainingCompletionReceipt
 from .minotaur_model import RoomContext, RoomPlan, plan_training_room
+from .maze import Challenge
 from .minotaur_policy_learning import (
     MinotaurTrainingPolicy, TrainCaseApproval, TrainRegistryAdmissionReceipt,
     TrainRoomOutcome,
@@ -138,6 +139,31 @@ class TrainingCorridorRunner:
     @property
     def is_complete(self) -> bool:
         return self.state.pending is None and self.state.remaining_count == 0
+
+    def operator_pending_train_case(self, public_view: TraineeRoomView) -> Challenge:
+        """Return private TRAIN supervision to an already trusted operator.
+
+        Only ``public_view`` may be supplied to learner inference. This method
+        deliberately does *not* establish an authority boundary against Python
+        code running inside the operator process; callers must not expose the
+        runner itself to an untrusted learner.
+        """
+        routed = self._in_flight
+        if (type(public_view) is not TraineeRoomView or routed is None
+                or self.state.pending is None or self._policy is None
+                or public_view != routed.trainee_view):
+            raise ValueError("exact pending public TRAIN view required")
+        case = routed.challenge
+        if (type(case) is not Challenge or case.split != "train"
+                or not case.id.startswith("train-") or not case.answer
+                or not self._admissions):
+            raise ValueError("pending TRAIN challenge is invalid")
+        approval = self._admissions[-1]
+        if (approval.room_id != routed.room_id or approval.case_id != case.id
+                or approval.prompt_sha256 != public_view.prompt_sha256
+                or approval.skill != routed.skill):
+            raise ValueError("pending TRAIN challenge does not match admission")
+        return case
 
     def next_training_prompt(self) -> TraineeRoomView:
         """Materialize exactly one next chamber using *current* policy state.
