@@ -69,6 +69,7 @@ on:
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/final_exam_precommit.py"
       - "labyrinth/q5_evaluation_preregistration_r68.py"
+      - "labyrinth/q5_signed_data_witness_r72.py"
       - "labyrinth/q8_external_acceptance_source_r68.py"
       - "labyrinth/train_exposure_attestation.py"
       - "labyrinth/maze_crash_resume_journal.py"
@@ -93,6 +94,7 @@ on:
       - "tests/test_rezon_pointer_mapping_r57.py"
       - "tests/test_rezon_two_adapter_source_partition_r68.py"
       - "tests/test_q5_evaluation_preregistration_r68.py"
+      - "tests/test_q5_signed_data_witness_r72.py"
       - "tests/test_q7_precommit_summary_immutability_r68.py"
       - "tests/test_q8_external_acceptance_source_r68.py"
       - "tests/test_fresh_process_eval_manifest_r57.py"
@@ -248,6 +250,7 @@ on:
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/final_exam_precommit.py"
       - "labyrinth/q5_evaluation_preregistration_r68.py"
+      - "labyrinth/q5_signed_data_witness_r72.py"
       - "labyrinth/q8_external_acceptance_source_r68.py"
       - "labyrinth/train_exposure_attestation.py"
       - "labyrinth/maze_crash_resume_journal.py"
@@ -272,6 +275,7 @@ on:
       - "tests/test_rezon_pointer_mapping_r57.py"
       - "tests/test_rezon_two_adapter_source_partition_r68.py"
       - "tests/test_q5_evaluation_preregistration_r68.py"
+      - "tests/test_q5_signed_data_witness_r72.py"
       - "tests/test_q7_precommit_summary_immutability_r68.py"
       - "tests/test_q8_external_acceptance_source_r68.py"
       - "tests/test_fresh_process_eval_manifest_r57.py"
@@ -493,6 +497,10 @@ jobs:
               # R68 source-only qualification checks; NO Q5/Q6/Q7/Q8 authority,
               # witness custody, pretrained learning, or graduation is implied.
               ("tests.test_q5_evaluation_preregistration_r68", 10),
+              # R72 signed data witness source-only. The signature checks
+              # exact source bytes, NOT independent signer custody, chronology,
+              # durable event consumption, learning or graduation.
+              ("tests.test_q5_signed_data_witness_r72", 9),
               ("tests.test_retention_transfer_cohort_r68", 8),
               ("tests.test_q7_precommit_summary_immutability_r68", 2),
               ("tests.test_q8_external_acceptance_source_r68", 9),

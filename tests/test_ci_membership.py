@@ -314,6 +314,27 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('R68 source-only', workflow)
         self.assertIn('NO Q5/Q6/Q7/Q8 authority', workflow)
 
+    def test_r72_signed_data_witness_is_mandatory_without_implicit_custody(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        path_groups = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for trigger, event_paths in path_groups.items():
+            for path in (
+                "labyrinth/q5_signed_data_witness_r72.py",
+                "tests/test_q5_signed_data_witness_r72.py",
+            ):
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertIn(f'      - "{path}"', event_paths)
+        self.assertIn('("tests.test_q5_signed_data_witness_r72", 9)', workflow)
+        self.assertIn('R72 signed data witness source-only', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+
     def test_r60_private_wheel_contract_is_required_by_both_cpu_ci_triggers(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
