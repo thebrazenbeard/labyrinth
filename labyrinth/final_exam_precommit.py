@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 import re
-from typing import Any
+from typing import Any, NamedTuple
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -69,14 +69,23 @@ class SignedFinalExamPrecommit:
     graduation_authorized: bool = False
 
 
-@dataclass(frozen=True)
-class FinalExamPrecommitSummary:
+class FinalExamPrecommitSummary(NamedTuple):
+    """Tuple-backed, source-only identity receipt; never graduation authority.
+
+    A frozen dataclass can still be changed with ``object.__setattr__``. This
+    receipt must not permit a mutable positive authority claim or mutable exam
+    identity even when passed through untrusted Python consumers.
+    """
+
     exam_id: str
     event_id: str
     objective_id: str
     scope_sha256: str
     sealed_plan_sha256: str
-    graduation_authorized: bool = False
+
+    @property
+    def graduation_authorized(self) -> bool:
+        return False
 
 
 def _canonical(body: dict[str, Any]) -> bytes:
@@ -174,12 +183,20 @@ def verify_pretraining_precommit(
     mandatory in effect: omitted, malformed or mismatched values fail closed.
     This never consumes an event or grants graduation.
     """
-    if (type(precommit) is not SignedFinalExamPrecommit
-            or precommit.graduation_authorized is not False
-            or type(precommit.public_bytes) is not bytes
-            or not 0 < len(precommit.public_bytes) <= _MAX_BYTES
-            or type(precommit.signature_hex) is not str
-            or re.fullmatch(r"[0-9a-f]{128}", precommit.signature_hex) is None
+    if type(precommit) is not SignedFinalExamPrecommit:
+        raise FinalExamPrecommitError("invalid signed precommit")
+    # Snapshot a frozen dataclass's fields exactly once: object.__setattr__
+    # can mutate such an object between signature verification and parsing.
+    # The exact same immutable bytes MUST feed the signature, parser and
+    # canonicality checks, even if the caller mutates its original wrapper.
+    public_bytes = precommit.public_bytes
+    signature_hex = precommit.signature_hex
+    graduation_authorized = precommit.graduation_authorized
+    if (graduation_authorized is not False
+            or type(public_bytes) is not bytes
+            or not 0 < len(public_bytes) <= _MAX_BYTES
+            or type(signature_hex) is not str
+            or re.fullmatch(r"[0-9a-f]{128}", signature_hex) is None
             or type(pinned_signer_public_key) is not bytes
             or len(pinned_signer_public_key) != 32):
         raise FinalExamPrecommitError("invalid signed precommit")
@@ -197,12 +214,12 @@ def verify_pretraining_precommit(
         raise FinalExamPrecommitError("external spent-event roster required")
     try:
         Ed25519PublicKey.from_public_bytes(pinned_signer_public_key).verify(
-            bytes.fromhex(precommit.signature_hex), _DOMAIN + precommit.public_bytes)
-        body = json.loads(precommit.public_bytes, object_pairs_hook=_unique)
+            bytes.fromhex(signature_hex), _DOMAIN + public_bytes)
+        body = json.loads(public_bytes, object_pairs_hook=_unique)
     except (InvalidSignature, ValueError, TypeError, UnicodeError) as exc:
         raise FinalExamPrecommitError("precommit signature or encoding invalid") from exc
     if (type(body) is not dict or body.keys() != _PRECOMMIT_FIELDS
-            or _canonical(body) != precommit.public_bytes
+            or _canonical(body) != public_bytes
             or body["schema"] != SCHEMA):
         raise FinalExamPrecommitError("precommit public schema changed")
     for field in ("exam_id", "event_id", "objective_id"):

@@ -6,14 +6,17 @@ import hashlib
 from pathlib import Path
 import re
 import tempfile
+from threading import Event
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 from labyrinth.journey import (
     begin_journey, complete_maze, face_minotaur,
 )
 from labyrinth.journey_policy_runner import TrainingCorridorRunner
 from labyrinth.minotaur_exam import ExamCaseResult, MinotaurExamReceipt
-from labyrinth.minotaur_policy_learning import load_policy
+from labyrinth.minotaur_policy_learning import TrainCaseApproval, load_policy
 from labyrinth.regenerative_maze import generate_maze_plan
 from labyrinth.training_scope import TrainingScopeSpec
 
@@ -194,6 +197,49 @@ class LiveTrainingCorridorTests(unittest.TestCase):
         second = runner.submit_training_response(toy_arithmetic_learner(next_view))
         self.assertEqual(len(runner.observations), 2)
         self.assertNotEqual(second.policy_before_sha256, second.policy_after_sha256)
+
+    def test_receipt_predecessor_is_atomic_observe_hash_after_concurrent_admission(self) -> None:
+        s = scope(scale=1)
+        runner = TrainingCorridorRunner.begin(
+            s, generate_maze_plan(s, 0), checkpoint_sha256=START,
+        )
+        view = runner.next_training_prompt()
+        policy = runner.policy
+        self.assertIsNotNone(policy)
+        initial = policy.model_hash
+        original_observe = policy.observe
+        competing_hash = []
+        read_started, extension_committed = Event(), Event()
+        extra = TrainCaseApproval(
+            room_id="parallel-room", case_id="parallel-case",
+            skill="arithmetic", tactic="practice", difficulty=1,
+            prompt_sha256=hashlib.sha256(b"parallel-approved-TRAIN-prompt").hexdigest(),
+        )
+
+        def competing_registry_admission() -> None:
+            self.assertTrue(read_started.wait(timeout=3))
+            policy.extend_training_registry((extra,))
+            competing_hash.append(policy.model_hash)
+            extension_committed.set()
+
+        def delayed_observe(outcome, *, mode="correct") -> dict:
+            read_started.set()
+            self.assertTrue(extension_committed.wait(timeout=3))
+            return original_observe(outcome, mode=mode)
+
+        # The old runner snapshots model_hash separately from observe().
+        # Interleaving a concurrent approved registry change at the method
+        # boundary makes that snapshot stale; observe() itself is atomic.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(competing_registry_admission)
+            with patch.object(policy, "observe", side_effect=delayed_observe):
+                receipt = runner.submit_training_response(toy_arithmetic_learner(view))
+            future.result(timeout=3)
+
+        self.assertNotEqual(initial, competing_hash[0])
+        self.assertEqual(receipt.policy_before_sha256, competing_hash[0])
+        self.assertEqual(receipt.policy_after_sha256, policy.model_hash)
+        self.assertNotEqual(receipt.policy_before_sha256, receipt.policy_after_sha256)
 
     def test_non_arithmetic_scope_fails_closed(self) -> None:
         s = TrainingScopeSpec(

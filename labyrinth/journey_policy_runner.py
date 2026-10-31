@@ -242,7 +242,6 @@ class TrainingCorridorRunner:
         )
         # The policy itself checks exact TRAIN registry admission. Failure
         # cannot advance the corridor because state is assigned afterward.
-        before = self._policy.model_hash
         update = self._policy.observe(outcome)
         observed = ObservedTrainingChamber(
             room_id=routed.room_id, case_id=routed.challenge.id,
@@ -250,7 +249,9 @@ class TrainingCorridorRunner:
             difficulty=routed.suggestion.difficulty,
             prompt_sha256=view.prompt_sha256,
             correct=correct,
-            policy_before_sha256=before,
+            # observe() serializes its own predecessor read with the update.
+            # An earlier independent hash read could race another TRAIN user.
+            policy_before_sha256=update["before_hash"],
             policy_after_sha256=update["after_hash"],
             checkpoint_after_sha256=next_state.checkpoint_sha256,
         )

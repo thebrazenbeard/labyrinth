@@ -38,6 +38,7 @@ on:
       - "labyrinth/neural_run_binding.py"
       - "labyrinth/retention_qualification.py"
       - "labyrinth/retention_sample_planning_r57.py"
+      - "labyrinth/retention_transfer_cohort_r68.py"
       - "labyrinth/measured_weakness_feedback.py"
       - "labyrinth/atomic_artifact_publication.py"
       - "labyrinth/preregistered_control_matrix.py"
@@ -65,7 +66,10 @@ on:
       - "labyrinth/five_arm_statistical_screen.py"
       - "labyrinth/evidence_pointer.py"
       - "labyrinth/rezon_pointer_mapping_r57.py"
+      - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/final_exam_precommit.py"
+      - "labyrinth/q5_evaluation_preregistration_r68.py"
+      - "labyrinth/q8_external_acceptance_source_r68.py"
       - "labyrinth/train_exposure_attestation.py"
       - "labyrinth/maze_crash_resume_journal.py"
       - "labyrinth/pinned_model_inference_receipt.py"
@@ -83,8 +87,14 @@ on:
       - "scripts/qualify_toy_cpu_evidence_r36.py"
       - "tests/test_minotaur_*.py"
       - "tests/test_r57_minotaur_policy_regression.py"
+      - "tests/test_r68_minotaur_policy_concurrency.py"
       - "tests/test_retention_sample_planning_r57.py"
+      - "tests/test_retention_transfer_cohort_r68.py"
       - "tests/test_rezon_pointer_mapping_r57.py"
+      - "tests/test_rezon_two_adapter_source_partition_r68.py"
+      - "tests/test_q5_evaluation_preregistration_r68.py"
+      - "tests/test_q7_precommit_summary_immutability_r68.py"
+      - "tests/test_q8_external_acceptance_source_r68.py"
       - "tests/test_fresh_process_eval_manifest_r57.py"
       - "tests/test_independent_holdout.py"
       - "tests/test_signed_minotaur_pair_r25.py"
@@ -207,6 +217,7 @@ on:
       - "labyrinth/neural_run_binding.py"
       - "labyrinth/retention_qualification.py"
       - "labyrinth/retention_sample_planning_r57.py"
+      - "labyrinth/retention_transfer_cohort_r68.py"
       - "labyrinth/measured_weakness_feedback.py"
       - "labyrinth/atomic_artifact_publication.py"
       - "labyrinth/preregistered_control_matrix.py"
@@ -234,7 +245,10 @@ on:
       - "labyrinth/five_arm_statistical_screen.py"
       - "labyrinth/evidence_pointer.py"
       - "labyrinth/rezon_pointer_mapping_r57.py"
+      - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/final_exam_precommit.py"
+      - "labyrinth/q5_evaluation_preregistration_r68.py"
+      - "labyrinth/q8_external_acceptance_source_r68.py"
       - "labyrinth/train_exposure_attestation.py"
       - "labyrinth/maze_crash_resume_journal.py"
       - "labyrinth/pinned_model_inference_receipt.py"
@@ -252,8 +266,14 @@ on:
       - "scripts/qualify_toy_cpu_evidence_r36.py"
       - "tests/test_minotaur_*.py"
       - "tests/test_r57_minotaur_policy_regression.py"
+      - "tests/test_r68_minotaur_policy_concurrency.py"
       - "tests/test_retention_sample_planning_r57.py"
+      - "tests/test_retention_transfer_cohort_r68.py"
       - "tests/test_rezon_pointer_mapping_r57.py"
+      - "tests/test_rezon_two_adapter_source_partition_r68.py"
+      - "tests/test_q5_evaluation_preregistration_r68.py"
+      - "tests/test_q7_precommit_summary_immutability_r68.py"
+      - "tests/test_q8_external_acceptance_source_r68.py"
       - "tests/test_fresh_process_eval_manifest_r57.py"
       - "tests/test_independent_holdout.py"
       - "tests/test_signed_minotaur_pair_r25.py"
@@ -463,13 +483,24 @@ jobs:
               ("tests.test_r51_pending_history_integrity", 17),
               ("tests.test_measured_cli_binding_r53", 10),
               ("tests.test_evidence_pointer", 8),
-              ("tests.test_final_exam_precommit", 13),
+              ("tests.test_final_exam_precommit", 14),
               # R57 patches are source-only. Every boundary test is mandatory:
               # skipped or missing cases must fail this pinned CPU workflow.
               ("tests.test_r57_minotaur_policy_regression", 2),
               ("tests.test_retention_sample_planning_r57", 10),
               ("tests.test_rezon_pointer_mapping_r57", 10),
               ("tests.test_fresh_process_eval_manifest_r57", 10),
+              # R68 source-only qualification checks; NO Q5/Q6/Q7/Q8 authority,
+              # witness custody, pretrained learning, or graduation is implied.
+              ("tests.test_q5_evaluation_preregistration_r68", 10),
+              ("tests.test_retention_transfer_cohort_r68", 8),
+              ("tests.test_q7_precommit_summary_immutability_r68", 2),
+              ("tests.test_q8_external_acceptance_source_r68", 9),
+              ("tests.test_rezon_two_adapter_source_partition_r68", 13),
+              ("tests.test_r68_minotaur_policy_concurrency", 1),
+              # The runner must bind its predecessor to observe()'s atomic
+              # policy receipt, not a separate mutable model_hash read.
+              ("tests.test_journey_policy_runner", 7),
               # R60 installed-wheel import contract: package-private MiniLM
               # implementation, no global scripts namespace, no import side effects.
               ("tests.test_private_wheel_minilm_contract_r60", 1),

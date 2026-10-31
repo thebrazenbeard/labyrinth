@@ -22,6 +22,7 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import threading
 from typing import Any, Mapping
 from dataclasses import dataclass
 
@@ -127,6 +128,8 @@ class MinotaurTrainingPolicy:
     rehearsal after sustained transfer failures, and adjusts difficulty
     against a declared specificity baseline. It only operates on
     training feedback supplied by a trusted trainer, never exam outcomes.
+    Concurrent calls on one instance are serialized in-process; this lock
+    does not reserve events or prevent replay across hosts or processes.
     """
 
     def __init__(
@@ -148,6 +151,10 @@ class MinotaurTrainingPolicy:
         }
         self._case_ids: list[str] = []
         self._prompt_sha256: list[str] = []
+        # Multiple TRAIN workers may call this one policy concurrently.
+        # Protect the whole ledger transition, including receipt lineage,
+        # while routing or checkpointing observes the resulting state.
+        self._lock = threading.RLock()
         self._registry_digest()
 
     def _registry_digest(self) -> str:
@@ -187,6 +194,10 @@ class MinotaurTrainingPolicy:
         It deliberately changes the policy state digest while keeping all
         learned histograms and prior anti-reuse commitments unchanged.
         """
+        with self._lock:
+            return self._extend_training_registry_locked(new_cases)
+
+    def _extend_training_registry_locked(self, new_cases: tuple[TrainCaseApproval, ...]) -> str:
         self._validated_payload()
         if type(new_cases) is not tuple or not new_cases:
             raise ValueError("new authorized TRAIN cases required")
@@ -281,7 +292,8 @@ class MinotaurTrainingPolicy:
     @property
     def model_hash(self) -> str:
         """Local state fingerprint; not evidence of training provenance."""
-        return hashlib.sha256(_canonical(self._validated_payload())).hexdigest()
+        with self._lock:
+            return hashlib.sha256(_canonical(self._validated_payload())).hexdigest()
 
     def observe(self, outcome: TrainRoomOutcome, *, mode: str = "correct") -> dict[str, Any]:
         """Consume TRAIN-only scored behavior; controls opt in explicitly.
@@ -291,6 +303,10 @@ class MinotaurTrainingPolicy:
         an independently scored proof. A zero-update visit leaves all state
         and sealed IDs unchanged, as needed for the sham comparison.
         """
+        with self._lock:
+            return self._observe_locked(outcome, mode=mode)
+
+    def _observe_locked(self, outcome: TrainRoomOutcome, *, mode: str) -> dict[str, Any]:
         self._validated_payload()
         if type(outcome) is not TrainRoomOutcome:
             raise ValueError("expected a TrainRoomOutcome")
@@ -340,6 +356,10 @@ class MinotaurTrainingPolicy:
 
     def propose_room(self, metadata: Mapping[str, str | int]) -> dict[str, object]:
         """Suggest next TRAIN-only room tactic and difficulty, without gold."""
+        with self._lock:
+            return self._propose_room_locked(metadata)
+
+    def _propose_room_locked(self, metadata: Mapping[str, str | int]) -> dict[str, object]:
         self._validated_payload()
         if not isinstance(metadata, Mapping) or set(metadata) != _ROOM_METADATA:
             raise ValueError("room metadata must be the exact public training view")
@@ -419,6 +439,10 @@ class MinotaurTrainingPolicy:
         Publishing via a same-directory hard link preserves non-overwrite
         semantics even when a competing writer creates the destination.
         """
+        with self._lock:
+            return self._save_policy_locked(destination)
+
+    def _save_policy_locked(self, destination: str | Path) -> str:
         path = Path(destination)
         payload = self._validated_payload()
         digest = hashlib.sha256(_canonical(payload)).hexdigest()

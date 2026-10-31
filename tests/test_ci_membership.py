@@ -207,7 +207,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         for event_paths in paths:
             self.assertIn('"labyrinth/final_exam_precommit.py"', event_paths)
             self.assertIn('"tests/test_final_exam_precommit.py"', event_paths)
-        self.assertIn('("tests.test_final_exam_precommit", 13)', workflow)
+        self.assertIn('("tests.test_final_exam_precommit", 14)', workflow)
         self.assertIn('or result.skipped', workflow)
 
     def test_graduation_auth_dependency_is_pinned_in_both_workflows(self):
@@ -267,6 +267,52 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         # and never silently substitute missing modules or counts.
         self.assertIn('or result.skipped', workflow)
         self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+
+    def test_r68_source_only_qualification_contracts_are_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        boundaries = (
+            "labyrinth/q5_evaluation_preregistration_r68.py",
+            "labyrinth/retention_transfer_cohort_r68.py",
+            "labyrinth/final_exam_precommit.py",
+            "labyrinth/q8_external_acceptance_source_r68.py",
+            "labyrinth/rezon_two_adapter_source_partition_r68.py",
+            "labyrinth/minotaur_policy_learning.py",
+            "tests/test_q5_evaluation_preregistration_r68.py",
+            "tests/test_retention_transfer_cohort_r68.py",
+            "tests/test_q7_precommit_summary_immutability_r68.py",
+            "tests/test_q8_external_acceptance_source_r68.py",
+            "tests/test_rezon_two_adapter_source_partition_r68.py",
+            "tests/test_r68_minotaur_policy_concurrency.py",
+        )
+        for trigger, event_paths in paths_by_trigger.items():
+            for path in boundaries:
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertIn(f'      - "{path}"', event_paths)
+
+        minimum_case_counts = (
+            ("tests.test_q5_evaluation_preregistration_r68", 10),
+            ("tests.test_retention_transfer_cohort_r68", 8),
+            ("tests.test_q7_precommit_summary_immutability_r68", 2),
+            ("tests.test_q8_external_acceptance_source_r68", 9),
+            ("tests.test_rezon_two_adapter_source_partition_r68", 13),
+            ("tests.test_r68_minotaur_policy_concurrency", 1),
+            ("tests.test_journey_policy_runner", 7),
+        )
+        for module_name, minimum in minimum_case_counts:
+            with self.subTest(module=module_name):
+                self.assertIn(f'("{module_name}", {minimum})', workflow)
+
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+        self.assertIn('R68 source-only', workflow)
+        self.assertIn('NO Q5/Q6/Q7/Q8 authority', workflow)
 
     def test_r60_private_wheel_contract_is_required_by_both_cpu_ci_triggers(self):
         root = Path(__file__).resolve().parents[1]

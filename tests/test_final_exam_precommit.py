@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import replace
 from hashlib import sha256
 import hmac
+import inspect
 import json
+import sys
 import unittest
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -154,6 +156,43 @@ class FinalExamPrecommitTests(unittest.TestCase):
         corrupted = replace(self.precommit, public_bytes=self.precommit.public_bytes + b" ")
         with self.assertRaisesRegex(FinalExamPrecommitError, "signature"):
             self.verify(precommit=corrupted)
+
+    def test_signed_bytes_cannot_be_swapped_after_signature_check(self):
+        # This is source-only interpreter-level adversarial simulation. A
+        # frozen SignedFinalExamPrecommit can be mutated via object.__setattr__.
+        # The verifier must parse the exact bytes that Ed25519 authenticated.
+        signed = replace(self.precommit)
+        signed_source = b'"source_sha256":"' + b"e" * 64 + b'"'
+        unsigned_source = b'"source_sha256":"' + b"d" * 64 + b'"'
+        self.assertIn(signed_source, signed.public_bytes)
+        altered_bytes = signed.public_bytes.replace(signed_source, unsigned_source)
+        self.assertNotEqual(altered_bytes, signed.public_bytes)
+        self.assertIn(unsigned_source, altered_bytes)
+
+        lines, start_line = inspect.getsourcelines(verify_pretraining_precommit)
+        parse_line = next(
+            start_line + offset for offset, line in enumerate(lines)
+            if "body = json.loads(" in line
+        )
+        did_swap = False
+
+        def after_signature_before_parse(frame, event, arg):
+            nonlocal did_swap
+            if (event == "line"
+                    and frame.f_code is verify_pretraining_precommit.__code__
+                    and frame.f_lineno == parse_line):
+                object.__setattr__(signed, "public_bytes", altered_bytes)
+                did_swap = True
+            return after_signature_before_parse
+
+        prior_trace = sys.gettrace()
+        try:
+            sys.settrace(after_signature_before_parse)
+            with self.assertRaisesRegex(FinalExamPrecommitError, "signature|pins"):
+                self.verify(precommit=signed, source="d" * 64)
+        finally:
+            sys.settrace(prior_trace)
+        self.assertTrue(did_swap, "test must exercise verification-to-parse boundary")
 
     def test_plan_scope_and_event_mismatch_fails_closed(self):
         for kwargs in ({"event": "event-else"}, {"scope": "b" * 64},
