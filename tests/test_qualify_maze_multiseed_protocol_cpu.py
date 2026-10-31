@@ -15,7 +15,9 @@ from unittest.mock import patch
 from labyrinth.training_scope import TrainingScopeSpec
 from scripts import qualify_maze_multiseed_protocol_cpu as target
 from scripts.qualify_maze_conditioned_minilm_cpu import (
-    build_training_cycles, select_training_batch,
+    build_training_cycles, optimizer_learning_rate,
+    preregistered_control_comparison, preregistered_randomized_labels,
+    select_training_batch,
 )
 
 
@@ -28,7 +30,9 @@ class MultiSeedProtocolTests(unittest.TestCase):
         run_root.mkdir(parents=True)
         model_sha = "f" * 64
         data = {
-            "schema": target.CHILD_SCHEMA,
+            "schema": (target.PREREG_CHILD_SCHEMA
+                       if plan["manifest"].get("preregistered_controls")
+                       else target.CHILD_SCHEMA),
             "harness_sha256": plan["manifest"]["runner_sha256"],
             "model_id": target.MODEL_ID,
             "scope": job["scope"],
@@ -44,17 +48,23 @@ class MultiSeedProtocolTests(unittest.TestCase):
         scope = TrainingScopeSpec.from_dict(job["scope"])
         cycles = build_training_cycles(
             scope, weak_cycle_one=(plan["manifest"]["weak_skill"],))
-        for arm in target.SUPPORTED_ARMS:
+        opt_in = bool(plan["manifest"].get("preregistered_controls"))
+        for arm in plan["manifest"]["arms"]:
             initial = "a" * 64
-            after0 = ("a" if arm == "zero_update" else
-                      "b" if arm == "correct" else "c") * 64
-            after1 = ("a" if arm == "zero_update" else
-                      "d" if arm == "correct" else "e") * 64
+            unchanged = arm in ("zero_update", "zero_lr")
+            after0 = ("a" if unchanged else
+                      {"correct": "b", "inverted": "c",
+                       "randomized_labels": "d"}[arm]) * 64
+            after1 = ("a" if unchanged else
+                      {"correct": "e", "inverted": "f",
+                       "randomized_labels": "9"}[arm]) * 64
             initial_lora = "1" * 64
-            after0_lora = ("1" if arm == "zero_update" else
-                           "2" if arm == "correct" else "3") * 64
-            after1_lora = ("1" if arm == "zero_update" else
-                           "4" if arm == "correct" else "5") * 64
+            after0_lora = ("1" if unchanged else
+                           {"correct": "2", "inverted": "3",
+                            "randomized_labels": "4"}[arm]) * 64
+            after1_lora = ("1" if unchanged else
+                           {"correct": "5", "inverted": "6",
+                            "randomized_labels": "7"}[arm]) * 64
             rows = []
             for index, cycle in enumerate(cycles):
                 checkpoint = run_root / arm / f"cycle-{index}"
@@ -64,7 +74,7 @@ class MultiSeedProtocolTests(unittest.TestCase):
                 (checkpoint / "head.safetensors").write_bytes(
                     f"FAKE-HEAD:{arm}:{index}".encode())
                 sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
-                rows.append({
+                row = {
                     "cycle": index,
                     "maze_room_ids": job["cycle_room_ids"][index],
                     "maze_exposure_ids": job["cycle_exposure_ids"][index],
@@ -74,8 +84,10 @@ class MultiSeedProtocolTests(unittest.TestCase):
                         for row in select_training_batch(cycle, step)
                     ],
                     "training_visits": job["steps_per_cycle"] * 4,
+                    "forward_steps": job["steps_per_cycle"],
+                    "backward_steps": job["steps_per_cycle"],
                     "optimizer_updates": (
-                        0 if arm == "zero_update" else job["steps_per_cycle"]),
+                        0 if unchanged else job["steps_per_cycle"]),
                     "pretrained_base_sha256": model_sha,
                     "frozen_peft_sha256_before": model_sha,
                     "frozen_peft_sha256_after": model_sha,
@@ -92,7 +104,25 @@ class MultiSeedProtocolTests(unittest.TestCase):
                     "adapter_file_sha256": sha(
                         checkpoint / "adapter" / "adapter_model.safetensors"),
                     "head_file_sha256": sha(checkpoint / "head.safetensors"),
-                })
+                }
+                if opt_in:
+                    labels = (preregistered_randomized_labels(cycle, job["seed"])
+                              if arm == "randomized_labels" else None)
+                    assigned = {
+                        case.exposure_id: (labels[case.exposure_id] if labels is not None
+                                           else case.label ^ int(arm == "inverted"))
+                        for case in cycle.examples
+                    }
+                    row.update({
+                        "optimizer_step_invocations": (
+                            0 if arm == "zero_update" else job["steps_per_cycle"]),
+                        "effective_learning_rate": optimizer_learning_rate(
+                            arm, plan["manifest"]["learning_rate"]),
+                        "label_assignment_sha256": hashlib.sha256(json.dumps(
+                            assigned, sort_keys=True,
+                            separators=(",", ":")).encode("ascii")).hexdigest(),
+                    })
+                rows.append(row)
             data["arms"][arm] = {
                 "initial_trainable_sha256": initial,
                 "initial_lora_sha256": initial_lora,
@@ -100,10 +130,29 @@ class MultiSeedProtocolTests(unittest.TestCase):
                     "status": "SELF_REPORTED_FRESH_INSTANCE_PASS"},
                 "cycles": rows,
             }
+        if opt_in:
+            data.update({
+                "control_preregistration": "OPERATOR_REQUESTED_UNSEALED_SOURCE_ONLY",
+                "control_arms": list(plan["manifest"]["arms"]),
+                "control_semantics": {
+                    "correct": "TRUE_TRAIN_LABELS_ADAMW",
+                    "zero_update": "SAME_FORWARD_BACKWARD_NO_OPTIMIZER_STEP",
+                    "inverted": "BINARY_LABEL_INVERSION_ADAMW",
+                    "zero_lr": "SAME_FORWARD_BACKWARD_ADAMW_STEP_AT_LR_ZERO",
+                    "randomized_labels": "PINNED_CLASS_PRESERVING_TRAIN_LABEL_PERMUTATION_ADAMW",
+                },
+                "private_exam_independence": "NOT_ESTABLISHED",
+            })
+            for split in target.PUBLIC_SPLITS:
+                data[split + "_five_arm_comparison"] = preregistered_control_comparison({
+                    arm: data["arms"][arm]["cycles"][-1][split + "_accuracy"]
+                    for arm in plan["manifest"]["arms"]
+                })
         (run_root / "report.json").write_text(json.dumps(data), encoding="utf-8")
         return data
 
     def test_read_only_plan_has_distinct_seeds_and_budgets(self) -> None:
+        self.assertEqual(self.spec.required_arms, target.SUPPORTED_ARMS)
         with tempfile.TemporaryDirectory() as parent:
             out = io.StringIO()
             with redirect_stdout(out):
@@ -127,6 +176,115 @@ class MultiSeedProtocolTests(unittest.TestCase):
                     target.ProtocolSpec(required_arms=(*target.SUPPORTED_ARMS, control))
         with self.assertRaisesRegex(ValueError, "independently held prior-skill"):
             target.ProtocolSpec(require_protected_retention=True)
+
+    def test_opt_in_five_arm_plan_and_child_command_are_bound(self) -> None:
+        spec = target.ProtocolSpec(preregistered_controls=True)
+        plan = target.build_plan(spec)
+        self.assertEqual(tuple(plan["manifest"]["arms"]), target.PREREG_ARMS)
+        self.assertTrue(plan["manifest"]["preregistered_controls"])
+        command = target.child_command(plan["manifest"]["jobs"][0],
+                                       Path("/tmp/safe"), spec)
+        self.assertIn("--preregistered-controls", command)
+        with tempfile.TemporaryDirectory() as parent:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(target.main([
+                    "--output-parent", parent, "--run-name", "opt-in",
+                    "--preregistered-controls"]), 0)
+            self.assertFalse((Path(parent) / "opt-in").exists())
+            self.assertEqual(tuple(json.loads(output.getvalue())["manifest"]["arms"]),
+                             target.PREREG_ARMS)
+        with self.assertRaises(ValueError):
+            target.ProtocolSpec(preregistered_controls=True,
+                                required_arms=target.SUPPORTED_ARMS)
+
+    def test_five_arm_fake_audit_binds_step_count_and_label_commitment(self) -> None:
+        spec = target.ProtocolSpec(preregistered_controls=True, steps=(8,))
+        plan = target.build_plan(spec)
+        job = plan["manifest"]["jobs"][0]
+        with tempfile.TemporaryDirectory() as parent:
+            run = Path(parent) / "five"
+            data = self._fake_child(run, job, plan)
+            summary = target.audit_child(job, plan, run)
+            self.assertEqual(summary["checkpoint_files_checked"], 20)
+            self.assertTrue(summary["public_correct_advantage_all_controls"][
+                "public_development"])
+            self.assertEqual(summary["physical_execution"],
+                             "CHILD_SELF_REPORTED_UNATTESTED")
+            data["arms"]["zero_lr"]["cycles"][1]["optimizer_step_invocations"] = 0
+            (run / "report.json").write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "optimizer|control"):
+                target.audit_child(job, plan, run)
+
+            data["arms"]["zero_lr"]["cycles"][1]["optimizer_step_invocations"] = 8
+            data["arms"]["randomized_labels"]["cycles"][0][
+                "label_assignment_sha256"] = "f" * 64
+            (run / "report.json").write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "label"):
+                target.audit_child(job, plan, run)
+
+    def test_five_arm_child_audit_error_durably_fails_closed(self) -> None:
+        spec = target.ProtocolSpec(preregistered_controls=True, steps=(8,))
+        with tempfile.TemporaryDirectory() as parent:
+            with patch.object(target.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    args=["synthetic"], returncode=0, stdout="", stderr="")):
+                with self.assertRaisesRegex(RuntimeError, "audit failed"):
+                    target.execute_plan(spec, parent, "five-malformed",
+                                        timeout_seconds_per_run=60)
+            root = Path(parent) / "five-malformed"
+            self.assertEqual(json.loads((root / "failure.json").read_text())[
+                "reason"], "CHILD_AUDIT_FAILED")
+            self.assertFalse((root / "result.json").exists())
+
+    def test_five_arm_public_aggregates_and_child_summary_are_consistent(self) -> None:
+        spec = target.ProtocolSpec(preregistered_controls=True, steps=(8,))
+        plan = target.build_plan(spec)
+        with tempfile.TemporaryDirectory() as parent:
+            rows = []
+            for job in plan["manifest"]["jobs"]:
+                run = Path(parent) / job["run_name"]
+                self._fake_child(run, job, plan)
+                rows.append(target.audit_child(job, plan, run))
+            aggregate = target.summarize_public_controls(rows, spec)
+            item = aggregate["fixed_public_splits"]["8"]["public_development"]
+            self.assertEqual(set(item["five_arm_means"]), set(target.PREREG_ARMS))
+            self.assertEqual(item["five_arm_positive_seed_count"], 3)
+            self.assertEqual(item["seeds"], 3)
+
+    def test_five_arm_forged_public_comparison_or_learning_rate_rejected(self) -> None:
+        spec = target.ProtocolSpec(preregistered_controls=True, steps=(8,))
+        plan = target.build_plan(spec)
+        job = plan["manifest"]["jobs"][0]
+        with tempfile.TemporaryDirectory() as parent:
+            run = Path(parent) / "five"
+            data = self._fake_child(run, job, plan)
+            data["public_transfer_five_arm_comparison"][
+                "correct_exceeds_every_control"] = False
+            (run / "report.json").write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "comparison"):
+                target.audit_child(job, plan, run)
+            data = self._fake_child(run / "second", job, plan)
+            data["arms"]["zero_lr"]["cycles"][0]["effective_learning_rate"] = .002
+            (run / "second" / "report.json").write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "learning-rate"):
+                target.audit_child(job, plan, run / "second")
+
+    def test_control_optimizer_counters_must_be_typed_integers(self) -> None:
+        spec = target.ProtocolSpec(preregistered_controls=True, steps=(8,))
+        plan = target.build_plan(spec)
+        job = plan["manifest"]["jobs"][0]
+        with tempfile.TemporaryDirectory() as parent:
+            run = Path(parent) / "type-falsifier"
+            data = self._fake_child(run, job, plan)
+            data["arms"]["correct"]["cycles"][0]["optimizer_updates"] = 8.0
+            (run / "report.json").write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "exact integers"):
+                target.audit_child(job, plan, run)
+            data["arms"]["correct"]["cycles"][0]["optimizer_updates"] = 8
+            data["arms"]["zero_lr"]["cycles"][0]["optimizer_step_invocations"] = 8.0
+            (run / "report.json").write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "optimizer"):
+                target.audit_child(job, plan, run)
 
     def test_seed_and_compute_limits_fail_closed(self) -> None:
         invalid = (

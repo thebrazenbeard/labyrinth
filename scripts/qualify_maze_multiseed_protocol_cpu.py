@@ -1,8 +1,9 @@
 """Opt-in, bounded multi-seed CPU orchestration of the public Maze/MiniLM probe.
 
-The backend currently provides correct-label, zero-*update* and inverted-label
-arms. It does NOT implement a zero-learning-rate optimizer-step control or a
-randomized-label arm; requests for those controls are rejected. Public
+The default backend provides correct-label, zero-*update* and inverted-label
+arms. An explicit --preregistered-controls opt-in requests five arms, adding
+zero-learning-rate optimizer steps and deterministic balanced randomized TRAIN
+labels. These remain UNSEALED operator-requested public controls. Public
 development and transfer sets are disclosed, and the same-skill cycle recheck
 is not independently controlled prior-skill retention. No graduation claim.
 
@@ -25,8 +26,10 @@ from typing import Any
 
 from labyrinth.training_scope import TrainingScopeSpec
 from scripts.qualify_maze_conditioned_minilm_cpu import (
+    PREREG_ARMS, PREREG_SCHEMA as PREREG_CHILD_SCHEMA,
     SCHEMA as CHILD_SCHEMA, SKILLS, build_training_cycles, default_scope,
-    select_training_batch,
+    optimizer_learning_rate, preregistered_control_comparison,
+    preregistered_randomized_labels, select_training_batch,
 )
 from scripts.qualify_minilm_cpu import (
     ARMS, HELDOUT, MODEL_ID, TRANSFER, _sha_file, plan_output,
@@ -60,7 +63,8 @@ class ProtocolSpec:
     seeds: tuple[int, ...] = (1101, 2202, 3303)
     steps: tuple[int, ...] = (8, 16)
     weak_skill: str = "negative_polarity"
-    required_arms: tuple[str, ...] = SUPPORTED_ARMS
+    required_arms: tuple[str, ...] | None = None
+    preregistered_controls: bool = False
     require_protected_retention: bool = False
     learning_rate: float = 0.002
 
@@ -78,12 +82,19 @@ class ProtocolSpec:
             raise ValueError("require 1..2 distinct step budgets in [1,16], at most 10 runs")
         if type(self.weak_skill) is not str or self.weak_skill not in SKILLS:
             raise ValueError("weakness hint must name one approved TRAIN skill")
-        if type(self.required_arms) is not tuple or self.required_arms != SUPPORTED_ARMS:
+        if type(self.preregistered_controls) is not bool:
+            raise ValueError("preregistered_controls must be boolean")
+        if (self.required_arms is not None and
+                (type(self.required_arms) is not tuple or
+                 self.required_arms != self.active_arms)):
             raise ValueError(
-                "backend lacks requested controls; supports correct, zero_update "
-                "(skips optimizer.step), inverted ONLY; zero_lr and randomized "
-                "labels are NOT implemented"
+                "backend lacks requested controls in selected explicit mode; "
+                "three-arm default or five-arm opt-in must be complete and ordered"
             )
+        # Preserve the prior public API: callers inspecting required_arms on
+        # a default ProtocolSpec still receive the exact supported tuple.
+        if self.required_arms is None:
+            object.__setattr__(self, "required_arms", self.active_arms)
         if type(self.require_protected_retention) is not bool:
             raise ValueError("require_protected_retention must be bool")
         if self.require_protected_retention:
@@ -91,6 +102,10 @@ class ProtocolSpec:
         if (type(self.learning_rate) not in (int, float)
                 or not 0 < self.learning_rate <= 0.01):
             raise ValueError("learning rate must be finite and in (0, .01]")
+
+    @property
+    def active_arms(self) -> tuple[str, ...]:
+        return PREREG_ARMS if self.preregistered_controls else SUPPORTED_ARMS
 
 
 def build_plan(spec: ProtocolSpec) -> dict[str, Any]:
@@ -125,7 +140,7 @@ def build_plan(spec: ProtocolSpec) -> dict[str, Any]:
         "weakness_provenance": "OPERATOR_DECLARED_NOT_MEASURED",
         "weak_skill": spec.weak_skill,
         "learning_rate": float(spec.learning_rate),
-        "arms": list(spec.required_arms),
+        "arms": list(spec.active_arms),
         "control_semantics": {
             "correct": "TRAIN_LABELS",
             "zero_update": "MATCHED_FORWARD_BACKWARD_SKIPS_OPTIMIZER_STEP",
@@ -146,6 +161,19 @@ def build_plan(spec: ProtocolSpec) -> dict[str, Any]:
         "graduation_authorized": False,
         "jobs": jobs,
     }
+    if spec.preregistered_controls:
+        rows.update({
+            "preregistered_controls": True,
+            "child_schema": PREREG_CHILD_SCHEMA,
+            "control_preregistration": "OPERATOR_REQUESTED_UNSEALED_SOURCE_ONLY",
+            "control_semantics": {
+                "correct": "TRUE_TRAIN_LABELS_ADAMW",
+                "zero_update": "SAME_FORWARD_BACKWARD_NO_OPTIMIZER_STEP",
+                "inverted": "BINARY_LABEL_INVERSION_ADAMW",
+                "zero_lr": "SAME_FORWARD_BACKWARD_ADAMW_STEP_AT_LR_ZERO",
+                "randomized_labels": "PINNED_CLASS_PRESERVING_TRAIN_LABEL_PERMUTATION_ADAMW",
+            },
+        })
     return {"manifest": rows, "manifest_sha256": _digest(rows)}
 
 
@@ -157,15 +185,18 @@ def child_command(job: dict[str, Any], root: Path, spec: ProtocolSpec) -> list[s
             or job["run_name"] !=
             f"seed-{job['seed']:010d}-steps-{job['steps_per_cycle']:02d}"):
         raise ValueError("unbound multi-seed child job")
-    return [
+    command = [
         sys.executable, "-m", "scripts.qualify_maze_conditioned_minilm_cpu",
         "--output-parent", str(root / "runs"),
         "--run-name", job["run_name"],
         "--scope-file", str(root / "scopes" / f"{job['seed']}.json"),
         "--weak-cycle-one", spec.weak_skill,
         "--steps-per-cycle", str(job["steps_per_cycle"]),
-        "--learning-rate", str(spec.learning_rate), "--execute",
+        "--learning-rate", str(spec.learning_rate),
     ]
+    if spec.preregistered_controls:
+        command.append("--preregistered-controls")
+    return command + ["--execute"]
 
 
 def _accuracy(value: Any) -> float:
@@ -174,12 +205,36 @@ def _accuracy(value: Any) -> float:
     return float(value)
 
 
+def _label_assignment_sha256(cycle: Any, arm: str, seed: int) -> str:
+    randomized = (preregistered_randomized_labels(cycle, seed)
+                  if arm == "randomized_labels" else None)
+    assignment = {
+        row.exposure_id: (randomized[row.exposure_id] if randomized is not None
+                          else row.label ^ int(arm == "inverted"))
+        for row in cycle.examples
+    }
+    # Match the opt-in neural child canonicalization exactly, not this
+    # orchestrator's newline-delimited plan commitment convention.
+    return hashlib.sha256(json.dumps(
+        assignment, sort_keys=True,
+        separators=(",", ":")).encode("ascii")).hexdigest()
+
+
 def audit_child(job: dict[str, Any], plan: dict[str, Any], run_root: Path) -> dict[str, Any]:
     """Independent file-hash and source-report consistency audit; NOT an exam."""
     manifest = plan["manifest"]
+    preregistered = manifest.get("preregistered_controls") is True
+    active_arms = PREREG_ARMS if preregistered else SUPPORTED_ARMS
+    if (plan.get("manifest_sha256") != _digest(manifest)
+            or manifest.get("arms") != list(active_arms)
+            or (preregistered and (manifest.get("child_schema") != PREREG_CHILD_SCHEMA
+                or manifest.get("control_preregistration") !=
+                "OPERATOR_REQUESTED_UNSEALED_SOURCE_ONLY"))):
+        raise ValueError("multi-seed precommitted plan or arm mode invalid")
     report_path = run_root / "report.json"
     data = json.loads(report_path.read_text(encoding="utf-8"))
-    if (type(data) is not dict or data.get("schema") != CHILD_SCHEMA
+    if (type(data) is not dict or data.get("schema") != (
+            PREREG_CHILD_SCHEMA if preregistered else CHILD_SCHEMA)
             or data.get("harness_sha256") != manifest["runner_sha256"]
             or data.get("model_id") != manifest["model_id"]
             or data.get("scope") != job["scope"]
@@ -192,12 +247,19 @@ def audit_child(job: dict[str, Any], plan: dict[str, Any], run_root: Path) -> di
             or data.get("crash_recovery") != "NOT_TESTED"):
         raise ValueError("child report mismatches precommitted public source protocol")
     if (type(data.get("arms")) is not dict
-            or set(data["arms"]) != set(SUPPORTED_ARMS)
+            or set(data["arms"]) != set(active_arms)
             or not _valid_sha(data.get("pretrained_base_sha256"))):
         raise ValueError("missing matched neural arms or frozen-base commitment")
+    if preregistered:
+        if (data.get("control_preregistration") !=
+                "OPERATOR_REQUESTED_UNSEALED_SOURCE_ONLY"
+                or data.get("control_arms") != list(active_arms)
+                or data.get("control_semantics") != manifest["control_semantics"]
+                or data.get("private_exam_independence") != "NOT_ESTABLISHED"):
+            raise ValueError("five-arm control semantics not bound to plan")
     scope = TrainingScopeSpec.from_dict(job["scope"])
     cycles = build_training_cycles(scope, weak_cycle_one=(manifest["weak_skill"],))
-    for arm in SUPPORTED_ARMS:
+    for arm in active_arms:
         payload = data["arms"][arm]
         readback = payload.get("final_checkpoint_readback") if type(payload) is dict else None
         history = payload.get("cycles") if type(payload) is dict else None
@@ -230,18 +292,35 @@ def audit_child(job: dict[str, Any], plan: dict[str, Any], run_root: Path) -> di
                 for step in range(job["steps_per_cycle"])
                 for row in select_training_batch(cycle, step)
             ]
+            if any(type(observed.get(key)) is not int for key in (
+                    "cycle", "training_visits", "optimizer_updates",
+                    "forward_steps", "backward_steps")):
+                raise ValueError("neural arm counters must be exact integers")
             if (observed.get("cycle") != index
                     or observed.get("maze_room_ids") != job["cycle_room_ids"][index]
                     or observed.get("maze_exposure_ids") != job["cycle_exposure_ids"][index]
                     or observed.get("training_visit_exposure_ids") != expected_visits
                     or observed.get("training_visits") != len(expected_visits)
+                    or observed.get("forward_steps") != job["steps_per_cycle"]
+                    or observed.get("backward_steps") != job["steps_per_cycle"]
                     or observed.get("optimizer_updates") !=
-                    (0 if arm == "zero_update" else job["steps_per_cycle"])
+                    (0 if arm in ("zero_update", "zero_lr") else job["steps_per_cycle"])
                     or observed.get("pretrained_base_sha256") !=
                     data["pretrained_base_sha256"]
                     or observed.get("frozen_peft_sha256_before") !=
                     observed.get("frozen_peft_sha256_after")):
                 raise ValueError("neural arm is not bound to actual Maze exposures")
+            if preregistered:
+                if (type(observed.get("optimizer_step_invocations")) is not int
+                        or observed.get("optimizer_step_invocations") !=
+                        (0 if arm == "zero_update" else job["steps_per_cycle"])
+                        or type(observed.get("effective_learning_rate")) not in (int, float)
+                        or observed["effective_learning_rate"] !=
+                        optimizer_learning_rate(arm, manifest["learning_rate"])):
+                    raise ValueError("five-arm optimizer control step/learning-rate mismatch")
+                if (observed.get("label_assignment_sha256") !=
+                        _label_assignment_sha256(cycle, arm, job["seed"])):
+                    raise ValueError("five-arm label assignment commitment mismatch")
             for relpath, key in (
                 ("adapter/adapter_model.safetensors", "adapter_file_sha256"),
                 ("head.safetensors", "head_file_sha256"),
@@ -259,12 +338,12 @@ def audit_child(job: dict[str, Any], plan: dict[str, Any], run_root: Path) -> di
             raise ValueError("regeneration lost learner or frozen-backbone state")
         if history[0]["lora_sha256_after"] != history[1]["lora_sha256_before"]:
             raise ValueError("regeneration lost LoRA adapter state")
-        if arm == "zero_update":
+        if arm in ("zero_update", "zero_lr"):
             if any(row.get("trainable_sha256_before") !=
                    row.get("trainable_sha256_after") or
                    row.get("lora_sha256_before") !=
                    row.get("lora_sha256_after") for row in history):
-                raise ValueError("zero-update changed parameters")
+                raise ValueError("zero-update/zero-lr control changed parameters")
         elif any(row.get("trainable_sha256_before") ==
                  row.get("trainable_sha256_after") or
                  row.get("lora_sha256_before") ==
@@ -273,14 +352,14 @@ def audit_child(job: dict[str, Any], plan: dict[str, Any], run_root: Path) -> di
     for index in range(2):
         visits = {
             tuple(data["arms"][arm]["cycles"][index]["training_visit_exposure_ids"])
-            for arm in SUPPORTED_ARMS
+            for arm in active_arms
         }
         if len(visits) != 1:
             raise ValueError("control arms saw different training visits")
-    initials = {data["arms"][arm]["initial_trainable_sha256"] for arm in SUPPORTED_ARMS}
+    initials = {data["arms"][arm]["initial_trainable_sha256"] for arm in active_arms}
     if len(initials) != 1:
         raise ValueError("control arms were not initialized identically")
-    initial_lora = {data["arms"][arm]["initial_lora_sha256"] for arm in SUPPORTED_ARMS}
+    initial_lora = {data["arms"][arm]["initial_lora_sha256"] for arm in active_arms}
     if len(initial_lora) != 1:
         raise ValueError("control LoRA arms were not initialized identically")
     final = {
@@ -293,14 +372,21 @@ def audit_child(job: dict[str, Any], plan: dict[str, Any], run_root: Path) -> di
                 _accuracy(data["arms"][arm]["cycles"][1]["public_development_accuracy"])
                 - _accuracy(data["arms"][arm]["cycles"][0]["public_development_accuracy"])
             ),
-        } for arm in SUPPORTED_ARMS
+        } for arm in active_arms
     }
+    if preregistered:
+        for split in PUBLIC_SPLITS:
+            expected = preregistered_control_comparison({
+                arm: final[arm][split] for arm in active_arms
+            })
+            if data.get(split + "_five_arm_comparison") != expected:
+                raise ValueError("five-arm public control comparison is inconsistent")
     return {
         "run_name": job["run_name"], "seed": job["seed"],
         "steps_per_cycle": job["steps_per_cycle"],
         "pretrained_base_sha256": data["pretrained_base_sha256"],
         "report_sha256": _sha_file(report_path),
-        "checkpoint_files_checked": 12,
+        "checkpoint_files_checked": 4 * len(active_arms),
         "physical_execution": "CHILD_SELF_REPORTED_UNATTESTED",
         "scores": final,
         "public_correct_advantage_both": {
@@ -308,6 +394,11 @@ def audit_child(job: dict[str, Any], plan: dict[str, Any], run_root: Path) -> di
             and final["correct"][split] > final["inverted"][split]
             for split in PUBLIC_SPLITS
         },
+        **({"public_correct_advantage_all_controls": {
+            split: all(final["correct"][split] > final[arm][split]
+                       for arm in active_arms if arm != "correct")
+            for split in PUBLIC_SPLITS
+        }} if preregistered else {}),
         "independent_retention": "NOT_RUN",
         "graduation_authorized": False,
     }
@@ -349,6 +440,18 @@ def summarize_public_controls(
                 ),
                 "seeds": len(group),
             }
+            if spec.preregistered_controls:
+                split_summary[split].update({
+                    "five_arm_means": {
+                        arm: sum(value(row, arm) for row in group) / len(group)
+                        for arm in spec.active_arms
+                    },
+                    "five_arm_positive_seed_count": sum(
+                        all(value(row, "correct") > value(row, arm)
+                            for arm in spec.active_arms if arm != "correct")
+                        for row in group
+                    ),
+                })
         result[str(budget)] = split_summary
     return {
         "fixed_public_splits": result,
@@ -425,6 +528,8 @@ def execute_plan(
         "crash_resume": "NOT_SUPPORTED",
         "graduation_authorized": False,
     }
+    if spec.preregistered_controls:
+        result["preregistered_controls"] = "FIVE_ARM_PUBLIC_UNSEALED_NOT_INDEPENDENT"
     (root / "result.json").write_bytes(_canonical(result))
     return result
 
@@ -443,7 +548,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seeds", default="1101,2202,3303")
     parser.add_argument("--steps", default="8,16")
     parser.add_argument("--weak-skill", default="negative_polarity")
-    parser.add_argument("--required-arms", default="correct,zero_update,inverted")
+    parser.add_argument("--required-arms", default=None)
+    parser.add_argument("--preregistered-controls", action="store_true",
+                        help="opt-in five-arm public-only control audit; no private qualification")
     parser.add_argument("--require-protected-retention", action="store_true")
     parser.add_argument("--timeout-seconds-per-run", type=int, default=900)
     parser.add_argument("--execute", action="store_true")
@@ -452,7 +559,9 @@ def main(argv: list[str] | None = None) -> int:
         spec = ProtocolSpec(
             seeds=_csv_ints(args.seeds), steps=_csv_ints(args.steps),
             weak_skill=args.weak_skill,
-            required_arms=tuple(args.required_arms.split(",")),
+            required_arms=(tuple(args.required_arms.split(","))
+                           if args.required_arms is not None else None),
+            preregistered_controls=args.preregistered_controls,
             require_protected_retention=args.require_protected_retention,
         )
         plan = build_plan(spec)

@@ -47,6 +47,8 @@ on:
       - "labyrinth/minotaur_development_feedback.py"
       - "labyrinth/authority_publication_service.py"
       - "labyrinth/arithmetic_retention_admission.py"
+      - "labyrinth/development_event_reservation_service.py"
+      - "labyrinth/measured_sentiment_corridors.py"
       - "scripts/qualify_hf_regenerative.py"
       - "scripts/qualify_maze_conditioned_minilm_cpu.py"
       - "scripts/qualify_maze_multiseed_protocol_cpu.py"
@@ -89,6 +91,8 @@ on:
       - "tests/test_minotaur_development_feedback.py"
       - "tests/test_authority_publication_service.py"
       - "tests/test_arithmetic_retention_admission.py"
+      - "tests/test_development_event_reservation_service.py"
+      - "tests/test_measured_sentiment_corridors.py"
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
       - "tests/test_qualify_maze_prereg_controls_cpu.py"
       - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
@@ -153,6 +157,8 @@ on:
       - "labyrinth/minotaur_development_feedback.py"
       - "labyrinth/authority_publication_service.py"
       - "labyrinth/arithmetic_retention_admission.py"
+      - "labyrinth/development_event_reservation_service.py"
+      - "labyrinth/measured_sentiment_corridors.py"
       - "scripts/qualify_hf_regenerative.py"
       - "scripts/qualify_maze_conditioned_minilm_cpu.py"
       - "scripts/qualify_maze_multiseed_protocol_cpu.py"
@@ -195,6 +201,8 @@ on:
       - "tests/test_minotaur_development_feedback.py"
       - "tests/test_authority_publication_service.py"
       - "tests/test_arithmetic_retention_admission.py"
+      - "tests/test_development_event_reservation_service.py"
+      - "tests/test_measured_sentiment_corridors.py"
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
       - "tests/test_qualify_maze_prereg_controls_cpu.py"
       - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
@@ -310,7 +318,9 @@ jobs:
               ("tests.test_minotaur_development_feedback", 7),
               ("tests.test_authority_publication_service", 10),
               ("tests.test_arithmetic_retention_admission", 8),
-              ("tests.test_qualify_maze_multiseed_protocol_cpu", 11),
+              ("tests.test_development_event_reservation_service", 15),
+              ("tests.test_measured_sentiment_corridors", 5),
+              ("tests.test_qualify_maze_multiseed_protocol_cpu", 21),
               ("tests.test_qualify_maze_prereg_controls_cpu", 5),
           )
           for module_name, min_count in new_required:
