@@ -21,7 +21,7 @@ from pathlib import Path
 import re
 from typing import Any, Callable, Mapping
 
-from scripts import qualify_maze_multiseed_protocol_cpu as protocol
+from labyrinth import maze_multiseed_protocol_cpu_experiment as protocol
 
 
 _SHA = re.compile(r"[a-f0-9]{64}\Z", re.ASCII)

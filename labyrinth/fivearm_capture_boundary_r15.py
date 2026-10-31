@@ -21,7 +21,7 @@ import re
 from pathlib import Path
 from typing import Callable, Protocol, TypeAlias
 
-from scripts import qualify_maze_multiseed_protocol_cpu as protocol
+from labyrinth import maze_multiseed_protocol_cpu_experiment as protocol
 
 from .fivearm_campaign_admission_r13 import (
     FiveArmCampaignEvidence, FiveArmCampaignError,

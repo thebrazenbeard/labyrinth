@@ -36,12 +36,12 @@ from .measured_neural_batch_binding import (
     BoundMeasuredNeuralBatches, verify_precommitted_neural_batch_schedule,
 )
 from . import measured_neural_batch_binding as measured_source
-from scripts.qualify_maze_conditioned_minilm_cpu import (
+from labyrinth.maze_conditioned_minilm_cpu_experiment import (
     PREREG_ARMS, TrainingCycle, build_training_cycles,
     optimizer_learning_rate, preregistered_randomized_labels,
     select_training_batch, validate_scope,
 )
-from scripts import qualify_maze_conditioned_minilm_cpu as maze_runner
+from labyrinth import maze_conditioned_minilm_cpu_experiment as maze_runner
 
 
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}\Z", re.ASCII)

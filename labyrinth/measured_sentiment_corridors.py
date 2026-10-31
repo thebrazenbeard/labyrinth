@@ -28,7 +28,7 @@ from .minotaur_development_feedback import (
     MinotaurDevelopmentFeedback, SkillDevelopmentObservation, _tactic,
 )
 from .training_scope import TrainingScopeSpec
-from scripts.qualify_maze_conditioned_minilm_cpu import (
+from labyrinth.maze_conditioned_minilm_cpu_experiment import (
     SKILLS, TrainingCycle, TrainingExample, build_training_cycles,
     validate_scope,
 )

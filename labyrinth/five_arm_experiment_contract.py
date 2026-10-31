@@ -20,7 +20,7 @@ import re
 from typing import Any
 
 from labyrinth.training_scope import TrainingScopeSpec
-from scripts.qualify_maze_conditioned_minilm_cpu import (
+from labyrinth.maze_conditioned_minilm_cpu_experiment import (
     NEGATIVES, OBJECTIVE, POSITIVES, PREREG_ARMS, SKILLS, TEMPLATES,
     build_training_cycles, optimizer_learning_rate,
     preregistered_randomized_labels, select_training_batch,

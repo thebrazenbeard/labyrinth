@@ -53,10 +53,15 @@ on:
       - "labyrinth/development_event_reservation_service.py"
       - "labyrinth/measured_sentiment_corridors.py"
       - "labyrinth/minilm_optimizer_state_resume.py"
+      - "labyrinth/minilm_cpu_experiment.py"
+      - "labyrinth/maze_conditioned_minilm_cpu_experiment.py"
+      - "labyrinth/maze_multiseed_protocol_cpu_experiment.py"
       - "labyrinth/sealed_semantic_exam_protocol.py"
       - "labyrinth/external_monotonic_authority_contract.py"
       - "labyrinth/measured_neural_batch_binding.py"
       - "labyrinth/five_arm_experiment_contract.py"
+      - "labyrinth/fivearm_campaign_admission_r13.py"
+      - "labyrinth/fivearm_capture_boundary_r15.py"
       - "labyrinth/five_arm_statistical_screen.py"
       - "labyrinth/evidence_pointer.py"
       - "labyrinth/rezon_pointer_mapping_r57.py"
@@ -130,6 +135,7 @@ on:
       - "tests/test_development_event_reservation_service.py"
       - "tests/test_measured_sentiment_corridors.py"
       - "tests/test_minilm_optimizer_state_resume.py"
+      - "tests/test_private_wheel_minilm_contract_r60.py"
       - "tests/test_sealed_semantic_exam_protocol.py"
       - "tests/test_external_monotonic_authority_contract.py"
       - "tests/test_measured_neural_batch_binding.py"
@@ -216,10 +222,15 @@ on:
       - "labyrinth/development_event_reservation_service.py"
       - "labyrinth/measured_sentiment_corridors.py"
       - "labyrinth/minilm_optimizer_state_resume.py"
+      - "labyrinth/minilm_cpu_experiment.py"
+      - "labyrinth/maze_conditioned_minilm_cpu_experiment.py"
+      - "labyrinth/maze_multiseed_protocol_cpu_experiment.py"
       - "labyrinth/sealed_semantic_exam_protocol.py"
       - "labyrinth/external_monotonic_authority_contract.py"
       - "labyrinth/measured_neural_batch_binding.py"
       - "labyrinth/five_arm_experiment_contract.py"
+      - "labyrinth/fivearm_campaign_admission_r13.py"
+      - "labyrinth/fivearm_capture_boundary_r15.py"
       - "labyrinth/five_arm_statistical_screen.py"
       - "labyrinth/evidence_pointer.py"
       - "labyrinth/rezon_pointer_mapping_r57.py"
@@ -293,6 +304,7 @@ on:
       - "tests/test_development_event_reservation_service.py"
       - "tests/test_measured_sentiment_corridors.py"
       - "tests/test_minilm_optimizer_state_resume.py"
+      - "tests/test_private_wheel_minilm_contract_r60.py"
       - "tests/test_sealed_semantic_exam_protocol.py"
       - "tests/test_external_monotonic_authority_contract.py"
       - "tests/test_measured_neural_batch_binding.py"
@@ -454,6 +466,9 @@ jobs:
               ("tests.test_retention_sample_planning_r57", 10),
               ("tests.test_rezon_pointer_mapping_r57", 10),
               ("tests.test_fresh_process_eval_manifest_r57", 10),
+              # R60 installed-wheel import contract: package-private MiniLM
+              # implementation, no global scripts namespace, no import side effects.
+              ("tests.test_private_wheel_minilm_contract_r60", 1),
               ("tests.test_signed_minotaur_pair_r25", 10),
               ("tests.test_qualify_v2_weight_updates_cpu_r25", 18),
               ("tests.test_v2_checkpoint_cpu_smoke_r22", 5),

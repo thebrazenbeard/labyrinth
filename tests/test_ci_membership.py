@@ -256,6 +256,36 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('or result.skipped', workflow)
         self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
 
+    def test_r60_private_wheel_contract_is_required_by_both_cpu_ci_triggers(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        path_groups = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        # Packaging relocates three reusable MiniLM contracts and alters two
+        # routing consumers. A diff touching only these files must still run
+        # pinned, no-skip CPU verification; the legacy CLI wrapper paths are
+        # already covered by the prior source contract.
+        required_paths = (
+            "labyrinth/minilm_cpu_experiment.py",
+            "labyrinth/maze_conditioned_minilm_cpu_experiment.py",
+            "labyrinth/maze_multiseed_protocol_cpu_experiment.py",
+            "labyrinth/fivearm_campaign_admission_r13.py",
+            "labyrinth/fivearm_capture_boundary_r15.py",
+            "tests/test_private_wheel_minilm_contract_r60.py",
+        )
+        for trigger, paths in path_groups.items():
+            for path in required_paths:
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertTrue((root / path).is_file())
+                    self.assertIn(f'      - "{path}"', paths)
+        self.assertIn('("tests.test_private_wheel_minilm_contract_r60", 1)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+
     def test_l12_l14_neural_and_custody_boundaries_are_required_in_cpu_ci(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()

@@ -15,7 +15,7 @@ import json
 import re
 from typing import Any
 
-from scripts.qualify_maze_conditioned_minilm_cpu import (
+from labyrinth.maze_conditioned_minilm_cpu_experiment import (
     PREREG_ARMS, TrainingCycle, TrainingExample, validate_cycles,
     plan_signed_measured_sentiment_batches,
 )

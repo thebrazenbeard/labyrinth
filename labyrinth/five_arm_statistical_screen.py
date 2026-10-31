@@ -18,7 +18,7 @@ from labyrinth.five_arm_experiment_contract import (
     FrozenFiveArmPlan, PriorCaseObservation, audit_distinct_eval_seeds,
     audit_prior_skill_retention,
 )
-from scripts.qualify_maze_conditioned_minilm_cpu import PREREG_ARMS
+from labyrinth.maze_conditioned_minilm_cpu_experiment import PREREG_ARMS
 
 SCHEMA = "labyrinth.five-arm-seed-paired-source-screen.v1"
 CONTROLS = tuple(arm for arm in PREREG_ARMS if arm != "correct")
