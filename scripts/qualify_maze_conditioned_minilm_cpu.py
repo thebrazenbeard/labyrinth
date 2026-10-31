@@ -30,6 +30,10 @@ from scripts.qualify_minilm_cpu import (
 
 
 SCHEMA = "labyrinth.maze-conditioned-minilm-cpu-development.v1"
+PREREG_SCHEMA = "labyrinth.maze-conditioned-minilm-five-arm-public-controls.v1"
+# The original three-arm physical protocol remains the default. Extra arms
+# must be explicitly requested; neither mode qualifies a protected exam.
+PREREG_ARMS = ARMS + ("zero_lr", "randomized_labels")
 OBJECTIVE = "sentiment.binary_polarity"
 SKILLS = ("positive_polarity", "negative_polarity")
 SKILL_LABEL = {"positive_polarity": 1, "negative_polarity": 0}
@@ -236,6 +240,107 @@ def select_training_batch(cycle: TrainingCycle, step: int) -> tuple[TrainingExam
                  for offset in range(4))
 
 
+def configured_arms(preregistered_controls: bool) -> tuple[str, ...]:
+    if type(preregistered_controls) is not bool:
+        raise ValueError("control mode must be a boolean")
+    return PREREG_ARMS if preregistered_controls else ARMS
+
+
+def preregistered_randomized_labels(
+    cycle: TrainingCycle, scope_seed: int,
+) -> dict[str, int]:
+    """Pinned TRAIN-only label permutation, not an independent holdout.
+
+    Exactly preserves this cycle's binary label counts and Maze visits, while
+    excluding an unchanged assignment or deterministic full inversion.
+    """
+    if (type(cycle) is not TrainingCycle or type(scope_seed) is not int
+            or scope_seed < 0 or not cycle.examples
+            or any(type(row) is not TrainingExample or row.label not in (0, 1)
+                   for row in cycle.examples)):
+        raise ValueError("valid generated binary TRAIN cycle and seed required")
+    labels = [row.label for row in cycle.examples]
+    if min(labels.count(0), labels.count(1)) < 2:
+        raise ValueError("randomized control requires both TRAIN classes")
+    identity = tuple(labels)
+    inverse = tuple(1-label for label in labels)
+    source = (
+        f"labyrinth.maze-preregistered-labels.v1\0{scope_seed}\0"
+        f"{cycle.plan.scope_fingerprint}\0{cycle.plan.cycle_index}"
+    ).encode("ascii")
+    rng = random.Random(int.from_bytes(hashlib.sha256(source).digest(), "big"))
+    for _ in range(128):
+        shuffled = labels.copy()
+        rng.shuffle(shuffled)
+        # A one-step run visits only the first four cases. The randomized
+        # arm must differ on at least one *actually visited* case even at
+        # that minimum budget, not only on unvisited rows farther down.
+        if (tuple(shuffled) not in (identity, inverse)
+                and any(shuffled[index] != labels[index]
+                        for index in range(min(4, len(labels))))):
+            return {row.exposure_id: label
+                    for row, label in zip(cycle.examples, shuffled)}
+    raise ValueError("no nontrivial class-preserving label permutation found")
+
+
+def optimizer_learning_rate(arm: str, nominal_rate: float) -> float:
+    if (type(arm) is not str or arm not in PREREG_ARMS
+            or type(nominal_rate) not in (float, int)
+            or not math.isfinite(nominal_rate) or not 0 < nominal_rate <= .01):
+        raise ValueError("invalid arm or nominal learning rate")
+    return 0.0 if arm == "zero_lr" else float(nominal_rate)
+
+
+def perform_optimizer_step(arm: str, optimizer: Any) -> None:
+    """zero_lr intentionally runs optimizer.step(), unlike zero_update."""
+    if arm not in PREREG_ARMS:
+        raise ValueError("unsupported training control arm")
+    if arm != "zero_update":
+        optimizer.step()
+
+
+def training_batch_labels(
+    batch: tuple[TrainingExample, ...], arm: str,
+    randomized_labels: dict[str, int] | None = None,
+) -> tuple[int, ...]:
+    """Exactly the labels passed to loss(), with control provenance explicit."""
+    if (type(batch) is not tuple or not batch
+            or type(arm) is not str or arm not in PREREG_ARMS
+            or any(type(row) is not TrainingExample or row.label not in (0, 1)
+                   for row in batch)):
+        raise ValueError("invalid generated TRAIN batch or arm")
+    if arm == "randomized_labels":
+        if (type(randomized_labels) is not dict
+                or any(row.exposure_id not in randomized_labels
+                       or type(randomized_labels[row.exposure_id]) is not int
+                       or randomized_labels[row.exposure_id] not in (0, 1)
+                       for row in batch)):
+            raise ValueError("randomized-label arm requires valid pinned assignments")
+        return tuple(randomized_labels[row.exposure_id] for row in batch)
+    if randomized_labels is not None:
+        raise ValueError("label permutation supplied for a nonrandomized arm")
+    return tuple(row.label ^ int(arm == "inverted") for row in batch)
+
+
+def preregistered_control_comparison(scores: dict[str, float]) -> dict[str, Any]:
+    if (type(scores) is not dict or set(scores) != set(PREREG_ARMS)
+            or any(type(value) not in (float, int) or not math.isfinite(value)
+                   or not 0 <= value <= 1 for value in scores.values())):
+        raise ValueError("complete five-arm finite public scores required")
+    return {
+        "correct_minus_controls": {
+            arm: float(scores["correct"] - scores[arm])
+            for arm in PREREG_ARMS if arm != "correct"
+        },
+        "correct_exceeds_every_control": all(
+            scores["correct"] > scores[arm]
+            for arm in PREREG_ARMS if arm != "correct"
+        ),
+        "qualification": "PUBLIC_DEVELOPMENT_ONLY",
+        "independent_generalization_qualified": False,
+    }
+
+
 def hash_named_weights(named: Iterable[tuple[str, Any]]) -> str:
     """Byte-exact weight identity, including name, shape and dtype.
 
@@ -325,6 +430,7 @@ def execute(
     run_root: Path, *, scope: TrainingScopeSpec,
     cycles: tuple[TrainingCycle, ...], steps_per_cycle: int,
     learning_rate: float, model_id: str = MODEL_ID,
+    preregistered_controls: bool = False,
 ) -> dict[str, Any]:
     validate_scope(scope)
     validate_cycles(cycles)
@@ -341,6 +447,7 @@ def execute(
                         > authoritative[1].plan.counts_by_skill.get(skill, 0))
     if cycles != build_training_cycles(scope, weak_cycle_one=weak_skills):
         raise ValueError("untrusted training cycles diverged from declared Maze")
+    active_arms = configured_arms(preregistered_controls)
 
     import os
     os.environ["HF_HUB_OFFLINE"] = "1"
@@ -414,7 +521,8 @@ def execute(
         return score_predictions(predict(model, head, rows), rows)
 
     report: dict[str, Any] = {
-        "schema": SCHEMA, "qualification": "PUBLIC_DEVELOPMENT_ONLY",
+        "schema": PREREG_SCHEMA if preregistered_controls else SCHEMA,
+        "qualification": "PUBLIC_DEVELOPMENT_ONLY",
         "pretrained_origin": "CACHED_MODEL_ID_NOT_INDEPENDENTLY_ATTESTED",
         "model_id": model_id, "device": "cpu", "cpu_torch_threads": 2,
         "torch_version": str(torch.__version__),
@@ -430,9 +538,23 @@ def execute(
         "crash_recovery": "NOT_TESTED",
         "physical_model_byte_custody": "SELF_REPORTED",
     }
+    if preregistered_controls:
+        report.update({
+            "control_preregistration": "OPERATOR_REQUESTED_UNSEALED_SOURCE_ONLY",
+            "control_arms": list(active_arms),
+            "control_semantics": {
+                "correct": "TRUE_TRAIN_LABELS_ADAMW",
+                "zero_update": "SAME_FORWARD_BACKWARD_NO_OPTIMIZER_STEP",
+                "inverted": "BINARY_LABEL_INVERSION_ADAMW",
+                "zero_lr": "SAME_FORWARD_BACKWARD_ADAMW_STEP_AT_LR_ZERO",
+                "randomized_labels": "PINNED_CLASS_PRESERVING_TRAIN_LABEL_PERMUTATION_ADAMW",
+            },
+            "private_exam_independence": "NOT_ESTABLISHED",
+        })
     run_root.mkdir(mode=0o700)
     (run_root / "maze_manifest.json").write_text(json.dumps({
-        "schema": SCHEMA, "scope": scope.to_dict(),
+        "schema": PREREG_SCHEMA if preregistered_controls else SCHEMA,
+        "scope": scope.to_dict(),
         "cycles": [{
             "cycle_index": cycle.plan.cycle_index,
             "weak_skill_counts": cycle.plan.counts_by_skill,
@@ -444,7 +566,7 @@ def execute(
     report["maze_manifest_sha256"] = _sha_file(run_root / "maze_manifest.json")
 
     expected_base_digest = None
-    for arm in ARMS:
+    for arm in active_arms:
         print(f"arm={arm} starting", flush=True)
         arm_root = run_root / arm
         arm_root.mkdir()
@@ -454,6 +576,8 @@ def execute(
         preceding_frozen = None
         cycle_results = []
         for cycle in cycles:
+            randomized_labels = (preregistered_randomized_labels(cycle, scope.seed)
+                                 if arm == "randomized_labels" else None)
             model, head, pretrained_base = create_model(previous)
             if expected_base_digest is None:
                 expected_base_digest = pretrained_base
@@ -475,7 +599,10 @@ def execute(
             params = [p for p in model.parameters() if p.requires_grad]
             if not params:
                 raise RuntimeError("model has no trainable pretrained adapter")
-            optimizer = torch.optim.AdamW(params + list(head.parameters()), lr=learning_rate)
+            optimizer = torch.optim.AdamW(
+                params + list(head.parameters()),
+                lr=optimizer_learning_rate(arm, learning_rate),
+            )
             examples = cycle.examples
             visits = []
             model.train()
@@ -483,16 +610,16 @@ def execute(
             for step in range(steps_per_cycle):
                 batch = select_training_batch(cycle, step)
                 visits.extend(row.exposure_id for row in batch)
-                labels = torch.tensor([
-                    row.label ^ int(arm == "inverted") for row in batch
-                ], dtype=torch.long)
+                labels = torch.tensor(
+                    training_batch_labels(batch, arm, randomized_labels),
+                    dtype=torch.long,
+                )
                 prediction = logits(model, head, [row.prompt for row in batch])
                 loss = torch.nn.functional.cross_entropy(prediction, labels)
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
-                if arm != "zero_update":
-                    optimizer.step()
-                else:
+                perform_optimizer_step(arm, optimizer)
+                if arm == "zero_update":
                     optimizer.zero_grad(set_to_none=True)
             after = trainable_digest(model, head)
             lora_after = adapter_digest(model)
@@ -501,9 +628,11 @@ def execute(
                 if not param.requires_grad
             )
             require_frozen_identity(frozen_before, frozen_after)
-            if arm == "zero_update" and (after != before or lora_after != lora_before):
-                raise RuntimeError("zero-update arm mutated")
-            if arm != "zero_update" and (after == before or lora_after == lora_before):
+            if arm in ("zero_update", "zero_lr") and (
+                    after != before or lora_after != lora_before):
+                raise RuntimeError("no-parameter-update control arm mutated")
+            if arm not in ("zero_update", "zero_lr") and (
+                    after == before or lora_after == lora_before):
                 raise RuntimeError("trainable parameters did not change")
             checkpoint = arm_root / f"cycle-{cycle.plan.cycle_index}"
             checkpoint.mkdir()
@@ -511,7 +640,7 @@ def execute(
             save_file({key: val.detach().cpu().contiguous()
                        for key, val in head.state_dict().items()},
                       str(checkpoint / "head.safetensors"))
-            cycle_results.append({
+            cycle_result = {
                 "cycle": cycle.plan.cycle_index,
                 "maze_room_ids": [row.room_id for row in examples],
                 "maze_case_seeds": [row.case_seed for row in examples],
@@ -519,7 +648,8 @@ def execute(
                 "training_visit_exposure_ids": visits,
                 "training_visits": len(visits), "unique_training_cases": len(examples),
                 "forward_steps": steps_per_cycle, "backward_steps": steps_per_cycle,
-                "optimizer_updates": 0 if arm == "zero_update" else steps_per_cycle,
+                "optimizer_updates": 0 if arm in ("zero_update", "zero_lr")
+                else steps_per_cycle,
                 "trainable_sha256_before": before, "trainable_sha256_after": after,
                 "lora_sha256_before": lora_before, "lora_sha256_after": lora_after,
                 "pretrained_base_sha256": pretrained_base,
@@ -530,7 +660,25 @@ def execute(
                 "public_development_accuracy_before": baseline_dev,
                 "public_development_accuracy": score(model, head, PUBLIC_DEVELOPMENT),
                 "public_transfer_accuracy": score(model, head, PUBLIC_TRANSFER),
-            })
+            }
+            if preregistered_controls:
+                cycle_result.update({
+                    "optimizer_step_invocations": 0 if arm == "zero_update"
+                    else steps_per_cycle,
+                    "effective_learning_rate": optimizer_learning_rate(
+                        arm, learning_rate),
+                    "label_assignment_sha256": hashlib.sha256(
+                        json.dumps({
+                            row.exposure_id: assigned
+                            for row, assigned in zip(
+                                cycle.examples,
+                                training_batch_labels(cycle.examples, arm,
+                                                      randomized_labels),
+                            )
+                        }, sort_keys=True, separators=(",", ":")).encode("ascii")
+                    ).hexdigest(),
+                })
+            cycle_results.append(cycle_result)
             preceding_state, preceding_lora, preceding_frozen = after, lora_after, frozen_after
             previous = checkpoint
             print(f"arm={arm} cycle={cycle.plan.cycle_index} saved", flush=True)
@@ -575,13 +723,15 @@ def execute(
             "final_checkpoint_readback": readback,
             "cycles": cycle_results,
         }
-    if len({report["arms"][arm]["initial_trainable_sha256"] for arm in ARMS}) != 1:
+    if len({report["arms"][arm]["initial_trainable_sha256"] for arm in active_arms}) != 1:
         raise RuntimeError("matched controls had different initial trainable parameters")
+    if len({report["arms"][arm]["initial_lora_sha256"] for arm in active_arms}) != 1:
+        raise RuntimeError("matched controls had different initial LoRA parameters")
     report["pretrained_base_sha256"] = expected_base_digest
     for cycle_index in range(2):
         exposures = {
             tuple(report["arms"][arm]["cycles"][cycle_index]["training_visit_exposure_ids"])
-            for arm in ARMS
+            for arm in active_arms
         }
         if len(exposures) != 1:
             raise RuntimeError("matched controls received nonmatching training visits")
@@ -596,8 +746,14 @@ def execute(
     report["public_development_retention"] = {
         arm: (report["arms"][arm]["cycles"][1]["public_development_accuracy"]
               - report["arms"][arm]["cycles"][0]["public_development_accuracy"])
-        for arm in ARMS
+        for arm in active_arms
     }
+    if preregistered_controls:
+        for split in ("public_development", "public_transfer"):
+            report[split + "_five_arm_comparison"] = preregistered_control_comparison({
+                arm: report["arms"][arm]["cycles"][-1][split + "_accuracy"]
+                for arm in active_arms
+            })
     report["learning_qualification"] = "NOT_ESTABLISHED_UNTIL_INDEPENDENT_EVALUATION"
     (run_root / "report.json").write_text(
         json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8",
@@ -615,6 +771,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="operator-declared weakness; never an independent exam signal")
     parser.add_argument("--steps-per-cycle", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=0.002)
+    parser.add_argument("--preregistered-controls", action="store_true",
+                        help="opt-in five-arm public probe; unsealed, not private qualification")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args(argv)
     if (not 1 <= args.steps_per_cycle <= 16
@@ -635,7 +793,8 @@ def main(argv: list[str] | None = None) -> int:
         output = plan_output(args.output_parent, args.run_name)
         if not args.execute:
             print(json.dumps({
-                "schema": SCHEMA, "execute": False, "run_root": str(output),
+                "schema": PREREG_SCHEMA if args.preregistered_controls else SCHEMA,
+                "execute": False, "run_root": str(output),
                 "scope_fingerprint": scope.fingerprint, "objective_id": scope.objective_id,
                 "cycles": [{
                     "cycle_index": c.plan.cycle_index,
@@ -647,12 +806,17 @@ def main(argv: list[str] | None = None) -> int:
                 "validation": validation, "model_id": MODEL_ID,
                 "weakness_feedback_provenance": "OPERATOR_DECLARED_NOT_MEASURED",
                 "public_development_only": True, "graduation_authorized": False,
+                **({
+                    "arms": list(configured_arms(True)),
+                    "control_preregistration": "OPERATOR_REQUESTED_UNSEALED_SOURCE_ONLY",
+                } if args.preregistered_controls else {}),
             }, sort_keys=True))
             return 0
         report = execute(
             output, scope=scope, cycles=cycles,
             steps_per_cycle=args.steps_per_cycle,
             learning_rate=args.learning_rate,
+            preregistered_controls=args.preregistered_controls,
         )
         print(json.dumps({
             "run_root": str(output),

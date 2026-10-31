@@ -42,8 +42,14 @@ on:
       - "labyrinth/retention_family_registry.py"
       - "labyrinth/retention_entrypoint_guard.py"
       - "labyrinth/monotonic_anchor_protocol.py"
+      - "labyrinth/measured_corridor_handoff.py"
+      - "labyrinth/measured_taskmaster_transition.py"
+      - "labyrinth/minotaur_development_feedback.py"
+      - "labyrinth/authority_publication_service.py"
+      - "labyrinth/arithmetic_retention_admission.py"
       - "scripts/qualify_hf_regenerative.py"
       - "scripts/qualify_maze_conditioned_minilm_cpu.py"
+      - "scripts/qualify_maze_multiseed_protocol_cpu.py"
       - "scripts/qualify_neural_journey_e2e_cpu.py"
       - "scripts/qualify_taskmaster_counterfactual_cpu.py"
       - "scripts/qualify_minilm*.py"
@@ -78,7 +84,14 @@ on:
       - "tests/test_retention_family_registry.py"
       - "tests/test_retention_entrypoint_guard.py"
       - "tests/test_monotonic_anchor_protocol.py"
+      - "tests/test_measured_corridor_handoff.py"
+      - "tests/test_measured_taskmaster_transition.py"
+      - "tests/test_minotaur_development_feedback.py"
+      - "tests/test_authority_publication_service.py"
+      - "tests/test_arithmetic_retention_admission.py"
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
+      - "tests/test_qualify_maze_prereg_controls_cpu.py"
+      - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
       - "tests/test_qualify_neural_journey_e2e_cpu.py"
       - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
       - "tests/test_qualify_minotaur_neural_taskmaster_cpu.py"
@@ -135,8 +148,14 @@ on:
       - "labyrinth/retention_family_registry.py"
       - "labyrinth/retention_entrypoint_guard.py"
       - "labyrinth/monotonic_anchor_protocol.py"
+      - "labyrinth/measured_corridor_handoff.py"
+      - "labyrinth/measured_taskmaster_transition.py"
+      - "labyrinth/minotaur_development_feedback.py"
+      - "labyrinth/authority_publication_service.py"
+      - "labyrinth/arithmetic_retention_admission.py"
       - "scripts/qualify_hf_regenerative.py"
       - "scripts/qualify_maze_conditioned_minilm_cpu.py"
+      - "scripts/qualify_maze_multiseed_protocol_cpu.py"
       - "scripts/qualify_neural_journey_e2e_cpu.py"
       - "scripts/qualify_taskmaster_counterfactual_cpu.py"
       - "scripts/qualify_minilm*.py"
@@ -171,7 +190,14 @@ on:
       - "tests/test_retention_family_registry.py"
       - "tests/test_retention_entrypoint_guard.py"
       - "tests/test_monotonic_anchor_protocol.py"
+      - "tests/test_measured_corridor_handoff.py"
+      - "tests/test_measured_taskmaster_transition.py"
+      - "tests/test_minotaur_development_feedback.py"
+      - "tests/test_authority_publication_service.py"
+      - "tests/test_arithmetic_retention_admission.py"
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
+      - "tests/test_qualify_maze_prereg_controls_cpu.py"
+      - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
       - "tests/test_qualify_neural_journey_e2e_cpu.py"
       - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
       - "tests/test_qualify_minotaur_neural_taskmaster_cpu.py"
@@ -279,6 +305,13 @@ jobs:
               ("tests.test_atomic_artifact_publication", 10),
               ("tests.test_preregistered_control_matrix", 18),
               ("tests.test_arithmetic_semantic_case_key", 7),
+              ("tests.test_measured_corridor_handoff", 5),
+              ("tests.test_measured_taskmaster_transition", 5),
+              ("tests.test_minotaur_development_feedback", 7),
+              ("tests.test_authority_publication_service", 10),
+              ("tests.test_arithmetic_retention_admission", 8),
+              ("tests.test_qualify_maze_multiseed_protocol_cpu", 11),
+              ("tests.test_qualify_maze_prereg_controls_cpu", 5),
           )
           for module_name, min_count in new_required:
               suite = unittest.defaultTestLoader.loadTestsFromName(module_name)
