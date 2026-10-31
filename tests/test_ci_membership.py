@@ -218,6 +218,18 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('"cryptography==50.0.2"', neural)
         self.assertIn('cryptography.__version__ == "50.0.2"', neural)
 
+    def test_private_wheel_requires_pinned_build_backend_in_both_ci_interpreters(self):
+        root = Path(__file__).resolve().parents[1]
+        for workflow_name in ("ci.yml", "minotaur-neural-cpu.yml"):
+            workflow = (root / ".github/workflows" / workflow_name).read_text()
+            with self.subTest(workflow=workflow_name):
+                backend_install = 'python -m pip install --disable-pip-version-check "setuptools==80.9.0"'
+                self.assertIn(backend_install, workflow)
+                # Installed-wheel regression intentionally uses --no-index and
+                # --no-build-isolation: the active interpreter must possess the
+                # exact PEP 517 backend BEFORE the editable project install.
+                self.assertLess(workflow.index(backend_install), workflow.index(' -e '))
+
     def test_r57_source_boundaries_are_required_not_optional_in_neural_cpu_ci(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()

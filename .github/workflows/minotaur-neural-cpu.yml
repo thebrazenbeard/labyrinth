@@ -370,6 +370,10 @@ jobs:
           python-version: "3.12"
       - name: Install pinned CPU neural dependencies
         run: |
+          # The mandatory source-only installed-wheel test builds offline with
+          # --no-build-isolation; editable project installation's temporary
+          # build env does not provision its backend in this interpreter.
+          python -m pip install --disable-pip-version-check "setuptools==80.9.0"
           python -m pip install --disable-pip-version-check -e . "numpy==2.5.4" "safetensors==0.8.0" "cryptography==50.0.2"
           python -m pip install --disable-pip-version-check --extra-index-url https://download.pytorch.org/whl/cpu "torch==2.5.1+cpu"
       - name: Require CPU PyTorch and pinned versions
