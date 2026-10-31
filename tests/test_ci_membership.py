@@ -303,7 +303,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             ("tests.test_q8_external_acceptance_source_r68", 9),
             ("tests.test_rezon_two_adapter_source_partition_r68", 13),
             ("tests.test_r68_minotaur_policy_concurrency", 1),
-            ("tests.test_journey_policy_runner", 7),
+            ("tests.test_journey_policy_runner", 8),
         )
         for module_name, minimum in minimum_case_counts:
             with self.subTest(module=module_name):
@@ -332,6 +332,26 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('or result.skipped', workflow)
         self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
         self.assertIn('R72 source-only nonlearning registry receipt', workflow)
+
+    def test_r72_measured_toy_bridge_changes_trigger_required_no_skip_cpu_tests(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for trigger, event_paths in paths_by_trigger.items():
+            for path in (
+                "labyrinth/minotaur_measured_toy_bridge_r72.py",
+                "tests/test_minotaur_measured_toy_bridge_r72.py",
+            ):
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertIn(f'      - "{path}"', event_paths)
+        self.assertIn('("tests.test_minotaur_measured_toy_bridge_r72", 5)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('R72 measured toy', workflow)
 
     def test_r60_private_wheel_contract_is_required_by_both_cpu_ci_triggers(self):
         root = Path(__file__).resolve().parents[1]

@@ -198,6 +198,26 @@ class LiveTrainingCorridorTests(unittest.TestCase):
         self.assertEqual(len(runner.observations), 2)
         self.assertNotEqual(second.policy_before_sha256, second.policy_after_sha256)
 
+    def test_registry_transition_receipt_bridges_two_scored_observations(self) -> None:
+        s = scope(scale=2)
+        runner = TrainingCorridorRunner.begin(s, generate_maze_plan(s, 0),
+                                              checkpoint_sha256=START)
+        first = runner.next_training_prompt()
+        first_observed = runner.submit_training_response(toy_arithmetic_learner(first))
+        self.assertEqual(getattr(runner, "registry_transitions", None), ())
+
+        second = runner.next_training_prompt()
+        self.assertEqual(len(runner.registry_transitions), 1)
+        admitted = runner.registry_transitions[0]
+        self.assertEqual(admitted.transition_kind, "train_registry_admission_nonlearning")
+        self.assertIs(admitted.train_observation, False)
+        self.assertIs(admitted.authorizes_model_update, False)
+        self.assertEqual(admitted.before_policy_sha256, first_observed.policy_after_sha256)
+        self.assertEqual(admitted.after_policy_sha256, runner.policy.model_hash)
+        self.assertEqual(admitted.added_case_ids, (second.challenge_id,))
+        second_observed = runner.submit_training_response(toy_arithmetic_learner(second))
+        self.assertEqual(second_observed.policy_before_sha256, admitted.after_policy_sha256)
+
     def test_receipt_predecessor_is_atomic_observe_hash_after_concurrent_admission(self) -> None:
         s = scope(scale=1)
         runner = TrainingCorridorRunner.begin(

@@ -28,7 +28,8 @@ from .journey_challenges import TraineeRoomView
 from .journey import JourneyState, TrainingCompletionReceipt
 from .minotaur_model import RoomContext, RoomPlan, plan_training_room
 from .minotaur_policy_learning import (
-    MinotaurTrainingPolicy, TrainCaseApproval, TrainRoomOutcome,
+    MinotaurTrainingPolicy, TrainCaseApproval, TrainRegistryAdmissionReceipt,
+    TrainRoomOutcome,
 )
 from .regenerative_maze import MazePlan
 from .taskmaster_routing import RoutedTrainingRoom, _arithmetic_challenge
@@ -95,6 +96,7 @@ class TrainingCorridorRunner:
         self._admissions = admissions
         self._in_flight: RoutedTrainingRoom | None = None
         self._observations: list[ObservedTrainingChamber] = []
+        self._registry_transitions: list[TrainRegistryAdmissionReceipt] = []
 
     @classmethod
     def begin(
@@ -122,6 +124,16 @@ class TrainingCorridorRunner:
     @property
     def observations(self) -> tuple[ObservedTrainingChamber, ...]:
         return tuple(self._observations)
+
+    @property
+    def registry_transitions(self) -> tuple[TrainRegistryAdmissionReceipt, ...]:
+        """Local, non-learning registry changes between scored TRAIN chambers.
+
+        The initial policy bootstraps from its first exact TRAIN approval;
+        later extensions have separate atomic transition receipts. These are
+        source observations, never host authorizations or model updates.
+        """
+        return tuple(self._registry_transitions)
 
     @property
     def is_complete(self) -> bool:
@@ -197,7 +209,8 @@ class TrainingCorridorRunner:
             # Registry admission itself changes model_hash, but is **not** a
             # learned observation; only submit_training_response may append
             # an ObservedTrainingChamber after scoring approved TRAIN data.
-            policy.extend_training_registry((admission,))
+            transition = policy.extend_training_registry_with_receipt((admission,))
+            self._registry_transitions.append(transition)
         self._policy = policy
         self._admissions += (admission,)
         self._in_flight = routed
