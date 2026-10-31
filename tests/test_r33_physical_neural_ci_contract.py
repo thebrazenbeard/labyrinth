@@ -44,14 +44,16 @@ def neural_cpu_job_text() -> str:
 
 def required_cpu_test_block(job_text: str) -> str:
     """Restrict exact no-skip membership to the existing enforced CPU suite."""
-    match = re.search(
-        r"new_required\s*=\s*\((.*?)\)\s*for module_name, min_count in new_required:",
-        job_text,
-        re.DOTALL,
-    )
-    if match is None:
+    # Exact physical-case pinning now follows the source/module inventory.
+    # Keep the two bounded regions distinct, while requiring the executing
+    # loop below to retain the mandatory source suite enforcement.
+    start = job_text.find("new_required = (")
+    end = job_text.find("required_physical_ids = (", start + 1)
+    if start < 0 or end < 0 or job_text.find(
+        "for module_name, min_count in new_required:", end
+    ) < 0:
         raise AssertionError("required CPU test inventory and enforcement missing")
-    return match.group(1)
+    return job_text[start:end]
 
 
 class R33PhysicalNeuralCiContractTests(TestCase):

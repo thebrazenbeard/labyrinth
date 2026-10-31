@@ -128,6 +128,56 @@ class SealedSemanticProtocolTests(unittest.TestCase):
             "blinded_retention_families"]), 10)
         self.assertNotIn("retention-family-10", scored.receipt_bytes.decode())
 
+    def test_subclassed_control_identity_cannot_launder_unapproved_arm_or_job(self):
+        # Previously the set of signed control jobs compared tuple members
+        # using adversarial equality. A subclass with the underlying value
+        # "foreign" could masquerade as "correct" while the signed aggregate
+        # published the foreign arm as though it were an approved control.
+        class GhostArm(str):
+            def __eq__(self, other):
+                return other == "correct"
+
+            def __ne__(self, other):
+                return other != "correct"
+
+            def __hash__(self):
+                return hash("correct")
+
+        class GhostSeed(int):
+            def __eq__(self, other):
+                return other == 201
+
+            def __ne__(self, other):
+                return other != 201
+
+            def __hash__(self):
+                return hash(201)
+
+        class GhostBudget(int):
+            def __eq__(self, other):
+                return other == 8
+
+            def __ne__(self, other):
+                return other != 8
+
+            def __hash__(self):
+                return hash(8)
+
+        baseline = self.submissions()
+        for field, forged in (("arm", GhostArm("foreign")),
+                              ("seed", GhostSeed(999)),
+                              ("steps_per_cycle", GhostBudget(999))):
+            with self.subTest(field=field), self.assertRaisesRegex(
+                SealedExamError, "typed blind submissions"
+            ):
+                changed = list(baseline)
+                first = changed[0]
+                changed[0] = sign_prediction_submission(
+                    replace(first, **{field: forged}, signature_hex=""),
+                    trainer_key=TRAINER_KEY,
+                )
+                self.score(submissions=tuple(changed))
+
     def test_replays_refused_locally_but_new_untrusted_ledger_can_replay(self):
         ledger = LocalOneShotLedger()
         self.score(ledger=ledger)
@@ -215,6 +265,24 @@ class SealedSemanticProtocolTests(unittest.TestCase):
             with self.subTest(changed=changed), self.assertRaises(SealedExamError):
                 build_sealed_plan(**{**self.settings,
                                      "cases": (changed,) + self.cases[1:]})
+
+    def test_subclassed_training_split_cannot_impersonate_private_transfer(self):
+        class ForgedSplit(str):
+            def __eq__(self, other):
+                return other == "transfer"
+
+            def __ne__(self, other):
+                return not self.__eq__(other)
+
+            __hash__ = str.__hash__
+
+        contaminated = replace(self.cases[0], split=ForgedSplit("training"))
+        self.assertEqual(str(contaminated.split), "training")
+        with self.assertRaisesRegex(SealedExamError, "split"):
+            build_sealed_plan(**{
+                **self.settings,
+                "cases": (contaminated,) + self.cases[1:],
+            })
 
     def test_missing_arm_duplicate_job_and_posthoc_budget_rejected(self):
         complete = self.submissions()

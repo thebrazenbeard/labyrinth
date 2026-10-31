@@ -111,6 +111,45 @@ class RegenerativeMazeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MazePlan(plan.objective_id, plan.scope_fingerprint, plan.cycle_index, plan.rooms)
 
+    def test_private_final_purpose_cannot_impersonate_training(self):
+        # A str subclass can compare equal to `train` while its actual value
+        # identifies evaluation-only material. This must fail at construction.
+        class GhostPurpose(str):
+            def __eq__(self, other):
+                return other == "train"
+
+            def __ne__(self, other):
+                return other != "train"
+
+        with self.assertRaisesRegex(ValueError, "purpose"):
+            MazeRoom("a" * 32, "arithmetic", 12, purpose=GhostPurpose("private_final"))
+
+    def test_subclassed_room_cannot_override_validated_identity(self):
+        class GhostRoom(MazeRoom):
+            def __getattribute__(self, name):
+                if name == "purpose":
+                    return "train"
+                return super().__getattribute__(name)
+
+        room = GhostRoom("a" * 32, "arithmetic", 12, "private_final")
+        with self.assertRaisesRegex(ValueError, "MazeRoom"):
+            MazePlan("objective", "b" * 64, 0, (room,))
+
+    def test_subclassed_scope_cannot_spoof_canonical_room_lineage(self):
+        class GhostScope(TrainingScopeSpec):
+            @property
+            def fingerprint(self):
+                return "0" * 64
+
+        standard = scope()
+        forged = GhostScope(**{field: getattr(standard, field) for field in (
+            "objective_id", "domain", "skills", "specificity", "scale",
+            "max_cycles", "seed",
+        )})
+        self.assertNotEqual(forged.fingerprint, standard.fingerprint)
+        with self.assertRaisesRegex(ValueError, "TrainingScopeSpec"):
+            generate_maze_plan(forged, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

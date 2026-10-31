@@ -38,6 +38,59 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
 
 
 class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_r36_toy_evidence_is_required_and_archived_as_non_authorizing_artifact(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"scripts/qualify_toy_cpu_evidence_r36.py"', event_paths)
+            self.assertIn('"tests/test_r36_toy_cpu_evidence_receipt.py"', event_paths)
+        self.assertIn('("tests.test_r36_toy_cpu_evidence_receipt", 9)', workflow)
+        self.assertIn('python -m scripts.qualify_toy_cpu_evidence_r36 --execute', workflow)
+        self.assertIn('checked_head="$(git rev-parse HEAD)"', workflow)
+        self.assertIn('checked_tree="$(git rev-parse \'HEAD^{tree}\')"', workflow)
+        self.assertIn('uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02', workflow)
+        self.assertIn('if-no-files-found: error', workflow)
+        self.assertIn('retention-days: 14', workflow)
+
+    def test_hardened_minotaur_exam_intake_is_required_without_optional_skips(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        self.assertIn('("tests.test_minotaur_exam_intake_guard_r36", 10)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_real_toy_physical_case_identities_cannot_be_diluted_by_counts(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        required = (
+            "tests.test_fullstate_physical_gate_r8.PhysicalFullStateContinuityGate.test_interrupted_vs_uninterrupted_adamw_rng_and_exposure_cursor",
+            "tests.test_optimizer_runner_v2_r19.OptimizerRunnerV2ToyAdamWTests.test_v2_journal_binds_cycle0_receipt_and_restores_continuous_adamw",
+            "tests.test_optimizer_runner_v2_r19.OptimizerRunnerV2ToyAdamWTests.test_v2_foreign_fork_is_rejected_and_pending_is_not_replayed",
+            "tests.test_checkpoint_manifest_v2_r19.V2PhysicalCheckpointTests.test_real_adamw_v2_save_and_restore_never_cross_load_as_v1",
+            "tests.test_v2_checkpoint_cpu_smoke_r22.ToyV2CpuPhysicalTests.test_real_toy_torch_adamw_two_cycle_resume_and_fresh_reload",
+            "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_real_torch_tensor_updates_frozen_base_and_optimizer_moments",
+            "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_noop_training_cannot_claim_real_learning",
+        )
+        for exact_case in required:
+            self.assertIn('"' + exact_case + '"', workflow)
+        self.assertIn("missing_required(required_physical_ids, discovered_ids)", workflow)
+
+    def test_five_arm_source_contract_changes_trigger_required_cpu_tests(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/five_arm_experiment_contract.py"', event_paths)
+            self.assertIn('"tests/test_five_arm_experiment_contract.py"', event_paths)
+        self.assertIn('("tests.test_five_arm_experiment_contract", 39)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
     def test_graduation_auth_dependency_is_pinned_in_both_workflows(self):
         root = Path(__file__).resolve().parents[1]
         generic = (root / ".github/workflows/ci.yml").read_text()

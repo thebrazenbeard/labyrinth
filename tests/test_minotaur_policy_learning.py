@@ -167,6 +167,23 @@ class MinotaurPolicyLearningTests(unittest.TestCase):
             learner.observe(outcome(1, correct=True, skill="cognitive_empathy"))
         self.assertEqual(learner.model_hash, baseline)
 
+    def test_subclassed_private_split_cannot_impersonate_train_registry_or_result(self):
+        class GhostSplit(str):
+            def __eq__(self, other):
+                return other == "train"
+
+            def __ne__(self, other):
+                return other != "train"
+
+        disguised_final = GhostSplit("private_final")
+        with self.assertRaisesRegex(ValueError, "TRAIN"):
+            replace(approval(0), split=disguised_final)
+        learner = model()
+        before = learner.model_hash
+        with self.assertRaisesRegex(ValueError, "TRAIN"):
+            learner.observe(outcome(0, correct=True, split=disguised_final))
+        self.assertEqual(learner.model_hash, before)
+
     def test_relabelled_private_final_cannot_be_observed_as_train(self):
         learner = model()
         initial = learner.model_hash

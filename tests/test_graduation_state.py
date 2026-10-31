@@ -108,6 +108,25 @@ class GraduationStateTests(unittest.TestCase):
         self.assertEqual(self.decide(evaluated_receipt(controls_correct=True)).disposition,
                          "STAY")
 
+    def test_subclassed_policy_cannot_create_or_use_persisted_campaign(self):
+        from labyrinth.graduation_gate import GraduationPolicy
+
+        class ForgedPolicy(GraduationPolicy):
+            def __getattribute__(self, name):
+                if name == "objective_kind":
+                    return "skill_mastery"
+                return object.__getattribute__(self, name)
+
+        fake = ForgedPolicy(**POLICY.__dict__)
+        with self.assertRaises(TypeError):
+            initialize_campaign(self.database, fake, state_key=STATE_KEY)
+        self.assertFalse(self.database.exists())
+        initialize_campaign(self.database, POLICY, state_key=STATE_KEY)
+        raw, signature = independently_signed(evaluated_receipt())
+        with self.assertRaises(TypeError):
+            decide_campaign(self.database, fake, raw, signature,
+                            independent_evaluator_key=KEY, state_key=STATE_KEY)
+
     def test_ancestor_symlink_cannot_redirect_custodian_database(self):
         actual_root = Path(self.temp.name) / "actual"
         actual_root.mkdir()

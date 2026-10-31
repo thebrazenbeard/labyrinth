@@ -203,6 +203,11 @@ def _validate_bank(cases: tuple[SealedSituation, ...],
     for case in cases:
         _identifier(case.case_id, "private case")
         _identifier(case.semantic_key, "semantic key")
+        # Partition membership is an exam custody boundary. A str subclass
+        # can override equality/hash to impersonate a transfer or retention
+        # row while its serialized underlying value is actually TRAIN.
+        if type(case.split) is not str:
+            raise SealedExamError("private split must be an exact string")
         try:
             family = canonical_family_id(case.family_id)
         except ValueError as exc:
@@ -440,7 +445,12 @@ def score_sealed_exam(
                                body["private_bank_commitment"]):
         raise SealedExamError("private bank changed since source precommit")
     if (type(submissions) is not tuple or not submissions
-            or any(type(row) is not PredictionSubmission for row in submissions)):
+            or any(type(row) is not PredictionSubmission
+                   or type(row.arm) is not str
+                   or row.arm not in ARMS
+                   or type(row.seed) is not int
+                   or type(row.steps_per_cycle) is not int
+                   for row in submissions)):
         raise SealedExamError("complete typed blind submissions required")
     expected_jobs = {(seed, steps, arm)
                      for seed in body["seeds"]

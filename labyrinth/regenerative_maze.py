@@ -43,7 +43,10 @@ class MazeRoom:
             raise ValueError("room skill must be nonempty")
         if type(self.case_seed) is not int or not 0 <= self.case_seed < _SEED_MODULUS:
             raise ValueError("room case_seed must be a signed-31-bit-safe integer")
-        if self.purpose != "train":
+        # Train/evaluation membership is an authority boundary. A subclassed
+        # string may override comparison and impersonate `train` while its
+        # underlying value names private examination material.
+        if type(self.purpose) is not str or self.purpose != "train":
             raise ValueError("maze room purpose must be train, never evaluation")
 
 
@@ -66,7 +69,7 @@ class MazePlan:
         if type(self.rooms) is not tuple or not 1 <= len(self.rooms) <= MAX_ROOMS:
             raise ValueError("maze room count out of bounds")
         for room in self.rooms:
-            if not isinstance(room, MazeRoom):
+            if type(room) is not MazeRoom:
                 raise ValueError("maze rooms must be MazeRoom records")
             MazeRoom.__post_init__(room)
         if (len({room.room_id for room in self.rooms}) != len(self.rooms)
@@ -114,7 +117,10 @@ def generate_maze_plan(
     cryptographic unpredictability. Exam questions must come from an isolated
     trusted evaluator and must never be installed as room content.
     """
-    if not isinstance(scope, TrainingScopeSpec):
+    # A subclass can replace `.fingerprint` or other identity properties
+    # without changing the validated base dataclass fields. Accept only the
+    # canonical scope record used to derive deterministic Maze identities.
+    if type(scope) is not TrainingScopeSpec:
         raise ValueError("scope must be TrainingScopeSpec")
     # Frozen dataclasses can be mutated with object.__setattr__; revalidate
     # restored objects to prevent unbounded room counts or malformed IDs.

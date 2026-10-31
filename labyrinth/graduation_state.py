@@ -110,7 +110,7 @@ def initialize_campaign(db_path: Path, policy: GraduationPolicy, *, state_key: b
     """
     _valid_key(state_key)
     path = _valid_path(db_path)
-    if not isinstance(policy, GraduationPolicy):
+    if type(policy) is not GraduationPolicy:
         raise TypeError("expected frozen GraduationPolicy")
     try:
         descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -161,7 +161,7 @@ def decide_campaign(
         raise ValueError("independent evaluator key is missing")
     if hmac.compare_digest(independent_evaluator_key, state_key):
         raise ValueError("evaluator and state custody must use different secrets")
-    if not isinstance(policy, GraduationPolicy):
+    if type(policy) is not GraduationPolicy:
         raise TypeError("expected frozen GraduationPolicy")
 
     db = None

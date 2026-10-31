@@ -54,6 +54,7 @@ on:
       - "labyrinth/sealed_semantic_exam_protocol.py"
       - "labyrinth/external_monotonic_authority_contract.py"
       - "labyrinth/measured_neural_batch_binding.py"
+      - "labyrinth/five_arm_experiment_contract.py"
       - "labyrinth/train_exposure_attestation.py"
       - "labyrinth/maze_crash_resume_journal.py"
       - "labyrinth/pinned_model_inference_receipt.py"
@@ -67,10 +68,12 @@ on:
       - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
       - "scripts/qualify_v2_weight_updates_cpu_r25.py"
       - "scripts/qualify_v2_checkpoint_cpu_r22.py"
+      - "scripts/qualify_toy_cpu_evidence_r36.py"
       - "tests/test_minotaur_*.py"
       - "tests/test_signed_minotaur_pair_r25.py"
       - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
       - "tests/test_v2_checkpoint_cpu_smoke_r22.py"
+      - "tests/test_r36_toy_cpu_evidence_receipt.py"
       - "tests/test_fullstate_physical_gate_r8.py"
       - "tests/test_optimizer_runner_v2_r19.py"
       - "tests/test_checkpoint_manifest_v2_r19.py"
@@ -124,6 +127,7 @@ on:
       - "tests/test_qualify_maze_measured_tactics_cpu.py"
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
       - "tests/test_qualify_maze_prereg_controls_cpu.py"
+      - "tests/test_five_arm_experiment_contract.py"
       - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
       - "tests/test_qualify_neural_journey_e2e_cpu.py"
       - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
@@ -193,6 +197,7 @@ on:
       - "labyrinth/sealed_semantic_exam_protocol.py"
       - "labyrinth/external_monotonic_authority_contract.py"
       - "labyrinth/measured_neural_batch_binding.py"
+      - "labyrinth/five_arm_experiment_contract.py"
       - "labyrinth/train_exposure_attestation.py"
       - "labyrinth/maze_crash_resume_journal.py"
       - "labyrinth/pinned_model_inference_receipt.py"
@@ -206,10 +211,12 @@ on:
       - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
       - "scripts/qualify_v2_weight_updates_cpu_r25.py"
       - "scripts/qualify_v2_checkpoint_cpu_r22.py"
+      - "scripts/qualify_toy_cpu_evidence_r36.py"
       - "tests/test_minotaur_*.py"
       - "tests/test_signed_minotaur_pair_r25.py"
       - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
       - "tests/test_v2_checkpoint_cpu_smoke_r22.py"
+      - "tests/test_r36_toy_cpu_evidence_receipt.py"
       - "tests/test_fullstate_physical_gate_r8.py"
       - "tests/test_optimizer_runner_v2_r19.py"
       - "tests/test_checkpoint_manifest_v2_r19.py"
@@ -263,6 +270,7 @@ on:
       - "tests/test_qualify_maze_measured_tactics_cpu.py"
       - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
       - "tests/test_qualify_maze_prereg_controls_cpu.py"
+      - "tests/test_five_arm_experiment_contract.py"
       - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
       - "tests/test_qualify_neural_journey_e2e_cpu.py"
       - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
@@ -337,6 +345,7 @@ jobs:
           # are required CPU tests, never optional/skip-allowed smoke checks.
           python - <<'PY'
           import unittest
+          from scripts.minotaur_ci import missing_required, test_ids
 
           recovery = unittest.defaultTestLoader.loadTestsFromName(
               "tests.test_neural_resume_checkpoint")
@@ -393,19 +402,37 @@ jobs:
               ("tests.test_qualify_maze_measured_tactics_cpu", 4),
               ("tests.test_qualify_maze_multiseed_protocol_cpu", 21),
               ("tests.test_qualify_maze_prereg_controls_cpu", 5),
+              ("tests.test_five_arm_experiment_contract", 39),
               ("tests.test_signed_minotaur_pair_r25", 10),
               ("tests.test_qualify_v2_weight_updates_cpu_r25", 18),
               ("tests.test_v2_checkpoint_cpu_smoke_r22", 5),
+              ("tests.test_r36_toy_cpu_evidence_receipt", 9),
+              ("tests.test_minotaur_exam_intake_guard_r36", 10),
               ("tests.test_fullstate_physical_gate_r8", 1),
               ("tests.test_optimizer_runner_v2_r19", 7),
               ("tests.test_checkpoint_manifest_v2_r19", 6),
           )
+          # A count alone is not a physical gate: replacing a real PyTorch
+          # method with a trivial source test must invalidate qualification.
+          required_physical_ids = (
+              "tests.test_fullstate_physical_gate_r8.PhysicalFullStateContinuityGate.test_interrupted_vs_uninterrupted_adamw_rng_and_exposure_cursor",
+              "tests.test_optimizer_runner_v2_r19.OptimizerRunnerV2ToyAdamWTests.test_v2_journal_binds_cycle0_receipt_and_restores_continuous_adamw",
+              "tests.test_optimizer_runner_v2_r19.OptimizerRunnerV2ToyAdamWTests.test_v2_foreign_fork_is_rejected_and_pending_is_not_replayed",
+              "tests.test_checkpoint_manifest_v2_r19.V2PhysicalCheckpointTests.test_real_adamw_v2_save_and_restore_never_cross_load_as_v1",
+              "tests.test_v2_checkpoint_cpu_smoke_r22.ToyV2CpuPhysicalTests.test_real_toy_torch_adamw_two_cycle_resume_and_fresh_reload",
+              "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_real_torch_tensor_updates_frozen_base_and_optimizer_moments",
+              "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_noop_training_cannot_claim_real_learning",
+          )
+          discovered_ids = []
           for module_name, min_count in new_required:
               suite = unittest.defaultTestLoader.loadTestsFromName(module_name)
+              discovered_ids.extend(test_ids(suite))
               result = unittest.TextTestRunner(verbosity=2).run(suite)
               if (result.testsRun < min_count or not result.wasSuccessful()
                       or result.skipped):
                   raise SystemExit(f"required CPU source/custody tests failed or skipped: {module_name}")
+          if missing_required(required_physical_ids, discovered_ids):
+              raise SystemExit("required physical toy test identity missing or substituted")
           PY
           # These explicitly execute real toy CPU weight updates and a
           # regenerated-Maze full-state checkpoint/reload. Successful source
@@ -440,3 +467,22 @@ jobs:
               print(f"required source-only toy CPU execution PASS: {module}")
           PY
           python -m unittest tests.test_hf_scoped_report_audit tests.test_hf_program_scope tests.test_objective_contract tests.test_reserved_structural_transfer -v
+      - name: Preserve two physical toy CPU probe reports without authority
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          checked_head="$(git rev-parse HEAD)"
+          checked_tree="$(git rev-parse 'HEAD^{tree}')"
+          evidence_path="${RUNNER_TEMP}/labyrinth-toy-cpu-evidence.json"
+          python -m scripts.qualify_toy_cpu_evidence_r36 --execute \
+            --source-head "$checked_head" \
+            --source-tree "$checked_tree" \
+            --run-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --output "$evidence_path"
+          (cd "$RUNNER_TEMP" && sha256sum labyrinth-toy-cpu-evidence.json > labyrinth-toy-cpu-evidence.json.sha256)
+      - name: Retain non-authorizing toy CPU evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: minotaur-toy-cpu-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/labyrinth-toy-cpu-evidence*
+          if-no-files-found: error
+          retention-days: 14

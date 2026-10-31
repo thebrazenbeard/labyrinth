@@ -81,7 +81,9 @@ class TrainRoomOutcome:
             raise ValueError("invalid prompt SHA-256 commitment")
         if type(self.was_correct) is not bool:
             raise ValueError("was_correct must be an actual boolean")
-        if self.split != "train":
+        # An equality-overloading str subclass can call itself TRAIN while
+        # retaining the private-final split in its underlying bytes.
+        if type(self.split) is not str or self.split != "train":
             raise ValueError("only TRAIN outcomes can update the taskmaster")
 
 
@@ -112,7 +114,7 @@ class TrainCaseApproval:
             raise ValueError("invalid approved difficulty")
         if type(self.prompt_sha256) is not str or not _SHA256.fullmatch(self.prompt_sha256):
             raise ValueError("invalid approved prompt commitment")
-        if self.split != "train":
+        if type(self.split) is not str or self.split != "train":
             raise ValueError("only TRAIN cases may be approved")
 
 
