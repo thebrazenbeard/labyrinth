@@ -62,6 +62,13 @@ class FiveArmCampaignHostileR14(TestCase):
         with self.assertRaises(FiveArmCampaignError):
             self.fixture.audit(expected_report_sha256_by_run=hashes)
 
+    def test_parser_recursion_error_from_python_310_is_public_refusal(self) -> None:
+        """3.10's JSON decoder may raise RecursionError where 3.12 refuses differently."""
+        with patch("labyrinth.fivearm_campaign_admission_r13.json.loads",
+                   side_effect=RecursionError("nested child report")):
+            with self.assertRaises(FiveArmCampaignError):
+                self.fixture.audit()
+
     def test_report_larger_than_bounded_limit_refused_despite_matching_pin(self) -> None:
         run = self._job_root(0)
         hostile = (run / "report.json").read_bytes() + b" " * (8 * 1024 * 1024)

@@ -169,7 +169,8 @@ def audit_fivearm_campaign_from_disk(
                        parse_constant=lambda _: (_ for _ in ()).throw(
                            FiveArmCampaignError("nonfinite JSON in child report")))
             row = protocol.audit_child(job, plan, run_root)
-        except (ValueError, TypeError, KeyError, OSError, UnicodeError, IndexError) as exc:
+        except (ValueError, TypeError, KeyError, OSError, UnicodeError,
+                IndexError, RecursionError) as exc:
             raise FiveArmCampaignError(f"child {run_name} audit refused report or checkpoint") from exc
         # Audit is a separate read of the report and all checkpoint file hashes.
         # If the file changed between reads, the pinned receipt must no longer pass.
@@ -189,7 +190,8 @@ def audit_fivearm_campaign_from_disk(
         run_root = saved_runs / run_name
         try:
             second = protocol.audit_child(job, plan, run_root)
-        except (ValueError, TypeError, KeyError, OSError, UnicodeError, IndexError) as exc:
+        except (ValueError, TypeError, KeyError, OSError, UnicodeError,
+                IndexError, RecursionError) as exc:
             raise FiveArmCampaignError(
                 f"child {run_name} checkpoint changed during campaign audit"
             ) from exc
