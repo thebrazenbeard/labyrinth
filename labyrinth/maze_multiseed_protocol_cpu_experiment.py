@@ -187,23 +187,13 @@ def child_command(job: dict[str, Any], root: Path, spec: ProtocolSpec) -> list[s
             or job["run_name"] !=
             f"seed-{job['seed']:010d}-steps-{job['steps_per_cycle']:02d}"):
         raise ValueError("unbound multi-seed child job")
-    # Never select a top-level `scripts` package merely because *some other*
-    # installed distribution placed one adjacent to labyrinth. Source checkout
-    # compatibility is only selected for a genuine git worktree with its own
-    # historical CLI wrapper; installed wheels always use their private entry.
-    checkout_root = Path(__file__).resolve().parents[1]
-    is_source_checkout = (
-        checkout_root.joinpath(".git").exists()
-        and checkout_root.joinpath("pyproject.toml").is_file()
-        and checkout_root.joinpath(
-            "scripts", "qualify_maze_conditioned_minilm_cpu.py").is_file()
-    )
+    # The historical `scripts` CLI remains importable in a source checkout,
+    # but an orchestrated child always runs the package-private module.
+    # A wheel installed into an unrelated Git checkout can otherwise appear
+    # structurally identical to a source checkout and execute a foreign
+    # `scripts.qualify_maze_conditioned_minilm_cpu` module.
     command = [
-        sys.executable, "-m", (
-            "scripts.qualify_maze_conditioned_minilm_cpu"
-            if is_source_checkout
-            else "labyrinth.maze_conditioned_minilm_cpu_experiment"
-        ),
+        sys.executable, "-m", "labyrinth.maze_conditioned_minilm_cpu_experiment",
         "--output-parent", str(root / "runs"),
         "--run-name", job["run_name"],
         "--scope-file", str(root / "scopes" / f"{job['seed']}.json"),
