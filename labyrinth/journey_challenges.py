@@ -1,0 +1,162 @@
+"""Trusted trainer-side materialization of regenerative training rooms.
+
+Room descriptions have no answer key. This module is the boundary where an
+approved skill provider generates TRAIN cases and retains private supervision.
+Only the prompt-only view is suitable for a trainee inference adapter.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+import hashlib
+from typing import Callable, Mapping
+
+from .maze import Challenge, generate_maze
+from .regenerative_maze import MazePlan
+from .training_scope import TrainingScopeSpec
+
+
+_BUILTIN_TIERS = {
+    "arithmetic": 1,
+    "operation_chain": 2,
+    "source_priority": 3,
+    "program_reasoning": 4,
+}
+
+
+@dataclass(frozen=True)
+class TraineeRoomView:
+    room_id: str
+    skill: str
+    challenge_id: str
+    prompt: str
+    prompt_sha256: str
+
+
+@dataclass(frozen=True)
+class PreparedTrainingRoom:
+    """Holds evaluator-only gold; never pass this object to the trainee."""
+
+    room_id: str
+    skill: str
+    challenge: Challenge
+
+    @property
+    def trainee_view(self) -> TraineeRoomView:
+        return TraineeRoomView(
+            room_id=self.room_id,
+            skill=self.skill,
+            challenge_id=self.challenge.id,
+            prompt=self.challenge.prompt,
+            prompt_sha256=hashlib.sha256(self.challenge.prompt.encode("utf-8")).hexdigest(),
+        )
+
+
+def prepare_training_rooms(
+    plan: MazePlan,
+    *,
+    providers: Mapping[str, Callable[[int], Challenge]] | None = None,
+    semantic_scope: TrainingScopeSpec | None = None,
+) -> tuple[PreparedTrainingRoom, ...]:
+    """Materialize only registered skills; unsupported goals fail closed.
+
+    External skill providers are injected by a trusted trainer, never loaded
+    from text in a learner-controlled scope declaration.
+    """
+    if not isinstance(plan, MazePlan):
+        raise ValueError("expected validated MazePlan")
+    # Even frozen dataclasses may have been mutated through object.__setattr__.
+    plan.__post_init__()
+    if providers is not None and not isinstance(providers, Mapping):
+        raise ValueError("providers must be an explicit skill mapping")
+    if semantic_scope is not None:
+        if type(semantic_scope) is not TrainingScopeSpec:
+            raise ValueError("semantic_scope must be a frozen TrainingScopeSpec")
+        TrainingScopeSpec.__post_init__(semantic_scope)
+        if (plan.scope_fingerprint != semantic_scope.fingerprint
+                or plan.objective_id != semantic_scope.objective_id
+                or len(plan.rooms) != semantic_scope.total_chambers
+                or any(room.skill not in semantic_scope.skills for room in plan.rooms)):
+            raise ValueError("semantic training scope does not match the maze")
+        if providers is not None:
+            raise ValueError("uncontrolled provider override cannot bypass semantic focus")
+    supplied = {} if providers is None else dict(providers)
+    if any(not isinstance(key, str) or not key or not callable(value) for key, value in supplied.items()):
+        raise ValueError("invalid skill provider")
+    materialized: list[PreparedTrainingRoom] = []
+    seen_ids: set[str] = set()
+    seen_prompts: set[str] = set()
+    for room in plan.rooms:
+        if room.purpose != "train":
+            raise ValueError("exam/holdout room cannot be materialized for training")
+        if semantic_scope is not None and room.skill == "program_reasoning":
+            from .semantic_chambers import generate_semantic_program_challenge
+
+            challenge = generate_semantic_program_challenge(semantic_scope, room)
+        elif room.skill in supplied:
+            challenge = supplied[room.skill](room.case_seed)
+        elif room.skill in _BUILTIN_TIERS:
+            challenge = generate_maze(
+                seed=room.case_seed, tiers=(_BUILTIN_TIERS[room.skill],),
+                count=1, split="train",
+            )[0]
+        else:
+            raise ValueError(f"no approved training provider for skill {room.skill!r}")
+        if (
+            not isinstance(challenge, Challenge)
+            or challenge.split != "train"
+            or not isinstance(challenge.id, str)
+            or not challenge.id
+            or not isinstance(challenge.prompt, str)
+            or not challenge.prompt
+            or not isinstance(challenge.answer, str)
+            or not challenge.answer
+        ):
+            raise ValueError("provider returned an invalid/non-training challenge")
+        prompt_hash = hashlib.sha256(challenge.prompt.encode("utf-8")).hexdigest()
+        if challenge.id in seen_ids or prompt_hash in seen_prompts:
+            raise ValueError("duplicate challenge id or prompt in generated maze")
+        seen_ids.add(challenge.id)
+        seen_prompts.add(prompt_hash)
+        materialized.append(PreparedTrainingRoom(room.room_id, room.skill, challenge))
+    return tuple(materialized)
+
+
+def prepare_pending_adaptive_program_room(walk: object) -> PreparedTrainingRoom:
+    """Materialize one feedback-conditioned TRAIN-only program chamber.
+
+    This narrow approved provider makes the adaptive corridor's suggested
+    difficulty change executable program structure. It does not infer an
+    arbitrary learning objective, train a model, authenticate feedback, or
+    authorize graduation. Private answers stay in PreparedTrainingRoom.
+
+    The caller must retain this object trainer-side and send only
+    ``trainee_view`` to the learner. Feedback records the exact prompt digest.
+    """
+    from .adaptive_corridors import AdaptiveWalkState, _validate_state, offer_next_chamber
+    from .semantic_chambers import generate_semantic_program_challenge
+
+    if type(walk) is not AdaptiveWalkState:
+        raise ValueError("expected an adaptive training walk")
+    _validate_state(walk)
+    pending = walk.pending
+    if pending is None:
+        raise ValueError("adaptive walk has no pending training chamber")
+    if pending != offer_next_chamber(replace(walk, pending=None)).pending:
+        raise ValueError("pending chamber does not match the deterministic train-only route")
+    if pending.skill != "program_reasoning":
+        raise ValueError("adaptive semantic provider supports only program_reasoning")
+    challenge = generate_semantic_program_challenge(
+        walk.scope, pending.room, difficulty=pending.difficulty,
+    )
+    if challenge.split != "train" or not challenge.id.startswith("train-"):
+        raise ValueError("adaptive provider returned a non-training challenge")
+    prior_cases = set(walk.forbidden_case_ids)
+    prior_prompts = set(walk.forbidden_prompt_sha256)
+    for event in walk.history:
+        prior_cases.add(event.feedback.case_id)
+        prior_prompts.add(event.feedback.prompt_sha256)
+    if (challenge.id in prior_cases
+            or hashlib.sha256(challenge.prompt.encode("utf-8")).hexdigest() in prior_prompts):
+        raise ValueError("adaptive challenge overlaps prior train or sealed exam evidence")
+    return PreparedTrainingRoom(pending.room_id, pending.skill, challenge)

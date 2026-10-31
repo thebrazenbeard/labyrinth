@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 import hashlib
 from importlib.metadata import version as package_version
@@ -21,6 +22,7 @@ import math
 import os
 from pathlib import Path
 import random
+import re
 import sys
 from typing import Any
 
@@ -33,8 +35,19 @@ LEGACY_SCHEMA = "labyrinth.hf-lora-pilot.v2"
 SCHEMA = "labyrinth.hf-lora-pilot.v3"
 EVAL_SCHEMA = "labyrinth.hf-lora-reload-eval.v2"
 EVAL_SEED_XOR = 0x5C18A7
+# Bounded deterministic attempts only; if a public heldout split cannot be
+# separated from TRAIN, refuse to run instead of quietly dropping examples.
+EVAL_SPLIT_MAX_ATTEMPTS = 64
 # No quantization/CPU offload in v1: bound pre-existing weights to a small size.
 MAX_LOCAL_WEIGHTS = 1_073_741_824
+SIGNED_DEVELOPMENT_RESUME = "SIGNED_DEVELOPMENT_FAIL_BOUND"
+RESEARCH_ONLY_RESUME = "UNAUTHENTICATED_RESEARCH_ONLY"
+# This is an in-process misuse guard, not isolation from arbitrary code with
+# execution rights inside the trainer. Durable replay and evaluator-key custody
+# belong to the trusted host invoking hf_development_transition.
+_authorized_development_resume: ContextVar[tuple[Any, ...] | None] = ContextVar(
+    "labyrinth_hf_authorized_development_resume", default=None,
+)
 
 
 @dataclass(frozen=True)
@@ -137,16 +150,202 @@ def validate_config(config: PilotConfig, *, output_must_be_new: bool = True) -> 
     return resolved
 
 
+def _arithmetic_equivalence_key(challenge: Challenge) -> tuple[str, int, int] | None:
+    """A narrow known-template semantic key for *public* tier-one arithmetic.
+
+    Operand order is irrelevant for add/multiply, but not subtraction. Equal
+    numerical answers to different expressions do not imply duplication.
+    Unrecognized arithmetic templates fail closed; this is not a general
+    mathematical equivalence checker or a private-exam isolation guarantee.
+    """
+    if challenge.kind != "arithmetic":
+        return None
+    if challenge.tier != 1:
+        raise ValueError("unexpected arithmetic challenge tier")
+    matched = re.fullmatch(
+        r"Calculate (\d+) ([+*\-]) (\d+)\.\n"
+        r"Respond with exactly one line: ANSWER: <integer>\.",
+        challenge.prompt,
+    )
+    if matched is None:
+        raise ValueError("unrecognized arithmetic prompt; cannot establish split separation")
+    left, operation, right = int(matched[1]), matched[2], int(matched[3])
+    if operation in ("+", "*"):
+        left, right = sorted((left, right))
+    return operation, left, right
+
+
 def training_cases(config: PilotConfig) -> tuple[list[Challenge], list[Challenge]]:
-    """Keep supervision entirely on the TRAIN split; eval gold never enters SGD."""
+    """Keep supervision in TRAIN; reroll public eval on known arithmetic overlap.
+
+    This improves the finite generated arithmetic split without proving
+    semantic independence for all tasks or any signed private examination.
+    """
     train = generate_maze(seed=config.seed, count=config.train_count, tiers=config.tiers, split="train")
-    heldout = generate_maze(seed=config.seed ^ EVAL_SEED_XOR, count=config.eval_count,
-                            tiers=config.tiers, split="eval")
-    if {c.id for c in train} & {c.id for c in heldout}:
-        raise ValueError("training/held-out challenge IDs overlap")
-    if {c.prompt for c in train} & {c.prompt for c in heldout}:
-        raise ValueError("training/held-out prompt text overlaps")
-    return train, heldout
+    train_ids = {case.id for case in train}
+    train_prompts = {case.prompt for case in train}
+    train_arithmetic = {_arithmetic_equivalence_key(case) for case in train
+                        if case.kind == "arithmetic"}
+    for attempt in range(EVAL_SPLIT_MAX_ATTEMPTS):
+        heldout = generate_maze(
+            seed=config.seed ^ EVAL_SEED_XOR ^ attempt, count=config.eval_count,
+            tiers=config.tiers, split="eval",
+        )
+        heldout_arithmetic = {_arithmetic_equivalence_key(case) for case in heldout
+                              if case.kind == "arithmetic"}
+        if (not train_ids.intersection(case.id for case in heldout)
+                and not train_prompts.intersection(case.prompt for case in heldout)
+                and not train_arithmetic.intersection(heldout_arithmetic)):
+            return train, heldout
+    raise ValueError("public heldout could not avoid semantic arithmetic TRAIN overlap")
+
+
+def _scoped_public_heldout(config: PilotConfig, scope: Any, cycle_index: int,
+                           train: list[Challenge]) -> list[Challenge]:
+    """Deterministic, cycle-specific *public development* diagnostic cases.
+
+    The seed is committed to the declared scope and cycle, never influenced by
+    candidate answers or training labels. This is not an unseen/private final
+    examination. Unscoped v2/v3 pilots retain their historical fixed split.
+    """
+    from .training_scope import TrainingScopeSpec
+
+    if type(scope) is not TrainingScopeSpec:
+        raise ValueError("scoped diagnostic requires a validated TrainingScopeSpec")
+    TrainingScopeSpec.__post_init__(scope)
+    if type(cycle_index) is not int or not 0 <= cycle_index < scope.max_cycles:
+        raise ValueError("diagnostic cycle outside declared training scope")
+    digest = hashlib.sha256(
+        f"labyrinth.hf-public-diagnostic.v1:{scope.fingerprint}:{config.seed}:{cycle_index}"
+        .encode("ascii")
+    ).digest()
+    seed = int.from_bytes(digest[:4], "big") & (2**31 - 1)
+    train_ids = {case.id for case in train}
+    train_prompts = {case.prompt for case in train}
+    train_arithmetic = {_arithmetic_equivalence_key(case) for case in train
+                        if case.kind == "arithmetic"}
+    for attempt in range(EVAL_SPLIT_MAX_ATTEMPTS):
+        heldout = generate_maze(
+            seed=seed ^ attempt, count=config.eval_count,
+            tiers=config.tiers, split="eval",
+        )
+        heldout_arithmetic = {_arithmetic_equivalence_key(case) for case in heldout
+                              if case.kind == "arithmetic"}
+        if (train_ids.isdisjoint(case.id for case in heldout)
+                and train_prompts.isdisjoint(case.prompt for case in heldout)
+                and train_arithmetic.isdisjoint(heldout_arithmetic)):
+            return heldout
+    raise ValueError("scoped public heldout could not avoid semantic arithmetic TRAIN overlap")
+
+
+def _scoped_training_cases(config: PilotConfig, scope: Any, cycle_index: int,
+                           weak_skills: tuple[str, ...]
+                           ) -> tuple[list[Challenge], list[Challenge], Any]:
+    """Materialize a scoped TRAIN maze; never use exam cases for SGD.
+
+    Public diagnostic cases change with each cycle and are shared by all
+    matched arms *within* that cycle. They are not a private final exam. A
+    nonexistent skill provider fails closed instead of pretending a declared
+    goal was taught.
+    """
+    from .journey_challenges import prepare_training_rooms
+    from .regenerative_maze import generate_maze_plan
+    from .training_scope import TrainingScopeSpec
+
+    if type(scope) is not TrainingScopeSpec:
+        raise ValueError("resume requires a validated TrainingScopeSpec")
+    TrainingScopeSpec.__post_init__(scope)
+    # A scoped HF diagnostic must be backed by a genuine matching public
+    # tier. maze.py now routes tier 4 to the bounded register-program generator:
+    # TRAIN uses 3/4-step structures, public eval uses distinct 5/6-step
+    # structures. Neither is a private graduation examination. All other
+    # declared skills still fail closed.
+    supported = {"arithmetic", "operation_chain", "source_priority", "program_reasoning"}
+    if any(skill not in supported for skill in scope.skills):
+        raise ValueError("v3 HF pilot has no matching heldout diagnostic for a declared skill")
+    if type(weak_skills) is not tuple:
+        raise ValueError("weak_skills must be a tuple")
+    plan = generate_maze_plan(scope, cycle_index, weak_skills=weak_skills)
+    prepared = prepare_training_rooms(plan, semantic_scope=scope)
+    train = [room.challenge for room in prepared]
+    if not 2 <= len(train) <= 64:
+        raise ValueError("resumed training maze must contain 2..64 challenges")
+    if tuple(sorted({challenge.tier for challenge in train})) != tuple(sorted(config.tiers)):
+        raise ValueError("resumed maze tiers must exactly match pilot diagnostic tiers")
+    if config.steps < len({challenge.tier for challenge in train}):
+        raise ValueError("steps insufficient to visit each regenerated training tier")
+    heldout = _scoped_public_heldout(config, scope, cycle_index, train)
+    if ({challenge.id for challenge in train} & {challenge.id for challenge in heldout}
+            or {challenge.prompt for challenge in train} & {challenge.prompt for challenge in heldout}):
+        raise ValueError("scoped training maze overlaps public heldout diagnostic cases")
+    return train, heldout, plan
+
+
+def _resume_training_cases(config: PilotConfig, scope: Any, cycle_index: int,
+                           weak_skills: tuple[str, ...], predecessor_report: dict[str, Any],
+                           *, allow_unscoped_predecessor: bool = False,
+                           ) -> tuple[list[Challenge], list[Challenge], Any]:
+    train, heldout, plan = _scoped_training_cases(config, scope, cycle_index, weak_skills)
+    from .journey_challenges import prepare_training_rooms
+    from .regenerative_maze import generate_maze_plan
+
+    prior_train_ids = predecessor_report.get("training_case_ids")
+    prior_heldout_ids = predecessor_report.get("heldout_case_ids")
+    if (type(prior_train_ids) is not list or type(prior_heldout_ids) is not list
+            or any(type(item) is not str for item in prior_train_ids + prior_heldout_ids)):
+        raise ValueError("predecessor report lacks recorded training/heldout case identities")
+    prior_conf = predecessor_report.get("config")
+    if type(prior_conf) is not dict:
+        raise ValueError("predecessor report lacks a valid config")
+    prior_training = PilotConfig(**{**prior_conf, "tiers": tuple(prior_conf["tiers"])})
+    prior_cycle = predecessor_report.get("resumed_journey")
+    if prior_cycle is None:
+        if not allow_unscoped_predecessor or cycle_index != 1:
+            raise ValueError("unscoped predecessor requires explicit cycle-1 legacy bootstrap authorization")
+        # Legacy v3 had no scope declaration; this is operator-authorized
+        # transfer, not a claim that the previous run learned this objective.
+        prior_train, prior_eval = training_cases(prior_training)
+    elif (type(prior_cycle) is not dict
+          or prior_cycle.get("scope_fingerprint") != scope.fingerprint
+          or prior_cycle.get("cycle_index") != cycle_index - 1):
+        raise ValueError("predecessor objective/cycle identity does not match requested continuation")
+    else:
+        prior_weak_skills = prior_cycle.get("weak_skills")
+        if type(prior_weak_skills) is not list or any(type(x) is not str for x in prior_weak_skills):
+            raise ValueError("predecessor maze lacks re-playable weakness declarations")
+        prior_plan = generate_maze_plan(scope, cycle_index - 1, weak_skills=prior_weak_skills)
+        prior_train = [room.challenge for room in prepare_training_rooms(
+            prior_plan, semantic_scope=scope)]
+        prior_eval = _scoped_public_heldout(prior_training, scope, cycle_index - 1, prior_train)
+    if [challenge.id for challenge in prior_train] != prior_train_ids or [challenge.id for challenge in prior_eval] != prior_heldout_ids:
+        raise ValueError("predecessor training/evaluation generation disagrees with report")
+    earlier = prior_train + prior_eval
+    old_ids = {challenge.id for challenge in earlier}
+    old_prompt_hashes = {hashlib.sha256(challenge.prompt.encode("utf-8")).hexdigest()
+                         for challenge in earlier}
+    if prior_cycle is not None:
+        history_ids = prior_cycle.get("historical_case_ids")
+        history_hashes = prior_cycle.get("historical_prompt_sha256")
+        if (type(history_ids) is not list or type(history_hashes) is not list
+                or len(set(history_ids)) != len(history_ids)
+                or len(set(history_hashes)) != len(history_hashes)
+                or any(type(x) is not str or not x for x in history_ids)
+                or any(type(x) is not str or len(x) != 64
+                       or any(char not in "0123456789abcdef" for char in x)
+                       for x in history_hashes)
+                or not old_ids.issubset(history_ids)
+                or not old_prompt_hashes.issubset(history_hashes)):
+            raise ValueError("predecessor history does not seal all immediate public cases")
+        old_ids.update(history_ids)
+        old_prompt_hashes.update(history_hashes)
+    new_ids = {challenge.id for challenge in train + heldout}
+    new_prompt_hashes = {hashlib.sha256(challenge.prompt.encode("utf-8")).hexdigest()
+                         for challenge in train + heldout}
+    if (new_ids & old_ids or new_prompt_hashes & old_prompt_hashes
+            or {challenge.id for challenge in train} & {challenge.id for challenge in heldout}
+            or {challenge.prompt for challenge in train} & {challenge.prompt for challenge in heldout}):
+        raise ValueError("regenerated training maze overlaps prior or current evaluation/training content")
+    return train, heldout, plan
 
 
 def derange_answers(cases: list[Challenge]) -> list[str]:
@@ -474,16 +673,92 @@ def _load_base(model_path: Path, device: str, *, torch: Any,
     return model, tokenizer
 
 
-def run_pilot(config: PilotConfig) -> dict[str, Any]:
+def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None = None,
+              predecessor_run_dir: str | Path | None = None, resume_context: Any = None,
+              weak_skills: tuple[str, ...] = (),
+              allow_unscoped_predecessor: bool = False,
+              unauthenticated_research_resume: bool = False) -> dict[str, Any]:
     """Run fixed-budget LoRA-SFT and controls, save a new adapter and report.
 
-    The baseline and zero-update sham share the same base checkpoint. A
-    corrupted-label arm starts from a restored identical LoRA initialization.
+    For ordinary runs, baseline and sham share the base checkpoint. With an
+    explicitly declared scope and resume context, all candidate/sham/corrupted
+    arms start from identical, verified previous LoRA *tensor values*. No
+    optimizer state is retained. Cycle zero can start a new scoped journey.
     A separate process must run `reload_evaluate` to qualify persistence.
     """
+    if type(unauthenticated_research_resume) is not bool:
+        raise ValueError("research-only resume flag must be a boolean")
+    development_resume_authority = None
+    # Enforce the authorization distinction before touching a model or
+    # loading heavyweight dependencies. An operator-signed FAIL plus atomic
+    # event reservation is required for the *bound* path; a deliberately
+    # untrusted, labeled research probe can still test mechanical adaptation.
+    if type(cycle_index) is int and cycle_index > 0:
+        from .hf_resume_bridge import ResumeContext
+        from .training_scope import TrainingScopeSpec
+
+        if (type(scope) is not TrainingScopeSpec or type(resume_context) is not ResumeContext
+                or predecessor_run_dir is None):
+            raise ValueError("resumed scoped journey needs a valid scope, predecessor and resume context")
+        expected_authorization = (
+            config, scope.fingerprint, cycle_index,
+            str(Path(predecessor_run_dir).expanduser().resolve(strict=False)),
+            resume_context, weak_skills,
+        )
+        if _authorized_development_resume.get() == expected_authorization:
+            if unauthenticated_research_resume:
+                raise ValueError("signed development successor cannot be marked untrusted research")
+            development_resume_authority = SIGNED_DEVELOPMENT_RESUME
+        elif unauthenticated_research_resume:
+            development_resume_authority = RESEARCH_ONLY_RESUME
+        else:
+            raise ValueError(
+                "scoped successor requires an evaluator-signed development FAIL "
+                "and durable reservation; use run_exam_bound_successor "
+                "or explicitly label an unqualified research-only resume"
+            )
+    elif unauthenticated_research_resume:
+        raise ValueError("research-only resume flag requires a scoped successor cycle")
     model_path, output_dir, weights = validate_config(config)
     initial_manifest = _checkpoint_manifest(model_path, weights)
-    train, heldout = training_cases(config)
+    resume_source = None
+    resume_receipt = None
+    plan = None
+    if scope is None:
+        if (cycle_index is not None or predecessor_run_dir is not None or resume_context is not None
+                or weak_skills or allow_unscoped_predecessor):
+            raise ValueError("journey options require an explicit training scope")
+        train, heldout = training_cases(config)
+    else:
+        from .hf_resume_bridge import ResumeContext, preflight_resume
+        from .training_scope import TrainingScopeSpec
+
+        if type(scope) is not TrainingScopeSpec:
+            raise ValueError("scope must be a validated TrainingScopeSpec")
+        TrainingScopeSpec.__post_init__(scope)
+        if type(cycle_index) is not int or not 0 <= cycle_index < scope.max_cycles:
+            raise ValueError("cycle_index outside declared training scope")
+        if cycle_index == 0:
+            if predecessor_run_dir is not None or resume_context is not None or allow_unscoped_predecessor:
+                raise ValueError("journey cycle zero must start from fresh LoRA initialization")
+            train, heldout, plan = _scoped_training_cases(config, scope, cycle_index, weak_skills)
+        else:
+            if type(resume_context) is not ResumeContext or predecessor_run_dir is None:
+                raise ValueError("resumed journey requires explicit predecessor and ResumeContext")
+            if (resume_context.scope_fingerprint != scope.fingerprint
+                    or resume_context.cycle_index != cycle_index):
+                raise ValueError("resume context differs from declared objective/cycle")
+            if resume_context.allow_legacy_unscoped is not allow_unscoped_predecessor:
+                raise ValueError("legacy bootstrap authorization differs between resume context and training request")
+            resume_source = preflight_resume(config, predecessor_run_dir, resume_context)
+            prior_report_path = resume_source.predecessor_run / "pilot_report.json"
+            prior_report = load_json(prior_report_path, strict=True)
+            if _sha_file(prior_report_path) != resume_context.predecessor_report_sha256:
+                raise RuntimeError("predecessor report changed after pinned resume preflight")
+            train, heldout, plan = _resume_training_cases(
+                config, scope, cycle_index, weak_skills, prior_report,
+                allow_unscoped_predecessor=allow_unscoped_predecessor,
+            )
     corrupted_answers = derange_answers(train)
     torch, auto_model, auto_tokenizer, peft_parts, device = _deps(config.device)
     cuda_headroom = _device_headroom(torch, device, weights)
@@ -497,8 +772,20 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     # Deterministic algorithms fail closed rather than silently switching to
     # nondeterministic kernels. Full cross-hardware determinism is not claimed.
     torch.use_deterministic_algorithms(True)
-    base, tokenizer = _load_base(model_path, device, torch=torch,
-                                 auto_model=auto_model, auto_tokenizer=auto_tokenizer)
+    if resume_source is not None:
+        # The bridge repeats the pinned on-disk preflight and verifies actual
+        # trainable LoRA parameter values against prior adapter values.
+        from .hf_resume_bridge import load_trainable_resume
+
+        resumed = load_trainable_resume(config, predecessor_run_dir, resume_context)
+        model, tokenizer = resumed.model, resumed.tokenizer
+        resume_receipt = resumed.receipt
+        if (resume_receipt["previous_cycle_final_lora_sha256"]
+                != resume_receipt["this_cycle_initial_lora_sha256"]):
+            raise RuntimeError("resumed LoRA tensor values differ from previous cycle")
+    else:
+        base, tokenizer = _load_base(model_path, device, torch=torch,
+                                     auto_model=auto_model, auto_tokenizer=auto_tokenizer)
     _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
     # Validate all token budgets before creating an output directory.
     for case in train:
@@ -507,15 +794,22 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     for case, answer in zip(train, corrupted_answers):
         _encode_pair(tokenizer, case.prompt, answer, config.max_tokens,
                      answer_only=config.answer_only)
-    baseline = _score_model(base, tokenizer, torch, heldout, device=device,
+    baseline = _score_model(model if resume_source is not None else base,
+                            tokenizer, torch, heldout, device=device,
                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
-    model = get_peft_model(base, lora_config(r=config.lora_rank, lora_alpha=config.lora_alpha,
-                                             lora_dropout=0, bias="none", task_type="CAUSAL_LM",
-                                             target_modules="all-linear"))
+    if resume_source is None:
+        model = get_peft_model(base, lora_config(r=config.lora_rank, lora_alpha=config.lora_alpha,
+                                                 lora_dropout=0, bias="none", task_type="CAUSAL_LM",
+                                                 target_modules="all-linear"))
     initial_digest = _parameter_digest(model, torch)
     initial_frozen_digest = _frozen_parameter_digest(model, torch)
     initial_buffer_digest = _buffer_digest(model, torch)
+    if resume_receipt is not None:
+        if (initial_digest != resume_receipt["this_cycle_initial_lora_sha256"]
+                or initial_frozen_digest != resume_receipt["frozen_parameter_sha256"]
+                or initial_buffer_digest != resume_receipt["persistent_buffers_sha256"]):
+            raise RuntimeError("resumed adapter values or frozen model state changed before controls")
     initial_state = {name: parameter.detach().clone()
                      for name, parameter in model.named_parameters() if parameter.requires_grad}
     # Compute/exposure-matched *zero-effective-update* control: same supervised
@@ -538,6 +832,8 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "zero-LR placebo evaluation",
     )
+    if _parameter_digest(model, torch) != initial_digest:
+        raise RuntimeError("zero-LR placebo evaluation changed initial LoRA tensor values")
     correct_training = _train_steps(model, tokenizer, torch, train, [c.answer for c in train], config)
     trained_digest = _parameter_digest(model, torch)
     if trained_digest == initial_digest:
@@ -627,6 +923,54 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
                         "Only the adapter was persisted; base weights remain unchanged.",
                         "Same-process scores do not qualify independent checkpoint reload."],
     }
+    if plan is not None:
+        historical_ids = {case.id for case in train + heldout}
+        historical_prompts = {hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
+                              for case in train + heldout}
+        if resume_source is not None:
+            previous_path = resume_source.predecessor_run / "pilot_report.json"
+            previous = load_json(previous_path, strict=True)
+            if _sha_file(previous_path) != resume_context.predecessor_report_sha256:
+                raise RuntimeError("predecessor report changed before successor receipt was persisted")
+            previous_cycle = previous.get("resumed_journey")
+            if previous_cycle is not None:
+                historical_ids.update(previous_cycle["historical_case_ids"])
+                historical_prompts.update(previous_cycle["historical_prompt_sha256"])
+            else:
+                old_config = PilotConfig(**{**previous["config"], "tiers": tuple(previous["config"]["tiers"])})
+                old_train, old_eval = training_cases(old_config)
+                historical_ids.update(case.id for case in old_train + old_eval)
+                historical_prompts.update(
+                    hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
+                    for case in old_train + old_eval
+                )
+        result["resumed_journey"] = {
+            "scope": scope.to_dict(), "scope_fingerprint": scope.fingerprint,
+            "cycle_index": cycle_index, "weak_skills": list(weak_skills),
+            "development_resume_authority": development_resume_authority,
+            "training_room_ids": [room.room_id for room in plan.rooms],
+            "historical_case_ids": sorted(historical_ids),
+            "historical_prompt_sha256": sorted(historical_prompts),
+            "predecessor_resume_receipt": resume_receipt,
+            "predecessor_scope_status": (
+                "LEGACY_UNSCOPED_OPERATOR_BOOTSTRAP_NOT_SAME_OBJECTIVE_PROOF"
+                if allow_unscoped_predecessor else
+                "SAME_DECLARED_SCOPE_RECORDED" if resume_receipt is not None else
+                "NEW_SCOPED_JOURNEY_INITIALIZATION"
+            ),
+            "same_initial_lora_for_all_controls": True,
+            "optimizer_state_carried": False,
+            "minotaur_private_graduation": False,
+            "private_exam_history_coverage": "NOT_ESTABLISHED",
+            "qualification": "NOT_ESTABLISHED",
+        }
+        result["limitations"].append(
+            "Scoped public diagnostics and LoRA changes do not establish Minotaur private graduation."
+        )
+        if resume_receipt is not None:
+            result["limitations"].append(
+                "Resumed only adapter tensor values, not AdamW optimizer moments or any subjective experience."
+            )
     _save_new(output_dir / "pilot_report.json", result)
     return result
 
@@ -672,7 +1016,24 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     actual_adapters = _adapter_manifest(adapter_dir)
     if actual_adapters != report.get("candidate_adapter_sha256"):
         raise ValueError("candidate adapter changed after training")
-    _, heldout = training_cases(config)
+    cycle_receipt = report.get("resumed_journey")
+    if cycle_receipt is None:
+        _, heldout = training_cases(config)
+    else:
+        from .training_scope import TrainingScopeSpec
+
+        if type(cycle_receipt) is not dict:
+            raise ValueError("malformed scoped diagnostic receipt")
+        scoped = TrainingScopeSpec.from_dict(cycle_receipt.get("scope"))
+        if scoped.fingerprint != cycle_receipt.get("scope_fingerprint"):
+            raise ValueError("scoped diagnostic scope fingerprint changed")
+        weak = cycle_receipt.get("weak_skills", [])
+        if (type(weak) is not list
+                or any(type(skill) is not str for skill in weak)):
+            raise ValueError("malformed scoped weakness receipt")
+        _, heldout, _ = _scoped_training_cases(
+            config, scoped, cycle_receipt.get("cycle_index"), tuple(weak),
+        )
     if [c.id for c in heldout] != report.get("heldout_case_ids"):
         raise ValueError("heldout generation differs from training report")
     if _prompt_commitment(heldout) != report.get("heldout_public_prompt_sha256"):
@@ -724,15 +1085,70 @@ def main(argv: list[str] | None = None) -> int:
     train.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     train.add_argument("--answer-only", action="store_true",
                        help="Pre-fill ANSWER: and supervise only numerical completion + EOS")
+    # All journey flags are opt-in. No previous adapter or scope manifest is
+    # silently discovered; a new cycle always uses a distinct output root.
+    train.add_argument("--scope-json", help="Local predeclared TrainingScopeSpec JSON (no downloads)")
+    train.add_argument("--cycle-index", type=int)
+    train.add_argument("--weak-skills", default="", help="Comma-separated skills from the declared scope")
+    train.add_argument("--predecessor-run-dir", help="Exact previous v3 HF pilot output directory")
+    train.add_argument("--predecessor-report-sha256", help="Operator-pinned previous pilot report SHA-256")
+    train.add_argument("--predecessor-lora-sha256", help="Operator-pinned previous LoRA tensor SHA-256")
+    train.add_argument("--resume-authority-ref", help="Opaque operator approval record identifier")
+    train.add_argument("--allow-legacy-unscoped-predecessor", action="store_true",
+                       help="Explicitly bootstrap from an unscoped v3 run (no same-objective lineage claim)")
+    train.add_argument("--unauthenticated-research-resume", action="store_true",
+                       help="Explicitly permit an unqualified unsigned successor for mechanical research only")
     evaluate = commands.add_parser("eval", help="Reload saved adapter in a new Python process")
     evaluate.add_argument("--run-dir", required=True)
     evaluate.add_argument("--report", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "train":
-            config_dict = {key: value for key, value in vars(args).items() if key != "command"}
+            journey_keys = {"scope_json", "cycle_index", "weak_skills", "predecessor_run_dir",
+                            "predecessor_report_sha256", "predecessor_lora_sha256",
+                            "resume_authority_ref", "allow_legacy_unscoped_predecessor",
+                            "unauthenticated_research_resume"}
+            config_dict = {key: value for key, value in vars(args).items()
+                           if key != "command" and key not in journey_keys}
             config_dict["tiers"] = tuple(int(t) for t in args.tiers.split(",")) if args.tiers else ()
-            result = run_pilot(PilotConfig(**config_dict))
+            journey_kwargs: dict[str, Any] = {}
+            if args.scope_json is not None:
+                from .training_scope import MAX_SCOPE_JSON_BYTES, parse_scope_json
+                scope_path = Path(args.scope_json).expanduser()
+                if (scope_path.is_symlink() or not scope_path.is_file()
+                        or not 0 < scope_path.stat().st_size <= MAX_SCOPE_JSON_BYTES):
+                    raise ValueError("scope JSON must be a bounded regular non-symlink local file")
+                scope = parse_scope_json(scope_path.read_bytes())
+                if args.cycle_index is None:
+                    raise ValueError("a scoped journey requires --cycle-index")
+                weak = tuple(args.weak_skills.split(",")) if args.weak_skills else ()
+                journey_kwargs = {"scope": scope, "cycle_index": args.cycle_index,
+                                  "weak_skills": weak,
+                                  "allow_unscoped_predecessor": args.allow_legacy_unscoped_predecessor,
+                                  "unauthenticated_research_resume": args.unauthenticated_research_resume}
+                if args.cycle_index > 0:
+                    if not all((args.predecessor_run_dir, args.predecessor_report_sha256,
+                                args.predecessor_lora_sha256, args.resume_authority_ref)):
+                        raise ValueError("resume requires all explicitly pinned predecessor flags")
+                    from .hf_resume_bridge import ResumeContext
+                    journey_kwargs["predecessor_run_dir"] = args.predecessor_run_dir
+                    journey_kwargs["resume_context"] = ResumeContext(
+                        scope_fingerprint=scope.fingerprint, cycle_index=args.cycle_index,
+                        predecessor_report_sha256=args.predecessor_report_sha256,
+                        predecessor_lora_value_sha256=args.predecessor_lora_sha256,
+                        authority_ref=args.resume_authority_ref,
+                        allow_legacy_unscoped=args.allow_legacy_unscoped_predecessor,
+                    )
+                elif any((args.predecessor_run_dir, args.predecessor_report_sha256,
+                          args.predecessor_lora_sha256, args.resume_authority_ref)):
+                    raise ValueError("cycle zero cannot load a predecessor adapter")
+            elif (args.cycle_index is not None or args.weak_skills
+                  or args.predecessor_run_dir or args.predecessor_report_sha256
+                  or args.predecessor_lora_sha256 or args.resume_authority_ref
+                  or args.allow_legacy_unscoped_predecessor
+                  or args.unauthenticated_research_resume):
+                raise ValueError("journey options require a local --scope-json manifest")
+            result = run_pilot(PilotConfig(**config_dict), **journey_kwargs)
             print(json.dumps({"schema": result["schema"], "output_dir": result["config"]["output_dir"],
                               "changed": result["initial_lora_parameter_sha256"] != result["candidate_lora_parameter_sha256"]}))
         else:

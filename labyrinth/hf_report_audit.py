@@ -13,11 +13,12 @@ from typing import Any
 
 from .evaluation import score_response
 from .hf_pilot import (
-    EVAL_SEED_XOR, LEGACY_SCHEMA, SCHEMA, _prompt_commitment,
-    _training_visit_indices, derange_answers,
+    LEGACY_SCHEMA, SCHEMA, PilotConfig,
+    RESEARCH_ONLY_RESUME, SIGNED_DEVELOPMENT_RESUME, _prompt_commitment,
+    _scoped_training_cases, _training_visit_indices, derange_answers, training_cases,
 )
-from .maze import generate_maze
 from .runner import _source_state
+from .training_scope import TrainingScopeSpec
 
 AUDIT_SCHEMA = "labyrinth.hf-pilot-audit.v1"
 ARMS = ("baseline", "sham", "candidate", "corrupted")
@@ -149,11 +150,67 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
             or len(tiers) * ntrain > 64):
         fail("invalid seed/count/steps/tiers in pilot config")
         return result()
+    journey = report.get("resumed_journey")
     try:
-        train = generate_maze(seed=seed, count=ntrain, tiers=tuple(tiers), split="train")
-        heldout = generate_maze(seed=seed ^ EVAL_SEED_XOR, count=neval, tiers=tuple(tiers), split="eval")
+        if journey is None:
+            # Match the pilot's bounded semantic split regeneration. A fixed
+            # eval seed would falsely reject a legitimate rerolled heldout
+            # report whenever commutative TRAIN/EVAL expressions collide.
+            train, heldout = training_cases(PilotConfig(
+                **{**config, "tiers": tuple(tiers)},
+            ))
+        else:
+            if not matched or type(journey) is not dict:
+                raise ValueError("scoped receipt requires an explicit v3 journey object")
+            scope = TrainingScopeSpec.from_dict(journey.get("scope"))
+            cycle = journey.get("cycle_index")
+            weak = journey.get("weak_skills")
+            if (journey.get("scope_fingerprint") != scope.fingerprint
+                    or type(cycle) is not int or not 0 <= cycle < scope.max_cycles
+                    or type(weak) is not list
+                    or any(type(skill) is not str or skill not in scope.skills for skill in weak)
+                    or len(set(weak)) != len(weak)):
+                raise ValueError("scoped objective/cycle/weakness receipt is inconsistent")
+            pilot = PilotConfig(**{**config, "tiers": tuple(tiers)})
+            train, heldout, plan = _scoped_training_cases(pilot, scope, cycle, tuple(weak))
+            if journey.get("training_room_ids") != [room.room_id for room in plan.rooms]:
+                raise ValueError("scoped training room identities disagree with regenerated maze")
+            historical_ids = journey.get("historical_case_ids")
+            historical_prompts = journey.get("historical_prompt_sha256")
+            current_case_ids = {case.id for case in train + heldout}
+            current_prompt_hashes = {
+                hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
+                for case in train + heldout
+            }
+            if (type(historical_ids) is not list or type(historical_prompts) is not list
+                    or len(historical_ids) > 4096 or len(historical_prompts) > 4096
+                    or len(historical_ids) != len(historical_prompts)
+                    or any(type(case_id) is not str or not 1 <= len(case_id) <= 128
+                           for case_id in historical_ids)
+                    or any(not _digest(prompt) for prompt in historical_prompts)
+                    or len(set(historical_ids)) != len(historical_ids)
+                    or len(set(historical_prompts)) != len(historical_prompts)
+                    or not current_case_ids.issubset(historical_ids)
+                    or not current_prompt_hashes.issubset(historical_prompts)
+                    or journey.get("same_initial_lora_for_all_controls") is not True):
+                raise ValueError("scoped history lacks current TRAIN/public diagnostic commitments")
+            if cycle == 0:
+                if journey.get("development_resume_authority") is not None:
+                    raise ValueError("initial cycle cannot claim successor authorization")
+                if (set(historical_ids) != current_case_ids
+                        or set(historical_prompts) != current_prompt_hashes):
+                    raise ValueError("initial scoped history contains unexplained prior evidence")
+            else:
+                authority = journey.get("development_resume_authority")
+                if authority == RESEARCH_ONLY_RESUME:
+                    incomplete("successor explicitly used unauthenticated research-only authorization")
+                elif authority == SIGNED_DEVELOPMENT_RESUME:
+                    incomplete("signed development authorization is self-reported, not independently attested")
+                else:
+                    incomplete("legacy successor lacks recognized development-transition authority")
+                incomplete("successor history cannot be authenticated without independent predecessor custody")
         corrupted_labels = derange_answers(train)
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError, KeyError) as exc:
         fail(f"cannot reproduce training/evaluation controls: {exc}")
         return result()
     if report.get("training_case_ids") != [c.id for c in train]:

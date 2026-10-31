@@ -1,0 +1,61 @@
+{
+  "schema": "labyrinth.objective-contract.v1",
+  "scope": {
+    "schema": "labyrinth.training-scope.v1",
+    "objective_id": "vera-local-empathy-v1",
+    "domain": "empathy",
+    "skills": [
+      "cognitive_empathy",
+      "emotional_recognition",
+      "reactive_empathy",
+      "compassionate_empathy",
+      "boundary_recognition",
+      "empathic_reasoning"
+    ],
+    "specificity": 4,
+    "scale": 3,
+    "max_cycles": 3,
+    "seed": 20261030
+  },
+  "intention": "Develop observable, context-sensitive empathic reasoning without conflating compassionate decisions with subjective feeling.",
+  "targets": [
+    {
+      "skill": "cognitive_empathy",
+      "focus_tags": ["perspective_taking", "belief_inference", "uncertainty"],
+      "observable_behaviors": ["Accurately distinguish what another person knows from what the learner knows."],
+      "rubric_id": "cognitive_v1", "minimum_score_percent": 80, "minimum_gain_percent": 15
+    },
+    {
+      "skill": "emotional_recognition",
+      "focus_tags": ["anger", "fear", "context"],
+      "observable_behaviors": ["Recognize that anger may reflect distress or justified protest without assuming intent."],
+      "rubric_id": "recognition_v1", "minimum_score_percent": 80, "minimum_gain_percent": 15
+    },
+    {
+      "skill": "reactive_empathy",
+      "focus_tags": ["response_timing", "tone", "disclosure"],
+      "observable_behaviors": ["Select proportionate responses to another person's reported emotional state."],
+      "rubric_id": "reactive_v1", "minimum_score_percent": 80, "minimum_gain_percent": 15
+    },
+    {
+      "skill": "compassionate_empathy",
+      "focus_tags": ["helpfulness", "honesty", "practical_support"],
+      "observable_behaviors": ["Offer helpful action without making statements known to be false."],
+      "rubric_id": "compassion_v1", "minimum_score_percent": 80, "minimum_gain_percent": 15
+    },
+    {
+      "skill": "boundary_recognition",
+      "focus_tags": ["consent", "autonomy", "noninterference"],
+      "observable_behaviors": ["Recognize when unsolicited intervention would violate expressed boundaries."],
+      "rubric_id": "boundaries_v1", "minimum_score_percent": 85, "minimum_gain_percent": 15
+    },
+    {
+      "skill": "empathic_reasoning",
+      "focus_tags": ["value_conflicts", "truthfulness", "competing_needs"],
+      "observable_behaviors": ["Explain tradeoffs between honesty, emotional validation and competing needs."],
+      "rubric_id": "reasoning_v1", "minimum_score_percent": 85, "minimum_gain_percent": 15
+    }
+  ],
+  "excluded_scopes": ["Clinical diagnosis", "Unauthorized psychological manipulation", "Claims about internal emotional consciousness"],
+  "forbidden_claims": ["Behavioral tests do not establish subjective emotional experience.", "A declared rubric is not an implemented or independently validated examiner."]
+}
