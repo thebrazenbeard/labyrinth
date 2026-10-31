@@ -10,7 +10,11 @@ from dataclasses import asdict
 import hashlib
 import unittest
 
-from labyrinth.hf_pilot import PilotConfig, _resume_training_cases, _scoped_training_cases
+from labyrinth.hf_pilot import (
+    PilotConfig, _arithmetic_semantic_commitments, _arithmetic_history_witnesses,
+    _arithmetic_case_binding_records, _arithmetic_case_binding_root,
+    _resume_training_cases, _scoped_training_cases,
+)
 from labyrinth.training_scope import TrainingScopeSpec
 from tests.test_reserved_structural_transfer import _independent_expected_answer
 
@@ -56,6 +60,8 @@ class HFProgramScopeTests(unittest.TestCase):
 
     def test_cycle_regeneration_replays_predecessor_and_rejects_old_prompts(self):
         prior_train, prior_eval, _ = self._cases(0)
+        witnesses = _arithmetic_history_witnesses(prior_train + prior_eval)
+        bindings = _arithmetic_case_binding_records(witnesses)
         prior_report = {
             "config": {**asdict(self.config), "tiers": list(self.config.tiers)},
             "training_case_ids": [case.id for case in prior_train],
@@ -66,6 +72,12 @@ class HFProgramScopeTests(unittest.TestCase):
                 "historical_case_ids": sorted(case.id for case in prior_train + prior_eval),
                 "historical_prompt_sha256": sorted(hashlib.sha256(case.prompt.encode()).hexdigest()
                                                    for case in prior_train + prior_eval),
+                "historical_arithmetic_sha256": sorted(
+                    _arithmetic_semantic_commitments(prior_train + prior_eval)
+                ),
+                "historical_arithmetic_witnesses_v1": witnesses,
+                "historical_arithmetic_case_bindings_v1": bindings,
+                "historical_arithmetic_binding_root_v1": _arithmetic_case_binding_root(bindings),
             },
         }
         train, heldout, _ = _resume_training_cases(
@@ -78,7 +90,9 @@ class HFProgramScopeTests(unittest.TestCase):
         prior_report["resumed_journey"]["historical_prompt_sha256"].append(
             hashlib.sha256(train[0].prompt.encode()).hexdigest()
         )
-        with self.assertRaisesRegex(ValueError, "overlaps prior"):
+        # A cycle-zero predecessor cannot legitimately know any successor
+        # prompt. Reject its forged history before the later overlap check.
+        with self.assertRaisesRegex(ValueError, "initial predecessor has unexplained"):
             _resume_training_cases(self.config, self.scope, 1, (), prior_report)
 
     def test_wrong_tier_or_unsupported_goal_fails_closed(self):

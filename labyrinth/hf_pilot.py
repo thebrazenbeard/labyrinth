@@ -24,6 +24,7 @@ from pathlib import Path
 import random
 import re
 import sys
+import tempfile
 from typing import Any
 
 from .evaluation import score_response
@@ -175,6 +176,138 @@ def _arithmetic_equivalence_key(challenge: Challenge) -> tuple[str, int, int] | 
     return operation, left, right
 
 
+def _arithmetic_semantic_commitments(cases: list[Challenge]) -> set[str]:
+    """Seal known arithmetic equivalence without exposing public answer keys.
+
+    These commitments are only for the bounded tier-one expression grammar.
+    A different task family requires its own independently reviewed semantic
+    equivalence relation; IDs/prompt hashes alone cannot supply one.
+    """
+    commitments: set[str] = set()
+    for case in cases:
+        key = _arithmetic_equivalence_key(case)
+        if key is not None:
+            operation, left, right = key
+            payload = f"labyrinth.hf-public-arithmetic.v1\x00{operation}\x00{left}\x00{right}"
+            commitments.add(hashlib.sha256(payload.encode("ascii")).hexdigest())
+    return commitments
+
+
+def _historical_arithmetic_case_count(case_ids: list[str]) -> int:
+    """Count tier-one arithmetic identities in the replayable public history."""
+    return sum(re.fullmatch(r"(?:train|eval)-t1-\d+-[0-9a-f]{16}", case_id) is not None
+               for case_id in case_ids)
+
+
+def _arithmetic_history_witnesses(cases: list[Challenge]) -> list[dict[str, str]]:
+    """Retain answerless public prompts needed to verify older semantic seals.
+
+    A digest list alone is not self-authenticating: deleting a historic
+    semantic digest can conceal a future equivalent prompt. These witnesses
+    bind each semantic key to the separately recorded prompt SHA and case ID.
+    Independent predecessor custody is still required for *authenticity*.
+    """
+    return sorted(
+        ({"case_id": case.id, "prompt": case.prompt}
+         for case in cases if case.kind == "arithmetic"),
+        key=lambda entry: entry["case_id"],
+    )
+
+
+def _arithmetic_case_binding_records(witnesses: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Bind each old case ID to its exact public prompt and semantic key.
+
+    These hashes detect partial field substitution inside an operator-pinned
+    report; they are not signatures and cannot authenticate a wholly forged
+    report supplied *before* the operator establishes custody.
+    """
+    records: list[dict[str, str]] = []
+    for witness in witnesses:
+        case_id, prompt = witness["case_id"], witness["prompt"]
+        case = Challenge(
+            id=case_id, kind="arithmetic", tier=1,
+            split="eval" if case_id.startswith("eval-") else "train",
+            prompt=prompt, answer="",
+        )
+        semantics = _arithmetic_semantic_commitments([case])
+        if len(semantics) != 1:
+            raise ValueError("arithmetic witness cannot produce a unique semantic key")
+        prompt_digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        semantic_digest = next(iter(semantics))
+        raw = (f"labyrinth.hf-arithmetic-case-binding.v1\x00{case_id}\x00"
+               f"{prompt_digest}\x00{semantic_digest}")
+        records.append({
+            "case_id": case_id,
+            "prompt_sha256": prompt_digest,
+            "semantic_sha256": semantic_digest,
+            "binding_sha256": hashlib.sha256(raw.encode("ascii")).hexdigest(),
+        })
+    return sorted(records, key=lambda row: row["case_id"])
+
+
+def _arithmetic_case_binding_root(records: list[dict[str, str]]) -> str:
+    canonical = json.dumps(records, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(("labyrinth.hf-arithmetic-bindings-root.v1\x00" + canonical)
+                           .encode("ascii")).hexdigest()
+
+
+def _verified_arithmetic_history_witnesses(
+    witnesses: Any, historical_ids: list[str], historical_hashes: list[str],
+    historical_semantics: list[str],
+    historical_bindings: Any = None, historical_binding_root: Any = None,
+) -> set[str]:
+    """Recompute arithmetic equivalence from prompt text, never reported keys.
+
+    This checks internal consistency of a report, not who produced it. A
+    complete replacement of an unpinned report remains a custody problem.
+    """
+    if type(witnesses) is not list or len(witnesses) > 4096:
+        raise ValueError("predecessor arithmetic witnesses missing or malformed")
+    expected_ids = {case_id for case_id in historical_ids
+                    if re.fullmatch(r"(?:train|eval)-t1-\d+-[0-9a-f]{16}", case_id)}
+    known_hashes = set(historical_hashes)
+    actual_ids: set[str] = set()
+    actual_hashes: set[str] = set()
+    semantic: set[str] = set()
+    for witness in witnesses:
+        if (type(witness) is not dict or set(witness) != {"case_id", "prompt"}
+                or type(witness.get("case_id")) is not str
+                or type(witness.get("prompt")) is not str
+                or not 1 <= len(witness["prompt"]) <= 512
+                or witness["case_id"] not in expected_ids
+                or witness["case_id"] in actual_ids):
+            raise ValueError("predecessor arithmetic witness identity is invalid")
+        digest = hashlib.sha256(witness["prompt"].encode("utf-8")).hexdigest()
+        if digest not in known_hashes or digest in actual_hashes:
+            raise ValueError("predecessor arithmetic witness prompt is not committed")
+        observed = Challenge(
+            id=witness["case_id"], kind="arithmetic", tier=1,
+            split="eval" if witness["case_id"].startswith("eval-") else "train",
+            prompt=witness["prompt"], answer="",
+        )
+        # This rejects non-template prompts rather than guessing equivalence.
+        key = _arithmetic_equivalence_key(observed)
+        if key is None:
+            raise ValueError("predecessor arithmetic witness lacks semantic identity")
+        operation, left, right = key
+        payload = f"labyrinth.hf-public-arithmetic.v1\x00{operation}\x00{left}\x00{right}"
+        commitment = hashlib.sha256(payload.encode("ascii")).hexdigest()
+        if commitment in semantic:
+            raise ValueError("predecessor arithmetic history repeats semantic content")
+        actual_ids.add(witness["case_id"])
+        actual_hashes.add(digest)
+        semantic.add(commitment)
+    if actual_ids != expected_ids or semantic != set(historical_semantics):
+        raise ValueError("predecessor semantic arithmetic history disagrees with prompt witnesses")
+    if historical_bindings is not None or historical_binding_root is not None:
+        expected_bindings = _arithmetic_case_binding_records(witnesses)
+        if (type(historical_bindings) is not list
+                or historical_bindings != expected_bindings
+                or historical_binding_root != _arithmetic_case_binding_root(expected_bindings)):
+            raise ValueError("predecessor arithmetic case-to-prompt binding is invalid")
+    return semantic
+
+
 def training_cases(config: PilotConfig) -> tuple[list[Challenge], list[Challenge]]:
     """Keep supervision in TRAIN; reroll public eval on known arithmetic overlap.
 
@@ -323,6 +456,7 @@ def _resume_training_cases(config: PilotConfig, scope: Any, cycle_index: int,
     old_ids = {challenge.id for challenge in earlier}
     old_prompt_hashes = {hashlib.sha256(challenge.prompt.encode("utf-8")).hexdigest()
                          for challenge in earlier}
+    old_arithmetic = _arithmetic_semantic_commitments(earlier)
     if prior_cycle is not None:
         history_ids = prior_cycle.get("historical_case_ids")
         history_hashes = prior_cycle.get("historical_prompt_sha256")
@@ -336,11 +470,60 @@ def _resume_training_cases(config: PilotConfig, scope: Any, cycle_index: int,
                 or not old_ids.issubset(history_ids)
                 or not old_prompt_hashes.issubset(history_hashes)):
             raise ValueError("predecessor history does not seal all immediate public cases")
+        if (cycle_index == 1
+                and (set(history_ids) != old_ids
+                     or set(history_hashes) != old_prompt_hashes)):
+            raise ValueError("initial predecessor has unexplained public case history")
         old_ids.update(history_ids)
         old_prompt_hashes.update(history_hashes)
+        history_arithmetic = prior_cycle.get("historical_arithmetic_sha256")
+        if history_arithmetic is None and cycle_index == 1:
+            # Only cycle zero is fully reconstructible from this predecessor.
+            # Existing first-cycle v3 artifacts can make this single bounded
+            # transition, and the successor will emit the complete new seal.
+            pass
+        elif (type(history_arithmetic) is not list
+              or len(history_arithmetic) > 4096
+              or any(type(item) is not str or len(item) != 64
+                     or any(char not in "0123456789abcdef" for char in item)
+                     for item in history_arithmetic)
+              or len(set(history_arithmetic)) != len(history_arithmetic)
+              or not old_arithmetic.issubset(history_arithmetic)
+              or len(history_arithmetic) != _historical_arithmetic_case_count(history_ids)):
+            raise ValueError("predecessor semantic arithmetic history is missing or invalid")
+        if history_arithmetic is not None:
+            old_arithmetic.update(history_arithmetic)
+        witnesses = prior_cycle.get("historical_arithmetic_witnesses_v1")
+        history_bindings = prior_cycle.get("historical_arithmetic_case_bindings_v1")
+        history_binding_root = prior_cycle.get("historical_arithmetic_binding_root_v1")
+        if witnesses is None:
+            if cycle_index != 1:
+                raise ValueError("predecessor lacks replayable arithmetic history witnesses")
+        else:
+            if history_arithmetic is None:
+                raise ValueError("predecessor arithmetic witnesses lack a semantic commitment")
+            if ((history_bindings is None or history_binding_root is None)
+                    and cycle_index != 1):
+                raise ValueError("predecessor arithmetic case-to-prompt binding is missing")
+            verified = _verified_arithmetic_history_witnesses(
+                witnesses, history_ids, history_hashes, history_arithmetic,
+                history_bindings, history_binding_root,
+            )
+            immediate = {case.id: case.prompt for case in earlier
+                         if case.kind == "arithmetic"}
+            present = {witness["case_id"]: witness["prompt"] for witness in witnesses}
+            if any(present.get(case_id) != prompt
+                   for case_id, prompt in immediate.items()):
+                raise ValueError("predecessor immediate arithmetic witness was altered")
+            old_arithmetic.update(verified)
     new_ids = {challenge.id for challenge in train + heldout}
     new_prompt_hashes = {hashlib.sha256(challenge.prompt.encode("utf-8")).hexdigest()
                          for challenge in train + heldout}
+    new_arithmetic = _arithmetic_semantic_commitments(train + heldout)
+    if len(new_arithmetic) != sum(case.kind == "arithmetic" for case in train + heldout):
+        raise ValueError("regenerated maze repeats semantic arithmetic cases internally")
+    if new_arithmetic & old_arithmetic:
+        raise ValueError("regenerated training maze overlaps prior semantic arithmetic content")
     if (new_ids & old_ids or new_prompt_hashes & old_prompt_hashes
             or {challenge.id for challenge in train} & {challenge.id for challenge in heldout}
             or {challenge.prompt for challenge in train} & {challenge.prompt for challenge in heldout}):
@@ -587,24 +770,107 @@ def _training_visit_indices(train: list[Challenge], *, seed: int, steps: int) ->
 
 def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
                  labels: list[str], config: PilotConfig, *,
-                 learning_rate: float | None = None) -> dict[str, Any]:
+                 learning_rate: float | None = None,
+                 optimizer: Any | None = None,
+                 rng_policy: str = "seed_for_control",
+                 scheduler: Any | None = None,
+                 visit_cursor: int | None = None,
+                 expected_visit_exposures: tuple[tuple[str, str], ...] | None = None
+                 ) -> dict[str, Any]:
+    """Train an arm or advance an externally restored CPU candidate.
+
+    The default starts a fresh optimizer and reproducibly reseeds each arm.
+    ``optimizer`` plus ``rng_policy='preserve'`` instead leaves the caller's
+    AdamW moments and process RNG untouched. It requires a cursor and exact
+    scheduled (case ID, public prompt digest) exposure slice, preventing a
+    resumed segment from replaying the schedule's first examples. The caller
+    must independently pin the prior cursor, catalog, source and RNG to its
+    journal and keep control branches separate; this private seam alone is
+    not full-state resume authority.
+    """
     if len(train) != len(labels) or not train:
         raise ValueError("training supervision must match every training case")
-    indices = _training_visit_indices(train, seed=config.seed, steps=config.steps)
+    if scheduler is not None:
+        raise ValueError("scheduler-dependent continuation is unsupported")
+    external_optimizer = optimizer is not None
+    if not external_optimizer:
+        if rng_policy != "seed_for_control":
+            raise ValueError("preserved RNG requires an externally restored optimizer")
+        if visit_cursor is not None or expected_visit_exposures is not None:
+            raise ValueError("exposure cursor is only for externally restored candidate training")
+    else:
+        if rng_policy != "preserve":
+            raise ValueError("externally restored optimizer requires preserved RNG")
+        if config.device != "cpu":
+            raise ValueError("externally restored optimizer is CPU-only")
+        if learning_rate is not None:
+            raise ValueError("externally restored optimizer does not admit learning-rate controls")
+        if labels != [case.answer for case in train]:
+            raise ValueError("externally restored optimizer is only for correct-label candidate training")
+        if (type(visit_cursor) is not int or visit_cursor < 0
+                or visit_cursor + config.steps > 100000):
+            raise ValueError("externally restored exposure cursor is missing or out of bounds")
+        if (type(expected_visit_exposures) is not tuple
+                or len(expected_visit_exposures) != config.steps
+                or any(type(pair) is not tuple or len(pair) != 2
+                       or type(pair[0]) is not str or type(pair[1]) is not str
+                       or not re.fullmatch(r"[0-9a-f]{64}", pair[1])
+                       for pair in expected_visit_exposures)):
+            raise ValueError("externally restored exposure slice is missing or malformed")
+        if any(case.split != "train" for case in train) or len({case.id for case in train}) != len(train):
+            raise ValueError("externally restored training catalog is invalid")
+        if not isinstance(optimizer, torch.optim.AdamW):
+            raise ValueError("externally restored optimizer must be AdamW")
+        trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
+        if not trainable:
+            raise ValueError("externally restored optimizer requires trainable model parameters")
+        if any(getattr(getattr(parameter, "device", None), "type", None) != "cpu"
+               for parameter in trainable):
+            raise ValueError("externally restored optimizer requires CPU model parameters")
+        try:
+            no_buffer = object()
+            first_buffer = next(iter(model.named_buffers()), no_buffer)
+        except (AttributeError, TypeError) as exc:
+            raise ValueError("externally restored model buffer inventory is unavailable") from exc
+        if first_buffer is not no_buffer:
+            raise ValueError("registered model buffers are not captured by full-neural checkpoints")
+        try:
+            optimizer_params = [parameter for group in optimizer.param_groups
+                                for parameter in group["params"]]
+        except (AttributeError, KeyError, TypeError) as exc:
+            raise ValueError("externally restored AdamW parameter groups are malformed") from exc
+        if (len(optimizer_params) != len(trainable)
+                or {id(parameter) for parameter in optimizer_params}
+                != {id(parameter) for parameter in trainable}):
+            raise ValueError("externally restored optimizer does not own the model's trainable parameters")
+    if optimizer is None:
+        indices = _training_visit_indices(train, seed=config.seed, steps=config.steps)
+    else:
+        full_indices = _training_visit_indices(train, seed=config.seed,
+                                               steps=visit_cursor + config.steps)
+        indices = full_indices[visit_cursor:]
+        actual_exposures = tuple(
+            (train[index].id, hashlib.sha256(train[index].prompt.encode("utf-8")).hexdigest())
+            for index in indices
+        )
+        if actual_exposures != expected_visit_exposures:
+            raise ValueError("externally restored exposure schedule differs from pinned slice")
     prepared = [_encode_pair(tokenizer, case.prompt, answer, config.max_tokens,
                              answer_only=config.answer_only)
                 for case, answer in zip(train, labels)]
     if learning_rate is not None and learning_rate != 0.0:
         raise ValueError("control override only admits exact zero learning rate")
-    # The candidate and corrupted-label arms must start their update loops with
-    # the same RNG state, even when a local model contains stochastic layers.
-    random.seed(config.seed)
-    torch.manual_seed(config.seed)
-    if config.device == "cuda":
-        torch.cuda.manual_seed_all(config.seed)
+    if optimizer is None:
+        # Ordinary candidate and corrupted control arms start at a common RNG
+        # seed. Never reseed after a separately verified full-state restore.
+        random.seed(config.seed)
+        torch.manual_seed(config.seed)
+        if config.device == "cuda":
+            torch.cuda.manual_seed_all(config.seed)
     model.train()
-    optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
-                                  lr=config.learning_rate if learning_rate is None else learning_rate)
+    if optimizer is None:
+        optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
+                                      lr=config.learning_rate if learning_rate is None else learning_rate)
     token_total = 0
     losses: list[float] = []
     for step in range(config.steps):
@@ -626,9 +892,14 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
         value = float(loss.detach().cpu().item())
         losses.append(value)
         token_total += len(inputs)
-    return {"steps": config.steps, "example_visits": config.steps,
-            "visited_case_ids": [train[index].id for index in indices],
-            "input_tokens_seen": token_total, "losses": losses}
+    result = {"steps": config.steps, "example_visits": config.steps,
+              "visited_case_ids": [train[index].id for index in indices],
+              "input_tokens_seen": token_total, "losses": losses}
+    if external_optimizer:
+        result["visit_cursor_before"] = visit_cursor
+        result["visit_cursor_after"] = visit_cursor + config.steps
+        result["visited_exposures"] = list(actual_exposures)
+    return result
 
 
 def _deps(device: str) -> tuple[Any, Any, Any, Any, Any]:
@@ -927,6 +1198,11 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         historical_ids = {case.id for case in train + heldout}
         historical_prompts = {hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
                               for case in train + heldout}
+        historical_arithmetic = _arithmetic_semantic_commitments(train + heldout)
+        arithmetic_witness_map = {
+            witness["case_id"]: witness["prompt"]
+            for witness in _arithmetic_history_witnesses(train + heldout)
+        }
         if resume_source is not None:
             previous_path = resume_source.predecessor_run / "pilot_report.json"
             previous = load_json(previous_path, strict=True)
@@ -936,6 +1212,43 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
             if previous_cycle is not None:
                 historical_ids.update(previous_cycle["historical_case_ids"])
                 historical_prompts.update(previous_cycle["historical_prompt_sha256"])
+                prior_semantic = previous_cycle.get("historical_arithmetic_sha256")
+                prior_witnesses = previous_cycle.get("historical_arithmetic_witnesses_v1")
+                if prior_semantic is None:
+                    if previous_cycle.get("cycle_index") != 0:
+                        raise ValueError("predecessor semantic arithmetic history is missing")
+                    if prior_witnesses is not None:
+                        raise ValueError("predecessor witnesses have no semantic commitment")
+                if prior_witnesses is None:
+                    if previous_cycle.get("cycle_index") != 0:
+                        raise ValueError("predecessor replayable arithmetic witnesses are missing")
+                    old_config = PilotConfig(**{**previous["config"],
+                                                "tiers": tuple(previous["config"]["tiers"])})
+                    old_train, old_eval, _ = _scoped_training_cases(
+                        old_config, scope, 0, tuple(previous_cycle["weak_skills"]),
+                    )
+                    prior_witnesses = _arithmetic_history_witnesses(old_train + old_eval)
+                    if prior_semantic is not None:
+                        _verified_arithmetic_history_witnesses(
+                            prior_witnesses, previous_cycle["historical_case_ids"],
+                            previous_cycle["historical_prompt_sha256"], prior_semantic,
+                        )
+                else:
+                    if (previous_cycle.get("cycle_index") != 0
+                            and (previous_cycle.get("historical_arithmetic_case_bindings_v1") is None
+                                 or previous_cycle.get("historical_arithmetic_binding_root_v1") is None)):
+                        raise ValueError("predecessor arithmetic case-to-prompt binding is missing")
+                    _verified_arithmetic_history_witnesses(
+                        prior_witnesses, previous_cycle["historical_case_ids"],
+                        previous_cycle["historical_prompt_sha256"], prior_semantic,
+                        previous_cycle.get("historical_arithmetic_case_bindings_v1"),
+                        previous_cycle.get("historical_arithmetic_binding_root_v1"),
+                    )
+                if prior_semantic is None:
+                    historical_arithmetic.update(_arithmetic_semantic_commitments(
+                        old_train + old_eval))
+                else:
+                    historical_arithmetic.update(prior_semantic)
             else:
                 old_config = PilotConfig(**{**previous["config"], "tiers": tuple(previous["config"]["tiers"])})
                 old_train, old_eval = training_cases(old_config)
@@ -944,6 +1257,20 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
                     hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
                     for case in old_train + old_eval
                 )
+                historical_arithmetic.update(
+                    _arithmetic_semantic_commitments(old_train + old_eval)
+                )
+                prior_witnesses = _arithmetic_history_witnesses(old_train + old_eval)
+            for witness in prior_witnesses:
+                case_id, prompt = witness["case_id"], witness["prompt"]
+                if case_id in arithmetic_witness_map and arithmetic_witness_map[case_id] != prompt:
+                    raise ValueError("predecessor arithmetic witness conflicts with current content")
+                arithmetic_witness_map[case_id] = prompt
+        complete_witnesses = [
+            {"case_id": case_id, "prompt": prompt}
+            for case_id, prompt in sorted(arithmetic_witness_map.items())
+        ]
+        case_bindings = _arithmetic_case_binding_records(complete_witnesses)
         result["resumed_journey"] = {
             "scope": scope.to_dict(), "scope_fingerprint": scope.fingerprint,
             "cycle_index": cycle_index, "weak_skills": list(weak_skills),
@@ -951,6 +1278,10 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
             "training_room_ids": [room.room_id for room in plan.rooms],
             "historical_case_ids": sorted(historical_ids),
             "historical_prompt_sha256": sorted(historical_prompts),
+            "historical_arithmetic_sha256": sorted(historical_arithmetic),
+            "historical_arithmetic_witnesses_v1": complete_witnesses,
+            "historical_arithmetic_case_bindings_v1": case_bindings,
+            "historical_arithmetic_binding_root_v1": _arithmetic_case_binding_root(case_bindings),
             "predecessor_resume_receipt": resume_receipt,
             "predecessor_scope_status": (
                 "LEGACY_UNSCOPED_OPERATOR_BOOTSTRAP_NOT_SAME_OBJECTIVE_PROOF"
@@ -976,11 +1307,37 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
 
 
 def _save_new(path: Path, result: dict[str, Any]) -> None:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(str(path), flags, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(result, handle, indent=2, sort_keys=True)
-        handle.write("\n")
+    """Publish one complete report without ever replacing an existing report.
+
+    A same-directory temporary file is fully written and synced before a
+    hard-link atomically claims the final path. Unlike ``os.replace``, linking
+    fails if another run already owns the destination. Filesystems that do not
+    support hard links fail closed rather than publishing partially written
+    evidence. An interrupted process can leave a hidden staging file, but the
+    final report is either absent or complete.
+    """
+    fd, staged_name = tempfile.mkstemp(prefix=f".{path.name}.stage-", dir=path.parent)
+    staged = Path(staged_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(result, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        # Same-filesystem hard-link creation is atomic and never overwrites.
+        # If unsupported (e.g. some network filesystems), leave no final file.
+        os.link(staged, path)
+        # On POSIX, also sync the directory entry for power-loss durability.
+        # Windows Python cannot open directories with O_DIRECTORY; the staged
+        # file has still been flushed before the atomic hard-link operation.
+        if os.name != "nt" and hasattr(os, "O_DIRECTORY"):
+            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, Any]:

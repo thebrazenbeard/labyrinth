@@ -226,6 +226,15 @@ def retention_roster_sha256(pairs: tuple[RetentionPair, ...]) -> str:
 def _campaign(policy: RetentionPolicy, roster: tuple[RetentionPair, ...]) -> None:
     if type(policy) is not RetentionPolicy:
         raise RetentionError("precommitted retention policy required")
+    # A frozen dataclass prevents normal assignment, not object.__setattr__ or
+    # changes made through a compromised in-process caller. The constructor's
+    # safety limits must still hold at BOTH signing and decision time. Call
+    # the class method explicitly so an injected instance attribute cannot
+    # shadow the validator.
+    try:
+        RetentionPolicy.__post_init__(policy)
+    except (ValueError, TypeError, AttributeError, OverflowError) as exc:
+        raise RetentionError("invalid retention policy at custody boundary") from exc
     if not hmac.compare_digest(retention_roster_sha256(roster),
                                policy.expected_roster_sha256):
         raise RetentionError("retention roster commitment does not match policy")

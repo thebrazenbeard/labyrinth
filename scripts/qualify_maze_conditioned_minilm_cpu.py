@@ -108,6 +108,10 @@ class OptimizerContinuityRequest:
     logical_run_id: str
     prior_checkpoint_sha256: str
     fence: int
+    # Explicitly opt in to the stricter v2 source-only journal. This is not
+    # proof of host-owned authority, a crash recovery service or graduation.
+    source_journal_v2: bool = False
+    candidate_artifact_sha256: str | None = None
 
     def validate(self) -> None:
         if (type(self.logical_run_id) is not str
@@ -119,6 +123,15 @@ class OptimizerContinuityRequest:
                 or type(self.fence) is not int
                 or not 0 <= self.fence < 2**63 - 1):
             raise ValueError("optimizer continuity requires bounded operator pins")
+        if type(self.source_journal_v2) is not bool:
+            raise ValueError("optimizer journal v2 selection must be explicit")
+        if self.source_journal_v2:
+            if (type(self.candidate_artifact_sha256) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}",
+                                    self.candidate_artifact_sha256, re.ASCII) is None):
+                raise ValueError("optimizer journal v2 requires candidate artifact pin")
+        elif self.candidate_artifact_sha256 is not None:
+            raise ValueError("v2 candidate pin requires explicit optimizer journal v2")
 
 
 @dataclass(frozen=True)
@@ -614,12 +627,26 @@ def execute(
                      != measured_batches.predecessor_checkpoint_sha256
                      or optimizer_continuity.fence != measured_batches.fence)):
             raise ValueError("optimizer and measured schedule custody pins diverge")
+        if (measured_batches is not None
+                and optimizer_continuity.source_journal_v2
+                and optimizer_continuity.candidate_artifact_sha256
+                != measured_batches.candidate_artifact_sha256):
+            raise ValueError("v2 candidate differs from signed measured schedule")
         # The adapter reads this runner's source bytes to bind all visits and
         # control-label assignments before restoring model or optimizer state.
         from labyrinth.minilm_optimizer_state_resume import (
             MazeOptimizerResumePlan, load_maze_optimizer_snapshot,
             save_maze_optimizer_snapshot,
         )
+        if optimizer_continuity.source_journal_v2:
+            # A v1 journal is deliberately NOT a fallback. The import fails
+            # closed on a substrate without the typed v2 checkpoint contract.
+            from labyrinth.maze_crash_resume_journal import (
+                MazeJournalBinding, MazeJournalError, MazeJournalUnknown,
+                commit_maze_cycle, initialize_maze_journal,
+                inspect_maze_journal, precommit_maze_cycle,
+            )
+            from labyrinth.neural_resume_checkpoint import FullCheckpointContextV2
 
     import os
     os.environ["HF_HUB_OFFLINE"] = "1"
@@ -732,6 +759,17 @@ def execute(
             "optimizer_crash_resume": "NOT_TESTED",
             "reload_method": "NEW_BASE_OBJECT_FULL_MODEL_OPTIMIZER_AND_RNG_RESTORE",
         })
+        if optimizer_continuity.source_journal_v2:
+            report.update({
+                "optimizer_continuity": "V2_IMMEDIATE_PREDECESSOR_SOURCE_JOURNAL_ONLY",
+                "optimizer_checkpoint_pin_provenance": "V2_LOCAL_JOURNAL_RECEIPT_NO_HOST_CAS",
+                "optimizer_external_monotonic_authority": "NOT_ESTABLISHED",
+                "optimizer_crash_resume": "NOT_TESTED_PENDING_INTENT_FAIL_CLOSED",
+                "optimizer_source_journal_version": "v2",
+                "optimizer_v2_host_custody_verified": False,
+                "optimizer_v2_neural_derivation_verified": False,
+                "optimizer_v2_graduation_authorized": False,
+            })
     if verified_measured_schedule is not None:
         report.update({
             "weakness_feedback_provenance": "SIGNED_DEVELOPMENT_SOURCE_HOST_UNATTESTED",
@@ -771,7 +809,10 @@ def execute(
         preceding_lora = None
         preceding_frozen = None
         prior_full_state_sha256: str | None = None
+        prior_snapshot_immediate_sha256: str | None = None
         full_state_plan = None
+        source_journal_binding = None
+        source_journal_root = arm_root / "optimizer-source-journal-v2"
         cycle_results = []
         for cycle in cycles:
             randomized_labels = (preregistered_randomized_labels(cycle, scope.seed)
@@ -819,6 +860,28 @@ def execute(
                             if measured_batches is not None else None),
                     )
                     full_state_plan.validate()
+                    if optimizer_continuity.source_journal_v2:
+                        source_journal_binding = MazeJournalBinding(
+                            run_id=optimizer_continuity.logical_run_id,
+                            objective_id=scope.objective_id,
+                            arm=arm,
+                            candidate_artifact_sha256=(
+                                optimizer_continuity.candidate_artifact_sha256),
+                            scope_fingerprint=scope.fingerprint,
+                            base_checkpoint_sha256=pretrained_base,
+                            prior_checkpoint_sha256=(
+                                optimizer_continuity.prior_checkpoint_sha256),
+                            checkpoint_run_id=full_state_plan.checkpoint_run_id,
+                            # The plan commits to both executable source files,
+                            # exact scheduled exposures and optimizer options.
+                            source_sha256=full_state_plan.plan_sha256,
+                            fence=optimizer_continuity.fence,
+                            cycle_count=len(cycles),
+                        )
+                        initialize_maze_journal(
+                            source_journal_root, source_journal_binding,
+                            schema_version="v2",
+                        )
                 else:
                     if previous is None or prior_full_state_sha256 is None:
                         raise RuntimeError("missing prior full optimizer snapshot")
@@ -829,10 +892,46 @@ def execute(
                         optimizer=optimizer, plan=full_state_plan,
                         completed_steps=steps_per_cycle,
                         independently_pinned_checkpoint_sha256=prior_full_state_sha256,
+                        **({
+                            "cycle_index": 0,
+                            "immediate_predecessor_sha256": (
+                                prior_snapshot_immediate_sha256),
+                        } if optimizer_continuity.source_journal_v2 else {}),
                     )
                     restored_full_state_sha256 = receipt.sha256
                     if restored_full_state_sha256 != prior_full_state_sha256:
                         raise RuntimeError("optimizer snapshot readback changed")
+            active_immediate_sha256 = None
+            if (optimizer_continuity is not None
+                    and optimizer_continuity.source_journal_v2):
+                if source_journal_binding is None:
+                    raise RuntimeError("v2 journal binding was not installed")
+                active_immediate_sha256 = (
+                    prior_full_state_sha256 if cycle.plan.cycle_index
+                    else optimizer_continuity.prior_checkpoint_sha256)
+                journal_status = inspect_maze_journal(
+                    source_journal_root, source_journal_binding,
+                    schema_version="v2",
+                )
+                if (journal_status.pending_cycle is not None
+                        or journal_status.committed_cycles != cycle.plan.cycle_index
+                        or journal_status.last_checkpoint_sha256
+                        != active_immediate_sha256):
+                    raise RuntimeError("v2 journal pending or immediate predecessor changed")
+                future_context = full_state_plan.context(
+                    (cycle.plan.cycle_index + 1) * steps_per_cycle,
+                    cycle_index=cycle.plan.cycle_index,
+                    immediate_predecessor_sha256=active_immediate_sha256,
+                )
+                if type(future_context) is not FullCheckpointContextV2:
+                    raise RuntimeError("v2 journal cannot accept legacy snapshot context")
+                # Intent is durable BEFORE the first optimizer training step;
+                # an interrupted cycle is UNKNOWN/HOLD, never auto-replayed.
+                precommit_maze_cycle(
+                    source_journal_root, source_journal_binding,
+                    cycle.plan.cycle_index, future_context,
+                    schema_version="v2",
+                )
             before = trainable_digest(model, head)
             lora_before = adapter_digest(model)
             if preceding_state is not None and before != preceding_state:
@@ -916,7 +1015,30 @@ def execute(
                     checkpoint / "optimizer-state", encoder=model, head=head,
                     optimizer=optimizer, plan=full_state_plan,
                     completed_steps=completed_steps,
+                    **({
+                        "cycle_index": cycle.plan.cycle_index,
+                        "immediate_predecessor_sha256": active_immediate_sha256,
+                    } if optimizer_continuity.source_journal_v2 else {}),
                 )
+                if optimizer_continuity.source_journal_v2:
+                    committed_sha = commit_maze_cycle(
+                        source_journal_root, source_journal_binding,
+                        cycle.plan.cycle_index, future_context,
+                        checkpoint / "optimizer-state", full_receipt.sha256,
+                        schema_version="v2",
+                    )
+                    committed_status = inspect_maze_journal(
+                        source_journal_root, source_journal_binding,
+                        schema_version="v2",
+                    )
+                    if (committed_sha != full_receipt.sha256
+                            or committed_status.pending_cycle is not None
+                            or committed_status.committed_cycles
+                            != cycle.plan.cycle_index + 1
+                            or committed_status.last_checkpoint_sha256
+                            != full_receipt.sha256):
+                        raise RuntimeError("v2 journal checkpoint commit readback changed")
+                    prior_snapshot_immediate_sha256 = active_immediate_sha256
                 prior_full_state_sha256 = full_receipt.sha256
                 cycle_result.update({
                     "full_optimizer_snapshot_sha256": full_receipt.sha256,
@@ -926,6 +1048,16 @@ def execute(
                     "full_optimizer_predecessor_restore_sha256": restored_full_state_sha256,
                     "optimizer_continuity_provenance": "LOCAL_RECEIPT_NO_HOST_FENCE",
                 })
+                if optimizer_continuity.source_journal_v2:
+                    cycle_result.update({
+                        "optimizer_continuity_provenance": (
+                            "V2_LOCAL_SOURCE_JOURNAL_NO_HOST_CAS"),
+                        "optimizer_v2_immediate_predecessor_sha256": (
+                            active_immediate_sha256),
+                        "optimizer_v2_journal_committed_cycles": (
+                            committed_status.committed_cycles),
+                        "optimizer_v2_external_authority_attested": False,
+                    })
             if preregistered_controls:
                 cycle_result.update({
                     "optimizer_step_invocations": 0 if arm == "zero_update"
@@ -956,7 +1088,29 @@ def execute(
         del model, head, optimizer, params, prediction, loss, labels, batch
         import gc
         gc.collect()
-        restored_model, restored_head, restored_base = create_model(previous)
+        if (optimizer_continuity is not None
+                and optimizer_continuity.source_journal_v2):
+            # Independently read the *final* full-state checkpoint through a
+            # freshly allocated encoder/head/AdamW, not only the PEFT/head
+            # export. The journal remains source-local without external CAS.
+            restored_model, restored_head, restored_base = create_model(None)
+            restored_optimizer = torch.optim.AdamW(
+                [p for p in restored_model.parameters() if p.requires_grad]
+                + list(restored_head.parameters()),
+                lr=optimizer_learning_rate(arm, learning_rate),
+            )
+            final_receipt = load_maze_optimizer_snapshot(
+                previous / "optimizer-state", encoder=restored_model,
+                head=restored_head, optimizer=restored_optimizer,
+                plan=full_state_plan, completed_steps=2 * steps_per_cycle,
+                independently_pinned_checkpoint_sha256=prior_full_state_sha256,
+                cycle_index=1,
+                immediate_predecessor_sha256=prior_snapshot_immediate_sha256,
+            )
+            if final_receipt.sha256 != prior_full_state_sha256:
+                raise RuntimeError("final v2 full optimizer restore digest changed")
+        else:
+            restored_model, restored_head, restored_base = create_model(previous)
         restored_values = {
             "trainable_sha256_after": trainable_digest(restored_model, restored_head),
             "lora_sha256_after": adapter_digest(restored_model),
@@ -981,6 +1135,11 @@ def execute(
                 != cycle_results[-1]["public_transfer_accuracy"]):
             raise RuntimeError("final checkpoint readback changed public accuracy")
         del restored_model, restored_head
+        if (optimizer_continuity is not None
+                and optimizer_continuity.source_journal_v2):
+            del restored_optimizer
+            readback["full_optimizer_restore"] = (
+                "V2_FRESH_PROCESS_OBJECT_SOURCE_BYTES_ONLY")
         gc.collect()
         report["arms"][arm] = {
             "initial_trainable_sha256": cycle_results[0]["trainable_sha256_before"],
@@ -1046,6 +1205,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="required caller-declared predecessor checkpoint SHA-256; not independently attested")
     parser.add_argument("--optimizer-fence", type=int,
                         help="required caller-declared local fence; not host-owned")
+    parser.add_argument("--optimizer-v2-journal", action="store_true",
+                        help="opt-in v2 manifest and immediate-predecessor source journal; no host CAS/crash replay")
+    parser.add_argument("--optimizer-v2-candidate-sha256",
+                        help="operator-pinned candidate artifact SHA-256 required by v2 source journal")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args(argv)
     if (not 1 <= args.steps_per_cycle <= 16
@@ -1059,9 +1222,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.full_optimizer_cycle_continuity:
             if any(value is None for value in optimizer_args):
                 raise ValueError("full optimizer continuity requires run ID, predecessor SHA and fence")
-            optimizer_request = OptimizerContinuityRequest(*optimizer_args)
+            optimizer_request = OptimizerContinuityRequest(
+                *optimizer_args, source_journal_v2=args.optimizer_v2_journal,
+                candidate_artifact_sha256=args.optimizer_v2_candidate_sha256,
+            )
             optimizer_request.validate()
-        elif any(value is not None for value in optimizer_args):
+        elif (any(value is not None for value in optimizer_args)
+              or args.optimizer_v2_journal
+              or args.optimizer_v2_candidate_sha256 is not None):
             raise ValueError("optimizer pins require --full-optimizer-cycle-continuity")
         scope = default_scope()
         if args.scope_file is not None:
@@ -1090,7 +1258,9 @@ def main(argv: list[str] | None = None) -> int:
                 "weakness_feedback_provenance": "OPERATOR_DECLARED_NOT_MEASURED",
                 "public_development_only": True, "graduation_authorized": False,
                 "full_optimizer_continuity": (
-                    "LOCAL_RECEIPT_NO_HOST_FENCE" if optimizer_request is not None
+                    "V2_IMMEDIATE_PREDECESSOR_SOURCE_JOURNAL_ONLY"
+                    if optimizer_request is not None and optimizer_request.source_journal_v2
+                    else "LOCAL_RECEIPT_NO_HOST_FENCE" if optimizer_request is not None
                     else "DISABLED"),
                 **({
                     "arms": list(configured_arms(True)),

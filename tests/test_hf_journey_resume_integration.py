@@ -19,6 +19,8 @@ from unittest import mock
 
 from labyrinth.hf_pilot import (
     PilotConfig, EVAL_SPLIT_MAX_ATTEMPTS, _arithmetic_equivalence_key,
+    _arithmetic_semantic_commitments, _arithmetic_history_witnesses,
+    _arithmetic_case_binding_records, _arithmetic_case_binding_root,
     _resume_training_cases, _scoped_public_heldout, _scoped_training_cases,
     RESEARCH_ONLY_RESUME, reload_evaluate, run_pilot, training_cases,
 )
@@ -59,6 +61,8 @@ class ResumeIntegrationTests(unittest.TestCase):
         }
         if scoped_cycle is not None:
             cases = train + heldout
+            witnesses = _arithmetic_history_witnesses(cases)
+            bindings = _arithmetic_case_binding_records(witnesses)
             report["resumed_journey"] = {
                 "scope": self.scope.to_dict(),
                 "scope_fingerprint": self.scope.fingerprint,
@@ -66,6 +70,10 @@ class ResumeIntegrationTests(unittest.TestCase):
                 "weak_skills": [],
                 "historical_case_ids": sorted({case.id for case in cases}),
                 "historical_prompt_sha256": sorted({hashlib.sha256(case.prompt.encode()).hexdigest() for case in cases}),
+                "historical_arithmetic_sha256": sorted(_arithmetic_semantic_commitments(cases)),
+                "historical_arithmetic_witnesses_v1": witnesses,
+                "historical_arithmetic_case_bindings_v1": bindings,
+                "historical_arithmetic_binding_root_v1": _arithmetic_case_binding_root(bindings),
             }
         return report
 
@@ -109,6 +117,8 @@ class ResumeIntegrationTests(unittest.TestCase):
         self.assertEqual(heldout, _scoped_training_cases(config, scope, 0, ())[1])
 
         prior_cases = train + heldout
+        witnesses = _arithmetic_history_witnesses(prior_cases)
+        bindings = _arithmetic_case_binding_records(witnesses)
         prior = {
             "config": asdict(config),
             "training_case_ids": [case.id for case in train],
@@ -121,6 +131,12 @@ class ResumeIntegrationTests(unittest.TestCase):
                     hashlib.sha256(case.prompt.encode()).hexdigest()
                     for case in prior_cases
                 ),
+                "historical_arithmetic_sha256": sorted(
+                    _arithmetic_semantic_commitments(prior_cases)
+                ),
+                "historical_arithmetic_witnesses_v1": witnesses,
+                "historical_arithmetic_case_bindings_v1": bindings,
+                "historical_arithmetic_binding_root_v1": _arithmetic_case_binding_root(bindings),
             },
         }
         next_train, next_eval, _ = _resume_training_cases(
@@ -334,6 +350,12 @@ class ResumeIntegrationTests(unittest.TestCase):
         self.assertEqual(result["resumed_journey"]["development_resume_authority"],
                          RESEARCH_ONLY_RESUME)
         self.assertFalse(result["resumed_journey"]["minotaur_private_graduation"])
+        self.assertIn("historical_arithmetic_sha256", result["resumed_journey"])
+        emitted_witnesses = result["resumed_journey"]["historical_arithmetic_witnesses_v1"]
+        emitted_bindings = result["resumed_journey"]["historical_arithmetic_case_bindings_v1"]
+        self.assertEqual(emitted_bindings, _arithmetic_case_binding_records(emitted_witnesses))
+        self.assertEqual(result["resumed_journey"]["historical_arithmetic_binding_root_v1"],
+                         _arithmetic_case_binding_root(emitted_bindings))
         self.assertTrue((Path(self.config.output_dir) / "candidate_adapter" / "adapter_model.safetensors").exists())
 
 

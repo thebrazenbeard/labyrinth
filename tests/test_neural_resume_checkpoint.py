@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from dataclasses import replace
 import importlib.util
+import os
 from pathlib import Path
 import random
+import stat
 import tempfile
 import unittest
+from unittest.mock import patch
 
+import labyrinth.neural_resume_checkpoint as checkpoint
 from labyrinth.neural_resume_checkpoint import (
     FullCheckpointContext,
     FullCheckpointError,
@@ -30,6 +34,55 @@ def _context() -> FullCheckpointContext:
 
 
 class CheckpointContractTests(unittest.TestCase):
+    def test_publication_fsyncs_tensor_manifest_and_parent_directory(self):
+        # Isolate the filesystem publication path from optional neural libraries.
+        # A green manifest fsync cannot substitute for an unsynced tensor file.
+        class FakeParameter:
+            def detach(self):
+                return self
+
+        class FakeOptimizer:
+            def state_dict(self):
+                return {}
+
+        class FakeTorch:
+            @staticmethod
+            def get_rng_state():
+                return "fake-rng"
+
+        def save_tensor(_tensors, destination):
+            Path(destination).write_bytes(b"fake-safetensors-for-filesystem-test")
+
+        original_fsync = os.fsync
+        synced: set[tuple[int, int]] = set()
+
+        def recording_fsync(fd):
+            info = os.fstat(fd)
+            synced.add((stat.S_IFMT(info.st_mode), info.st_ino))
+            return original_fsync(fd)
+
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / "checkpoint"
+            with (patch.object(checkpoint, "_dependencies",
+                               return_value=(FakeTorch, None, save_tensor)),
+                  patch.object(checkpoint, "_trainable_and_groups",
+                               return_value=({"weight": FakeParameter()}, [["weight"]])),
+                  patch.object(checkpoint, "_encode_tree",
+                               return_value={"type": "dict", "items": []}),
+                  patch.object(checkpoint, "_numpy_rng_snapshot", return_value=None),
+                  patch.object(checkpoint.os, "fsync", side_effect=recording_fsync)):
+                save_full_checkpoint(destination, model=object(),
+                                     optimizer=FakeOptimizer(), context=_context())
+
+            for name in ("state.safetensors", "manifest.json"):
+                self.assertIn((stat.S_IFREG, (destination / name).stat().st_ino), synced,
+                              f"published {name} lacked a file fsync")
+            if os.name == "posix":
+                self.assertIn((stat.S_IFDIR, destination.stat().st_ino), synced,
+                              "staged checkpoint file entries lacked directory fsync")
+                self.assertIn((stat.S_IFDIR, destination.parent.stat().st_ino), synced,
+                              "published checkpoint directory entry lacked parent fsync")
+
     def test_reject_invalid_cursor_and_malformed_exposure(self):
         with self.assertRaisesRegex(ValueError, "cursor"):
             replace(_context(), cursor=3).validate()

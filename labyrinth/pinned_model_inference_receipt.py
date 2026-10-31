@@ -11,6 +11,7 @@ examination or a graduation credential.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 import hmac
@@ -247,6 +248,12 @@ def run_source_pinned_evaluator_inference(
     _hex(externally_pinned_candidate_component_binding_sha256,
          "external candidate-component binding")
     cases = _cases(cases)
+    # A frozen dataclass is not a security boundary against an in-process
+    # driver using object.__setattr__. Snapshot source identities before
+    # invoking the evaluator-selected factory and logits callbacks; calculate
+    # from that snapshot, and reject changes to the caller's original inputs.
+    original_inputs = (intent, cases, model)
+    intent, cases, model = deepcopy(original_inputs)
     committed = evaluator_roster_commitment(cases, roster_key=roster_key)
     if (not hmac.compare_digest(committed, intent.roster_commitment)
             or not hmac.compare_digest(committed,
@@ -277,6 +284,8 @@ def run_source_pinned_evaluator_inference(
                      "predicted_label": int(raw[1] > raw[0])})
     if _components(model) != before:
         raise InferenceSourceError("model artifact identity changed during inference")
+    if original_inputs != (intent, cases, model):
+        raise InferenceSourceError("evaluator intent, roster or model pins changed during inference")
     identity = {
         "exam_id": intent.exam_id, "event_id": intent.event_id,
         "run_id": intent.run_id, "arm": intent.arm,

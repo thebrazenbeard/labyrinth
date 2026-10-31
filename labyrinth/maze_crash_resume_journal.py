@@ -13,6 +13,12 @@ are caller-pinned source checks only. In particular, its control-arm name is a
 caller assertion: independent examination must separately verify that the
 checkpoint run ID and committed exposure/label roster derive from the actual
 precommitted MazeOptimizerResumePlan. No cleanup or implicit repair occurs.
+
+The default v1 route is LEGACY_UNQUALIFIED because its checkpoint manifest has
+no cycle-specific predecessor. An explicitly selected v2 route persists and
+checks the immediate previous committed checkpoint manifest receipt SHA in
+both intent context and checkpoint manifest. V2 remains SOURCE_ONLY; it does
+not make a caller's digest proof of actual model-state derivation.
 """
 
 from __future__ import annotations
@@ -27,13 +33,17 @@ import stat
 from typing import Any
 
 from .neural_resume_checkpoint import (
-    SCHEMA as FULL_NEURAL_SCHEMA, FullCheckpointContext, _context_json,
+    SCHEMA as FULL_NEURAL_SCHEMA, SCHEMA_V2 as FULL_NEURAL_SCHEMA_V2,
+    FullCheckpointContext, FullCheckpointContextV2, _context_json,
     _manifest_digest, _strict_json,
 )
 
 
 SCHEMA = "labyrinth.maze-crash-resume-journal.v1"
+SCHEMA_V2 = "labyrinth.maze-crash-resume-journal.v2"
 SOURCE_ONLY = "SOURCE_ONLY_NO_EXTERNAL_MONOTONIC_ANCHOR"
+LEGACY_UNQUALIFIED = "LEGACY_UNQUALIFIED"
+V2_SOURCE_ONLY = "V2_SOURCE_ONLY_NO_EXTERNAL_MONOTONIC_ANCHOR"
 _ARMS = frozenset(("correct", "zero_update", "zero_lr", "inverted",
                    "randomized_labels"))
 _HEX = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -92,6 +102,7 @@ class MazeJournalStatus:
     last_checkpoint_path: Path | None
     pending_cycle: int | None
     qualification: str = SOURCE_ONLY
+    lineage_qualification: str = LEGACY_UNQUALIFIED
 
     @property
     def safe_to_begin_next_cycle(self) -> bool:
@@ -103,8 +114,14 @@ def _canonical(value: Any) -> bytes:
                        allow_nan=False, ensure_ascii=True) + "\n").encode("ascii")
 
 
-def _digest(value: Any) -> str:
-    return sha256(b"labyrinth.maze-crash-resume-journal.v1\0" +
+def _version_schema(schema_version: str) -> str:
+    if type(schema_version) is not str or schema_version not in ("v1", "v2"):
+        raise ValueError("explicit v1 or v2 Maze journal schema required")
+    return SCHEMA_V2 if schema_version == "v2" else SCHEMA
+
+
+def _digest(value: Any, *, schema_version: str = "v1") -> str:
+    return sha256(_version_schema(schema_version).encode("ascii") + b"\0" +
                   _canonical(value)).hexdigest()
 
 
@@ -185,8 +202,12 @@ def _cycle_paths(root: Path, cycle: int) -> tuple[Path, Path]:
 
 
 def _context_check(binding: MazeJournalBinding,
-                   context: FullCheckpointContext) -> None:
-    if type(context) is not FullCheckpointContext:
+                   context: FullCheckpointContext,
+                   *, schema_version: str = "v1") -> None:
+    _version_schema(schema_version)
+    required_type = (FullCheckpointContextV2 if schema_version == "v2"
+                     else FullCheckpointContext)
+    if type(context) is not required_type:
         raise ValueError("typed full-state checkpoint context required")
     context.validate()
     if (context.run_id != binding.checkpoint_run_id
@@ -267,7 +288,7 @@ def _optimizer_moments_present(tree: Any, trainable_count: int,
 
 def _snapshot(root: Path, checkpoint_path: Path,
               expected_context_json: dict[str, Any], trusted_sha256: str,
-              *, arm: str
+              *, arm: str, schema_version: str = "v1"
               ) -> tuple[str, str]:
     if not isinstance(checkpoint_path, Path) or not checkpoint_path.is_absolute():
         raise ValueError("absolute checkpoint Path required")
@@ -288,7 +309,9 @@ def _snapshot(root: Path, checkpoint_path: Path,
         if target.is_symlink() or not stat.S_ISREG(target.lstat().st_mode):
             raise MazeJournalError("nonregular neural checkpoint file")
     manifest_raw = (checkpoint_path / "manifest.json").read_bytes()
-    if _manifest_digest(manifest_raw) != trusted_sha256:
+    neural_schema = (FULL_NEURAL_SCHEMA_V2 if schema_version == "v2"
+                     else FULL_NEURAL_SCHEMA)
+    if _manifest_digest(manifest_raw, schema=neural_schema) != trusted_sha256:
         raise MazeJournalError("checkpoint manifest not the pinned digest")
     try:
         manifest = _strict_json(manifest_raw)
@@ -297,7 +320,7 @@ def _snapshot(root: Path, checkpoint_path: Path,
     if (set(manifest) != {"schema", "context", "optimizer", "optimizer_groups",
                           "trainable_names", "model_tree", "optimizer_tree",
                           "rng_tree", "numpy_rng", "tensor_sha256"}
-            or manifest["schema"] != FULL_NEURAL_SCHEMA
+            or manifest["schema"] != neural_schema
             or manifest["optimizer"] != "AdamW"
             or manifest["context"] != expected_context_json
             or type(manifest["trainable_names"]) is not list
@@ -316,25 +339,30 @@ def _snapshot(root: Path, checkpoint_path: Path,
     return str(relative), manifest["tensor_sha256"]
 
 
-def initialize_maze_journal(root: Path, binding: MazeJournalBinding) -> None:
+def initialize_maze_journal(root: Path, binding: MazeJournalBinding,
+                            *, schema_version: str = "v1") -> None:
     """Exclusively initialize a never-replaced local run journal."""
     if type(binding) is not MazeJournalBinding:
         raise ValueError("typed run binding required")
     binding.validate()
+    schema = _version_schema(schema_version)
     root = _safe(root, existing=False)
     root.mkdir(mode=0o700)
-    _write_once(root / "run.json", {"schema": SCHEMA,
+    _write_once(root / "run.json", {"schema": schema,
                                     "binding": _binding_json(binding),
-                                    "binding_sha256": _digest(_binding_json(binding))})
+                                    "binding_sha256": _digest(_binding_json(binding), schema_version=schema_version)})
     _fsync_directory(root.parent)
 
 
-def _inspect(root: Path, binding: MazeJournalBinding) -> tuple[MazeJournalStatus,
+def _inspect(root: Path, binding: MazeJournalBinding,
+             *, schema_version: str = "v1") -> tuple[MazeJournalStatus,
                                                                dict[str, Any] | None]:
+    schema = _version_schema(schema_version)
+    qualifier = V2_SOURCE_ONLY if schema_version == "v2" else SOURCE_ONLY
     root = _safe(root, existing=True)
     data = _read(root / "run.json")
-    if data != {"schema": SCHEMA, "binding": _binding_json(binding),
-                "binding_sha256": _digest(_binding_json(binding))}:
+    if data != {"schema": schema, "binding": _binding_json(binding),
+                "binding_sha256": _digest(_binding_json(binding), schema_version=schema_version)}:
         raise MazeJournalError("wrong or altered run binding")
     found: set[str] = set()
     for entry in root.iterdir():
@@ -365,33 +393,42 @@ def _inspect(root: Path, binding: MazeJournalBinding) -> tuple[MazeJournalStatus
         expected_keys = {"schema", "run_binding_sha256", "cycle_index",
                          "prior_checkpoint_sha256", "context", "context_sha256",
                          "start_cursor", "qualification"}
-        if (set(intent) != expected_keys or intent["schema"] != SCHEMA
-                or intent["run_binding_sha256"] != _digest(_binding_json(binding))
+        if (set(intent) != expected_keys or intent["schema"] != schema
+                or intent["run_binding_sha256"] != _digest(_binding_json(binding), schema_version=schema_version)
                 or type(intent["cycle_index"]) is not int
                 or intent["cycle_index"] != cycle
                 or intent["prior_checkpoint_sha256"] != last_sha
-                or intent["qualification"] != SOURCE_ONLY
+                or intent["qualification"] != qualifier
                 or type(intent["start_cursor"]) is not int
                 or intent["start_cursor"] != last_cursor
                 or type(intent["context"]) is not dict
-                or intent["context_sha256"] != _digest(intent["context"])):
+                or intent["context_sha256"] != _digest(intent["context"], schema_version=schema_version)):
             raise MazeJournalError("invalid cycle intent or predecessor")
         try:
-            context = FullCheckpointContext(
+            context_type = (FullCheckpointContextV2 if schema_version == "v2"
+                            else FullCheckpointContext)
+            v2_fields = ({"cycle_index": intent["context"]["cycle_index"],
+                          "immediate_predecessor_sha256": intent["context"]["immediate_predecessor_sha256"]}
+                         if schema_version == "v2" else {})
+            context = context_type(
                 run_id=intent["context"]["run_id"],
                 objective_id=intent["context"]["objective_id"],
                 base_checkpoint_sha256=intent["context"]["base_checkpoint_sha256"],
                 prior_checkpoint_sha256=intent["context"]["prior_checkpoint_sha256"],
                 fence=intent["context"]["fence"], cursor=intent["context"]["cursor"],
                 exposures=tuple(tuple(x) for x in intent["context"]["exposures"]),
+                **v2_fields,
             )
-            _context_check(binding, context)
+            _context_check(binding, context, schema_version=schema_version)
         except (KeyError, TypeError, ValueError) as exc:
             raise MazeJournalError("invalid stored checkpoint context") from exc
         if (_context_json(context) != intent["context"]
                 or not last_cursor < context.cursor <= len(context.exposures)
                 or (exposures is not None and exposures != context.exposures)):
             raise MazeJournalError("noncontiguous cursor or exposure permutation")
+        if schema_version == "v2" and (context.cycle_index != cycle
+                                       or context.immediate_predecessor_sha256 != last_sha):
+            raise MazeJournalError("v2 checkpoint does not commit to immediate predecessor")
         if not has_commit:
             pending = cycle
             last_intent = intent
@@ -403,18 +440,19 @@ def _inspect(root: Path, binding: MazeJournalBinding) -> tuple[MazeJournalStatus
         if (set(commit) != {"schema", "intent_sha256", "cycle_index",
                             "checkpoint_sha256", "checkpoint_path", "tensor_sha256",
                             "qualification"}
-                or commit["schema"] != SCHEMA
-                or commit["intent_sha256"] != _digest(intent)
+                or commit["schema"] != schema
+                or commit["intent_sha256"] != _digest(intent, schema_version=schema_version)
                 or type(commit["cycle_index"]) is not int
                 or commit["cycle_index"] != cycle
                 or type(commit["checkpoint_sha256"]) is not str
                 or not _HEX.fullmatch(commit["checkpoint_sha256"])
                 or type(commit["checkpoint_path"]) is not str
-                or commit["qualification"] != SOURCE_ONLY):
+                or commit["qualification"] != qualifier):
             raise MazeJournalError("invalid committed cycle receipt")
         cp = (root.parent / commit["checkpoint_path"]).absolute()
         rel, tensor_sha = _snapshot(root, cp, intent["context"],
-                                    commit["checkpoint_sha256"], arm=binding.arm)
+                                    commit["checkpoint_sha256"], arm=binding.arm,
+                                    schema_version=schema_version)
         if rel != commit["checkpoint_path"] or tensor_sha != commit["tensor_sha256"]:
             raise MazeJournalError("committed checkpoint bytes changed")
         last_sha = commit["checkpoint_sha256"]
@@ -422,29 +460,37 @@ def _inspect(root: Path, binding: MazeJournalBinding) -> tuple[MazeJournalStatus
         last_cursor = context.cursor
         exposures = context.exposures
         committed += 1
-    return (MazeJournalStatus(committed, last_sha, last_path, pending), last_intent)
+    status = MazeJournalStatus(committed, last_sha, last_path, pending,
+                               qualifier, ("V2_SOURCE_COMMITTED_PREDECESSOR_ONLY"
+                                           if schema_version == "v2" else LEGACY_UNQUALIFIED))
+    return status, last_intent
 
 
-def inspect_maze_journal(root: Path, binding: MazeJournalBinding) -> MazeJournalStatus:
+def inspect_maze_journal(root: Path, binding: MazeJournalBinding,
+                         *, schema_version: str = "v1") -> MazeJournalStatus:
     """Read back a chain; UNKNOWN pending is a terminal hold, not a retry cue."""
     if type(binding) is not MazeJournalBinding:
         raise ValueError("typed run binding required")
     binding.validate()
-    return _inspect(root, binding)[0]
+    return _inspect(root, binding, schema_version=schema_version)[0]
 
 
 def precommit_maze_cycle(root: Path, binding: MazeJournalBinding,
-                         cycle_index: int, context: FullCheckpointContext) -> None:
+                         cycle_index: int, context: FullCheckpointContext,
+                         *, schema_version: str = "v1") -> None:
     """Exclusively persist an intent before any optimizer work for this cycle."""
     binding.validate()
-    _context_check(binding, context)
+    _context_check(binding, context, schema_version=schema_version)
     if type(cycle_index) is not int or not 0 <= cycle_index < binding.cycle_count:
         raise ValueError("invalid cycle")
-    status = inspect_maze_journal(root, binding)
+    status = inspect_maze_journal(root, binding, schema_version=schema_version)
     if status.pending_cycle is not None:
         raise MazeJournalUnknown("unresolved training cycle; do not replay")
     if status.committed_cycles != cycle_index:
         raise MazeJournalError("missing or already committed predecessor")
+    if schema_version == "v2" and (context.cycle_index != cycle_index
+                                   or context.immediate_predecessor_sha256 != status.last_checkpoint_sha256):
+        raise MazeJournalError("v2 immediate predecessor is not the last committed checkpoint")
     previous_cursor = 0
     if cycle_index:
         last = _read(_cycle_paths(root, cycle_index - 1)[0])
@@ -453,39 +499,48 @@ def precommit_maze_cycle(root: Path, binding: MazeJournalBinding,
             raise MazeJournalError("checkpoint exposures changed across cycles")
     if not previous_cursor < context.cursor <= len(context.exposures):
         raise MazeJournalError("cycle cursor must advance on committed exposures")
-    intent = {"schema": SCHEMA,
-              "run_binding_sha256": _digest(_binding_json(binding)),
+    schema = _version_schema(schema_version)
+    qualifier = V2_SOURCE_ONLY if schema_version == "v2" else SOURCE_ONLY
+    intent = {"schema": schema,
+              "run_binding_sha256": _digest(_binding_json(binding), schema_version=schema_version),
               "cycle_index": cycle_index,
               "prior_checkpoint_sha256": status.last_checkpoint_sha256,
               "context": _context_json(context),
-              "context_sha256": _digest(_context_json(context)),
+              "context_sha256": _digest(_context_json(context), schema_version=schema_version),
               "start_cursor": previous_cursor,
-              "qualification": SOURCE_ONLY}
+              "qualification": qualifier}
     _write_once(_cycle_paths(root, cycle_index)[0], intent)
 
 
 def commit_maze_cycle(root: Path, binding: MazeJournalBinding,
                       cycle_index: int, context: FullCheckpointContext,
                       checkpoint_path: Path,
-                      trusted_checkpoint_manifest_sha256: str) -> str:
+                      trusted_checkpoint_manifest_sha256: str,
+                      *, schema_version: str = "v1") -> str:
     """Publish receipt after exact byte readback; never infer from a partial file."""
     binding.validate()
-    _context_check(binding, context)
-    status, pending_intent = _inspect(root, binding)
+    _context_check(binding, context, schema_version=schema_version)
+    status, pending_intent = _inspect(root, binding, schema_version=schema_version)
     if (type(cycle_index) is not int or status.pending_cycle != cycle_index
             or status.committed_cycles != cycle_index or pending_intent is None):
         raise MazeJournalError("no matching unresolved cycle intent")
     if pending_intent["context"] != _context_json(context):
         raise MazeJournalError("checkpoint context changed after intent")
+    if schema_version == "v2" and (context.cycle_index != cycle_index
+                                   or context.immediate_predecessor_sha256 != status.last_checkpoint_sha256):
+        raise MazeJournalError("v2 commit has incorrect immediate predecessor")
     rel, tensor = _snapshot(root, checkpoint_path, pending_intent["context"],
-                            trusted_checkpoint_manifest_sha256, arm=binding.arm)
-    commit = {"schema": SCHEMA, "intent_sha256": _digest(pending_intent),
+                            trusted_checkpoint_manifest_sha256, arm=binding.arm,
+                            schema_version=schema_version)
+    schema = _version_schema(schema_version)
+    qualifier = V2_SOURCE_ONLY if schema_version == "v2" else SOURCE_ONLY
+    commit = {"schema": schema, "intent_sha256": _digest(pending_intent, schema_version=schema_version),
               "cycle_index": cycle_index,
               "checkpoint_sha256": trusted_checkpoint_manifest_sha256,
               "checkpoint_path": rel, "tensor_sha256": tensor,
-              "qualification": SOURCE_ONLY}
+              "qualification": qualifier}
     _write_once(_cycle_paths(root, cycle_index)[1], commit)
     # A successful API return is a SOURCE-ONLY local readback, not a host CAS.
-    if inspect_maze_journal(root, binding).committed_cycles != cycle_index + 1:
+    if inspect_maze_journal(root, binding, schema_version=schema_version).committed_cycles != cycle_index + 1:
         raise MazeJournalUnknown("commit readback not established")
     return trusted_checkpoint_manifest_sha256

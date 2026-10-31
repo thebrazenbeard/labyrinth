@@ -15,6 +15,8 @@ from .evaluation import score_response
 from .hf_pilot import (
     LEGACY_SCHEMA, SCHEMA, PilotConfig,
     RESEARCH_ONLY_RESUME, SIGNED_DEVELOPMENT_RESUME, _prompt_commitment,
+    _arithmetic_semantic_commitments, _historical_arithmetic_case_count,
+    _arithmetic_history_witnesses, _verified_arithmetic_history_witnesses,
     _scoped_training_cases, _training_visit_indices, derange_answers, training_cases,
 )
 from .runner import _source_state
@@ -177,11 +179,16 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
                 raise ValueError("scoped training room identities disagree with regenerated maze")
             historical_ids = journey.get("historical_case_ids")
             historical_prompts = journey.get("historical_prompt_sha256")
+            historical_arithmetic = journey.get("historical_arithmetic_sha256")
+            historical_witnesses = journey.get("historical_arithmetic_witnesses_v1")
+            historical_bindings = journey.get("historical_arithmetic_case_bindings_v1")
+            historical_binding_root = journey.get("historical_arithmetic_binding_root_v1")
             current_case_ids = {case.id for case in train + heldout}
             current_prompt_hashes = {
                 hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
                 for case in train + heldout
             }
+            current_arithmetic = _arithmetic_semantic_commitments(train + heldout)
             if (type(historical_ids) is not list or type(historical_prompts) is not list
                     or len(historical_ids) > 4096 or len(historical_prompts) > 4096
                     or len(historical_ids) != len(historical_prompts)
@@ -194,11 +201,27 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
                     or not current_prompt_hashes.issubset(historical_prompts)
                     or journey.get("same_initial_lora_for_all_controls") is not True):
                 raise ValueError("scoped history lacks current TRAIN/public diagnostic commitments")
+            if (type(historical_arithmetic) is not list
+                    or len(historical_arithmetic) > 4096
+                    or any(not _digest(digest) for digest in historical_arithmetic)
+                    or len(set(historical_arithmetic)) != len(historical_arithmetic)
+                    or not current_arithmetic.issubset(historical_arithmetic)
+                    or len(historical_arithmetic) !=
+                    _historical_arithmetic_case_count(historical_ids)):
+                raise ValueError("scoped semantic arithmetic history missing, malformed or incomplete")
+            _verified_arithmetic_history_witnesses(
+                historical_witnesses, historical_ids, historical_prompts,
+                historical_arithmetic, historical_bindings, historical_binding_root,
+            )
+            if historical_bindings is None or historical_binding_root is None:
+                raise ValueError("scoped arithmetic case-to-prompt binding is missing")
             if cycle == 0:
                 if journey.get("development_resume_authority") is not None:
                     raise ValueError("initial cycle cannot claim successor authorization")
                 if (set(historical_ids) != current_case_ids
-                        or set(historical_prompts) != current_prompt_hashes):
+                        or set(historical_prompts) != current_prompt_hashes
+                        or set(historical_arithmetic) != current_arithmetic
+                        or historical_witnesses != _arithmetic_history_witnesses(train + heldout)):
                     raise ValueError("initial scoped history contains unexplained prior evidence")
             else:
                 authority = journey.get("development_resume_authority")

@@ -15,9 +15,11 @@ import tempfile
 import unittest
 
 from labyrinth.pretrained_model_provenance import capture_pretrained_model_manifest
+from scripts.qualify_minilm_cpu import PHYSICAL_ARMS, arm_contract
 from scripts.qualify_model_bytes_provenance import (
     ModelByteWindowError, _RUNNER, main, run_bound_pilot,
 )
+from test_physical_report_bridge import physical_report
 
 
 def _sha(path: Path) -> str:
@@ -47,7 +49,7 @@ class ProvenanceRunnerIntegrationTests(unittest.TestCase):
         values = dict(model_root=self.model, manifest_json=self.manifest_path,
                       trusted_manifest_sha256=self.manifest["manifest_sha256"],
                       output_parent=self.run_parent, run_name="one", seed=42,
-                      steps_per_cycle=4, learning_rate=.002)
+                      steps_per_cycle=2, learning_rate=.002)
         values.update(overrides)
         return values
 
@@ -59,18 +61,22 @@ class ProvenanceRunnerIntegrationTests(unittest.TestCase):
         self.assertEqual(kwargs["env"]["TRANSFORMERS_OFFLINE"], "1")
         result = self.run_parent / "one"
         result.mkdir()
-        payload = {
-            "schema": "labyrinth.minilm-cpu-development.v1",
+        # Synthetic public development fixture must reflect the current v2
+        # runner's exact four-arm, batch-aware output schema. A v1 report
+        # falsely claiming the v2 harness SHA must not pass custody binding.
+        payload = physical_report()
+        payload.update({
             "model_id": str(self.model.absolute()),
             "harness_sha256": _sha(_RUNNER),
-            "seed": 42, "steps_per_cycle": 4, "learning_rate": .002,
-            "qualification": "PUBLIC_DEVELOPMENT_ONLY",
-            "private_final_exam": "NOT_RUN",
-            "graduation_authorized": False,
-            "physical_model_byte_custody": "SELF_REPORTED",
+            "run_id": "one", "seed": 42,
+            "steps_per_cycle": 2, "learning_rate": .002,
+            "device": "cpu",
+            "baseline_compute_matched_to_training": False,
+            "reload_method": "NEW_MODEL_OBJECT_SAME_PROCESS",
+            "zero_update_control": "SAME_FORWARD_BACKWARD_ADAMW_STEP_WITH_ZERO_LR",
+            "arm_contracts": {name: arm_contract(name, .002) for name in PHYSICAL_ARMS},
             "learning_qualification": "NOT_ESTABLISHED_UNTIL_INDEPENDENT_EVALUATION",
-            "arms": {name: {} for name in ("correct", "zero_update", "inverted")},
-        }
+        })
         (result / "report.json").write_text(json.dumps(payload), encoding="utf-8")
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 

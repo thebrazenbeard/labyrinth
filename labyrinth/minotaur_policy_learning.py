@@ -121,8 +121,9 @@ class MinotaurTrainingPolicy:
 
     Compatible with the operator-installed `OperatorTaskmasterAdapter`
     protocol. The stateless deterministic rule selects practice first, moves
-    to contrast/transfer after observed train successes, and adjusts
-    difficulty against a declared specificity baseline. It only operates on
+    to contrast/transfer after observed train successes, interleaves contrast
+    rehearsal after sustained transfer failures, and adjusts difficulty
+    against a declared specificity baseline. It only operates on
     training feedback supplied by a trusted trainer, never exam outcomes.
     """
 
@@ -349,6 +350,32 @@ class MinotaurTrainingPolicy:
             tactic = "contrast"
             if mastered(contrast):
                 tactic = "transfer"
+        # Sustained transfer failure calls for prerequisite contrast rehearsal,
+        # not endless easy transfer probes. Only propose a remedial tactic
+        # when an *unused, operator-approved TRAIN* case for it remains. An
+        # exhausted contrast inventory must not override a newly measured
+        # transfer weakness with a room the host cannot lawfully issue.
+        # Use committed TRAIN observation parity to alternate deterministically,
+        # including after reloading.
+        # This policy never sees examinations or grants graduation authority.
+        remedial_contrast = False
+        transfer = counts["transfer"]
+        used_cases = set(self._case_ids)
+        used_prompts = set(self._prompt_sha256)
+        contrast_remediation_available = any(
+            admission.skill == context.skill
+            and admission.tactic == "contrast"
+            and admission.case_id not in used_cases
+            and admission.prompt_sha256 not in used_prompts
+            for admission in self._approved_cases
+        )
+        if (tactic == "transfer"
+                and transfer["incorrect"] >= transfer["correct"] + 2
+                and contrast_remediation_available
+                and sum(bucket["correct"] + bucket["incorrect"]
+                        for bucket in counts.values()) % 2 == 0):
+            tactic = "contrast"
+            remedial_contrast = True
         # Difficulty must follow evidence for the *current* tactic. Otherwise
         # many old practice wins can keep a failing contrast/transfer chamber
         # maximally difficult. For a newly introduced tactic, use the mastered
@@ -362,6 +389,8 @@ class MinotaurTrainingPolicy:
         difference = wins - losses
         adjustment = min(2, difference // 2) if difference >= 0 else -min(2, (-difference + 1) // 2)
         difficulty = max(1, min(5, context.specificity + adjustment))
+        if remedial_contrast:
+            difficulty = min(difficulty, context.specificity)
         return {"difficulty": difficulty, "tactic": tactic}
 
     def save_policy(self, destination: str | Path) -> str:
