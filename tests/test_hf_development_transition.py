@@ -11,6 +11,8 @@ from unittest import TestCase, mock
 from labyrinth.hf_development_transition import (
     SCHEMA, _DOMAIN, DevelopmentCaseRef, development_case_commitment,
     run_exam_bound_successor, run_journey_bound_successor, verify_development_transition,
+    BoundReservationAuthority, BoundReservationReceipt,
+    bound_reservation_receipt_payload,
 )
 from labyrinth.hf_resume_bridge import ResumeContext
 from labyrinth.hf_pilot import (
@@ -436,6 +438,125 @@ class SignedDevelopmentTransitionTests(TestCase):
                 )
             self.assertEqual(runner.call_count, 1)
         self.assertEqual(consumed, {"dev-event-1"})
+
+    def _bound_authority(self, callback):
+        return BoundReservationAuthority(
+            sink_id="isolated-reservation-sink",
+            run_id="candidate-run-B",
+            candidate_artifact_sha256="c" * 64,
+            epoch=3, fence=5,
+            receipt_verification_key=b"independent-reservation-key-for-tests-v1",
+            reserve=callback,
+        )
+
+    def _signed_bound_receipt(self, request, *, change=None):
+        from dataclasses import replace as dataclass_replace
+
+        candidate = dataclass_replace(request, **(change or {}))
+        receipt = BoundReservationReceipt(
+            request=candidate,
+            sink_id="isolated-reservation-sink",
+            transaction_id="reservation-transaction-unique",
+            signature_hex="0" * 64,
+        )
+        signature = hmac.new(
+            b"independent-reservation-key-for-tests-v1",
+            bound_reservation_receipt_payload(receipt), hashlib.sha256,
+        ).hexdigest()
+        return dataclass_replace(receipt, signature_hex=signature)
+
+    def test_bound_receipt_exact_run_scope_and_fence_required_before_neural(self):
+        raw, sig = self.signed()
+        seen = []
+
+        def reserve(request):
+            seen.append(request)
+            return self._signed_bound_receipt(request)
+
+        with (mock.patch("labyrinth.hf_development_transition.preflight_resume"),
+              mock.patch("labyrinth.hf_development_transition.run_pilot",
+                         return_value={"trained": True}) as runner):
+            result = run_journey_bound_successor(
+                self.config, self.scope, "prior-run", self.context, raw, sig,
+                journey=self._regenerated_journey(),
+                evaluator_precommitment_sha256=self.fields["exam_case_commitment_sha256"],
+                evaluator_public_roster=self.public_roster,
+                independent_development_key=self.key,
+                bound_reservation_authority=self._bound_authority(reserve),
+            )
+        self.assertEqual(result, {"trained": True})
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].scope_fingerprint, self.scope.fingerprint)
+        self.assertEqual(seen[0].predecessor_lora_value_sha256,
+                         self.context.predecessor_lora_value_sha256)
+        self.assertEqual((seen[0].epoch, seen[0].fence), (3, 5))
+        self.assertEqual(seen[0].run_id, "candidate-run-B")
+        runner.assert_called_once()
+
+    def test_bound_receipt_from_foreign_run_same_event_rejected(self):
+        raw, sig = self.signed()
+        observed = []
+        mutations = (
+            {"run_id": "candidate-run-A"},
+            {"scope_fingerprint": "f" * 64},
+            {"candidate_artifact_sha256": "e" * 64},
+            {"cycle_index": 2},
+            {"predecessor_lora_value_sha256": "e" * 64},
+            {"predecessor_report_sha256": "e" * 64},
+            {"authority_ref": "different-authority"},
+            {"epoch": 4},
+            {"fence": 6},
+            {"output_path_sha256": "e" * 64},
+        )
+        with (mock.patch("labyrinth.hf_development_transition.preflight_resume"),
+              mock.patch("labyrinth.hf_development_transition.run_pilot") as runner):
+            for mutation in mutations:
+                def wrong_run(request):
+                    observed.append(request)
+                    return self._signed_bound_receipt(request, change=mutation)
+
+                with self.subTest(mutation=mutation), self.assertRaisesRegex(
+                        ValueError, "bound reservation"):
+                    run_journey_bound_successor(
+                        self.config, self.scope, "prior-run", self.context, raw, sig,
+                        journey=self._regenerated_journey(),
+                        evaluator_precommitment_sha256=self.fields[
+                            "exam_case_commitment_sha256"],
+                        evaluator_public_roster=self.public_roster,
+                        independent_development_key=self.key,
+                        bound_reservation_authority=self._bound_authority(wrong_run),
+                    )
+            runner.assert_not_called()
+        self.assertEqual(len(observed), len(mutations))
+
+    def test_bound_receipt_forged_signature_and_legacy_collision_refused(self):
+        raw, sig = self.signed()
+        def forged(request):
+            return replace(self._signed_bound_receipt(request), signature_hex="f" * 64)
+        with (mock.patch("labyrinth.hf_development_transition.preflight_resume"),
+              mock.patch("labyrinth.hf_development_transition.run_pilot") as runner):
+            with self.assertRaisesRegex(ValueError, "bound reservation"):
+                run_exam_bound_successor(
+                    self.config, self.scope, "prior-run", self.context, raw, sig,
+                    independent_development_key=self.key,
+                    bound_reservation_authority=self._bound_authority(forged),
+                )
+            with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+                run_exam_bound_successor(
+                    self.config, self.scope, "prior-run", self.context, raw, sig,
+                    independent_development_key=self.key,
+                    reserve_development_event=lambda _event: True,
+                    bound_reservation_authority=self._bound_authority(forged),
+                )
+            runner.assert_not_called()
+
+    def test_bound_authority_does_not_expose_symmetric_key_in_repr(self):
+        key = b"high-sensitivity-test-only-reservation-key"
+        authority = replace(self._bound_authority(lambda _request: None),
+                            receipt_verification_key=key)
+        displayed = repr(authority)
+        self.assertNotIn(key.decode("ascii"), displayed)
+        self.assertNotIn("<function", displayed)
 
 
 if __name__ == "__main__":

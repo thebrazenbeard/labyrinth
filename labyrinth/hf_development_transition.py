@@ -17,7 +17,7 @@ running inside the Python trainer, and neither path is a private graduation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 import hashlib
 import hmac
 import json
@@ -45,6 +45,8 @@ _FIELDS = frozenset({
 })
 MAX_RECEIPT_BYTES = 65_536
 MAX_DEVELOPMENT_CASES = 512
+_BOUND_RECEIPT_DOMAIN = b"labyrinth.hf-bound-development-reservation.v1\0"
+_MAX_FENCE = 2**63 - 1
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,156 @@ class VerifiedDevelopmentTransition:
     exam_id: str
     weak_skills: tuple[str, ...]
     exam_case_commitment_sha256: str
+
+
+@dataclass(frozen=True)
+class BoundReservationRequest:
+    """Typed source challenge bound to THIS successor; not host attestation."""
+
+    event_id: str
+    exam_id: str
+    run_id: str
+    candidate_artifact_sha256: str
+    scope_fingerprint: str
+    cycle_index: int
+    predecessor_report_sha256: str
+    predecessor_lora_value_sha256: str
+    authority_ref: str
+    predecessor_path_sha256: str
+    output_path_sha256: str
+    epoch: int
+    fence: int
+
+    def __post_init__(self) -> None:
+        for label in ("event_id", "exam_id", "run_id", "authority_ref"):
+            value = getattr(self, label)
+            if type(value) is not str or not _IDENTIFIER.fullmatch(value):
+                raise ValueError(f"invalid bound reservation {label}")
+        for label in ("candidate_artifact_sha256", "scope_fingerprint",
+                      "predecessor_report_sha256", "predecessor_lora_value_sha256",
+                      "predecessor_path_sha256", "output_path_sha256"):
+            value = getattr(self, label)
+            if type(value) is not str or not _DIGEST.fullmatch(value):
+                raise ValueError(f"invalid bound reservation {label}")
+        if (type(self.cycle_index) is not int or not 1 <= self.cycle_index <= 7
+                or type(self.epoch) is not int or not 1 <= self.epoch < _MAX_FENCE
+                or type(self.fence) is not int or not 0 <= self.fence < _MAX_FENCE):
+            raise ValueError("invalid bound reservation cycle or fence")
+
+
+@dataclass(frozen=True)
+class BoundReservationReceipt:
+    """Receipt cryptographically bound to the exact requested successor."""
+
+    request: BoundReservationRequest
+    sink_id: str
+    transaction_id: str
+    signature_hex: str
+    graduation_authorized: bool = False
+    host_custody_verified: bool = False
+
+
+def bound_reservation_receipt_payload(receipt: BoundReservationReceipt) -> bytes:
+    """Canonical HMAC payload; only a separately held sink key lends authority."""
+    if type(receipt) is not BoundReservationReceipt or type(receipt.request) is not BoundReservationRequest:
+        raise ValueError("typed bound reservation receipt required")
+    receipt.request.__post_init__()
+    for label in ("sink_id", "transaction_id"):
+        value = getattr(receipt, label)
+        if type(value) is not str or not _IDENTIFIER.fullmatch(value):
+            raise ValueError(f"invalid bound receipt {label}")
+    if (receipt.graduation_authorized is not False
+            or receipt.host_custody_verified is not False):
+        raise ValueError("bound receipt cannot claim graduation or independently hosted custody")
+    body = {
+        "request": asdict(receipt.request),
+        "sink_id": receipt.sink_id,
+        "transaction_id": receipt.transaction_id,
+        "graduation_authorized": False,
+        "host_custody_verified": False,
+    }
+    return _BOUND_RECEIPT_DOMAIN + (json.dumps(
+        body, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ) + "\n").encode("ascii")
+
+
+@dataclass(frozen=True)
+class BoundReservationAuthority:
+    """Opt-in typed callback with independently pinned receipt verifier key.
+
+    The host must pin run/candidate/fence, retain the verifier key separately,
+    and enforce durable one-shot state. In-process values are not such proof.
+    The legacy event-ID-only callback remains accessible/unqualified.
+    """
+
+    sink_id: str
+    run_id: str
+    candidate_artifact_sha256: str
+    epoch: int
+    fence: int
+    receipt_verification_key: bytes = field(repr=False, compare=False)
+    reserve: Callable[[BoundReservationRequest], BoundReservationReceipt] = field(
+        repr=False, compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        for label in ("sink_id", "run_id"):
+            value = getattr(self, label)
+            if type(value) is not str or not _IDENTIFIER.fullmatch(value):
+                raise ValueError(f"invalid bound reservation {label}")
+        if (type(self.candidate_artifact_sha256) is not str
+                or not _DIGEST.fullmatch(self.candidate_artifact_sha256)):
+            raise ValueError("invalid bound reservation candidate artifact")
+        if (type(self.epoch) is not int or not 1 <= self.epoch < _MAX_FENCE
+                or type(self.fence) is not int or not 0 <= self.fence < _MAX_FENCE
+                or type(self.receipt_verification_key) is not bytes
+                or len(self.receipt_verification_key) < 32 or not callable(self.reserve)):
+            raise ValueError("invalid bound reservation authority and key")
+
+
+def _path_commitment(path: str | Path) -> str:
+    if not isinstance(path, (str, Path)):
+        raise ValueError("bound reservation requires a valid local path")
+    resolved = str(Path(path).expanduser().resolve(strict=False))
+    return hashlib.sha256(b"labyrinth.hf-reservation-path.v1\0" +
+                          resolved.encode("utf-8")).hexdigest()
+
+
+def _reserve_bound_successor(
+    authority: BoundReservationAuthority, verified: VerifiedDevelopmentTransition,
+    scope: TrainingScopeSpec, context: ResumeContext, config: PilotConfig,
+    predecessor_run_dir: str | Path, independent_development_key: bytes,
+) -> None:
+    if type(authority) is not BoundReservationAuthority:
+        raise ValueError("typed bound reservation authority required")
+    authority.__post_init__()
+    if hmac.compare_digest(authority.receipt_verification_key,
+                           independent_development_key):
+        raise ValueError("bound reservation key must differ from development evaluator key")
+    request = BoundReservationRequest(
+        event_id=verified.event_id, exam_id=verified.exam_id,
+        run_id=authority.run_id,
+        candidate_artifact_sha256=authority.candidate_artifact_sha256,
+        scope_fingerprint=scope.fingerprint, cycle_index=context.cycle_index,
+        predecessor_report_sha256=context.predecessor_report_sha256,
+        predecessor_lora_value_sha256=context.predecessor_lora_value_sha256,
+        authority_ref=context.authority_ref,
+        predecessor_path_sha256=_path_commitment(predecessor_run_dir),
+        output_path_sha256=_path_commitment(config.output_dir),
+        epoch=authority.epoch, fence=authority.fence,
+    )
+    receipt = authority.reserve(request)
+    if (type(receipt) is not BoundReservationReceipt
+            or receipt.request != request or receipt.sink_id != authority.sink_id
+            or type(receipt.signature_hex) is not str
+            or not _DIGEST.fullmatch(receipt.signature_hex)):
+        raise ValueError("bound reservation receipt mismatches this candidate")
+    expected = hmac.new(
+        authority.receipt_verification_key,
+        bound_reservation_receipt_payload(receipt), hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(receipt.signature_hex, expected):
+        raise ValueError("bound reservation receipt signature invalid")
 
 
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -194,7 +346,8 @@ def run_journey_bound_successor(
     evaluator_precommitment_sha256: str,
     evaluator_public_roster: tuple[DevelopmentCaseRef, ...],
     independent_development_key: bytes,
-    reserve_development_event: Callable[[str], bool],
+    reserve_development_event: Callable[[str], bool] | None = None,
+    bound_reservation_authority: BoundReservationAuthority | None = None,
 ) -> dict[str, Any]:
     """Strict, opt-in Journey + signed development successor entry point.
 
@@ -267,6 +420,7 @@ def run_journey_bound_successor(
         config, scope, predecessor_run_dir, resume_context, receipt_bytes, signature_hex,
         independent_development_key=independent_development_key,
         reserve_development_event=reserve_development_event,
+        bound_reservation_authority=bound_reservation_authority,
     )
 
 
@@ -279,12 +433,18 @@ def run_exam_bound_successor(
     signature_hex: str,
     *,
     independent_development_key: bytes,
-    reserve_development_event: Callable[[str], bool],
+    reserve_development_event: Callable[[str], bool] | None = None,
+    bound_reservation_authority: BoundReservationAuthority | None = None,
 ) -> dict[str, Any]:
     """Run an opt-in neural successor with only signed remediation hints.
 
-    The host-supplied reservation callback must atomically persist consumption
-    of the event ID before training, returning exactly True only on first use.
+    The legacy host-supplied event-ID-only callback does NOT bind the neural
+    invocation's run/candidate/scope/cycle, and remains UNQUALIFIED. A callback
+    prepared for another run using the same event string may accept this run.
+    The optional bound authority path challenges the host with an exact typed
+    invocation and rejects a mismatched or unsigned receipt before training.
+    Even that path cannot establish independently hosted custody or one-shot
+    persistence without external deployment and an immutable authority.
     Read-only predecessor/configuration preflight runs *before* the reservation,
     so a known invalid path or adapter cannot burn an authentic exam event.
     The HF pilot repeats its checks after reservation to detect TOCTOU changes.
@@ -297,13 +457,24 @@ def run_exam_bound_successor(
         scope, resume_context, receipt_bytes, signature_hex,
         independent_development_key=independent_development_key,
     )
-    if not callable(reserve_development_event):
-        raise ValueError("trusted durable event reservation callback is required")
+    if (reserve_development_event is None) == (bound_reservation_authority is None):
+        raise ValueError("legacy and bound reservation paths are mutually exclusive")
+    if (bound_reservation_authority is not None
+            and type(bound_reservation_authority) is not BoundReservationAuthority):
+        raise ValueError("typed bound reservation authority required")
+    if (reserve_development_event is not None
+            and not callable(reserve_development_event)):
+        raise ValueError("legacy reservation callback must be callable")
     # No model training or output creation happens during this read-only
     # preflight. It rejects malformed/missing local model and predecessor
     # files while the signed development event is still available to retry.
     preflight_resume(config, predecessor_run_dir, resume_context)
-    if reserve_development_event(verified.event_id) is not True:
+    if bound_reservation_authority is not None:
+        _reserve_bound_successor(
+            bound_reservation_authority, verified, scope, resume_context,
+            config, predecessor_run_dir, independent_development_key,
+        )
+    elif reserve_development_event(verified.event_id) is not True:
         raise ValueError("development transition event is not newly reserved")
     # All successor scope, cycle and weakness arguments derive from signed
     # evidence, never from a separate operator-supplied weakness override.

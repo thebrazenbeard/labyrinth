@@ -240,6 +240,73 @@ def select_training_batch(cycle: TrainingCycle, step: int) -> tuple[TrainingExam
                  for offset in range(4))
 
 
+def plan_signed_measured_sentiment_batches(
+    *, declared_scope: TrainingScopeSpec,
+    training_cycles: tuple[TrainingCycle, ...],
+    steps_per_cycle: int,
+    binding: Any,
+    training_exposures: tuple[Any, ...],
+    expected_training_roster_sha256: str,
+    **verification_inputs: Any,
+) -> Any:
+    """Opt-in TRAIN batch plan from the four-key signed development verifier.
+
+    Unlike a caller-provided `MinotaurDevelopmentFeedback` dataclass, all
+    weakness/tactic decisions are recomputed from authenticated assessment,
+    candidate lineage, successor receipt, and companion binding bytes. The
+    exact first-cycle TRAIN roster must match the actual generated examples.
+
+    This returns a development-only immutable batch schedule, not host custody
+    of signing keys, physical model execution, or an authorization to graduate.
+    The existing default three-/five-arm physical runner is unchanged; a host
+    must independently attest and reserve a real candidate transition before
+    allowing this schedule into physical optimizer execution.
+    """
+    validate_scope(declared_scope)
+    validate_cycles(training_cycles)
+    if (type(steps_per_cycle) is not int or not 4 <= steps_per_cycle <= 16
+            or verification_inputs.get("scope") != declared_scope):
+        raise ValueError("signed development scope or batch budget mismatch")
+    from labyrinth.measured_weakness_feedback import (
+        TrainingExposureRef, training_roster_commitment,
+    )
+
+    authentic_first = build_training_cycles(declared_scope)[0]
+    if training_cycles[0] != authentic_first:
+        raise ValueError("cycle zero differs from its declared TRAIN Maze")
+    actual_exposures = tuple(
+        TrainingExposureRef(
+            row.exposure_id, hashlib.sha256(row.prompt.encode("utf-8")).hexdigest(),
+        ) for row in authentic_first.examples
+    )
+    if (training_exposures != actual_exposures
+            or expected_training_roster_sha256
+            != training_roster_commitment(actual_exposures)):
+        raise ValueError("signed candidate TRAIN roster is not actual first-cycle TRAIN")
+
+    # Import inside this opt-in seam: the sentiment scheduler imports this
+    # source harness to reuse its approved generated TRAIN case identities.
+    from labyrinth.minotaur_development_feedback import (
+        derive_minotaur_development_feedback,
+    )
+    from labyrinth.measured_sentiment_corridors import (
+        plan_measured_sentiment_corridor,
+    )
+
+    feedback = derive_minotaur_development_feedback(
+        binding=binding,
+        training_exposures=training_exposures,
+        expected_training_roster_sha256=expected_training_roster_sha256,
+        **verification_inputs,
+    )
+    planned = plan_measured_sentiment_corridor(
+        declared_scope, feedback, steps_per_cycle=steps_per_cycle,
+    )
+    if training_cycles[1] != planned.cycle:
+        raise ValueError("cycle one was not generated from the signed weak polarity")
+    return planned
+
+
 def configured_arms(preregistered_controls: bool) -> tuple[str, ...]:
     if type(preregistered_controls) is not bool:
         raise ValueError("control mode must be a boolean")
