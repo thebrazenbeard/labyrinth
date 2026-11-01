@@ -122,7 +122,7 @@ def _prepare_private_steward_bytes(
     """
     if not isinstance(dataset, CognitiveTrainDataset):
         raise ValueError("expected canonical cognitive TRAIN export")
-    if source_repo != "thebrazenbeard/labyrinth":
+    if type(source_repo) is not str or source_repo != "thebrazenbeard/labyrinth":
         raise ValueError("unsupported source repository")
     if not isinstance(source_commit, str) or not _HEX40.fullmatch(source_commit):
         raise ValueError("invalid producer commit")

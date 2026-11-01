@@ -168,3 +168,11 @@ class CognitiveRightsCandidateTests(TestCase):
                                               evaluator_signature="fake-eval")
         with self.assertRaises(ValueError):
             _candidate(source_commit="not-a-commit")
+
+    def test_steward_source_identity_rejects_overridden_str_comparison(self):
+        class ForgedRepository(str):
+            def __ne__(self, other):
+                return False
+
+        with self.assertRaisesRegex(ValueError, "source repository"):
+            _private(source_repo=ForgedRepository("untrusted/source"))
