@@ -787,6 +787,38 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn("does **not** provide rollback-proof host custody", doc)
         self.assertIn("graduation permission", doc)
 
+    def test_q6_durable_witnessed_slot_service_is_mandatory_and_source_only(self):
+        # Both PR and main must trigger the pinned neural gate for core,
+        # SO_PEERCRED transport, hostile tests, and source-only limitations.
+        # Green same-host tests DO NOT provide an independent antirollback
+        # witness, protected evaluator prompts or model execution evidence.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        trigger_paths = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for path in (
+            "labyrinth/q6_durable_slot_authority_r120.py",
+            "labyrinth/q6_durable_slot_unix_r120.py",
+            "tests/test_q6_durable_slot_authority_r120.py",
+            "docs/qualification/Q6_DURABLE_SLOT_AUTHORITY_SOURCE_R120.md",
+        ):
+            self.assertTrue((root / path).is_file())
+            for event, manifest in trigger_paths.items():
+                with self.subTest(event=event, path=path):
+                    self.assertIn(f'      - "{path}"', manifest)
+        self.assertIn('("tests.test_q6_durable_slot_authority_r120", 20)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:',
+                      workflow)
+        doc = (root / "docs/qualification/Q6_DURABLE_SLOT_AUTHORITY_SOURCE_R120.md").read_text()
+        self.assertIn("SOURCE-ONLY", doc)
+        self.assertIn("no independent implementation or attestation", doc.lower())
+        self.assertIn("**HOLD**", doc)
+
     def test_minotaur_feedback_novelty_regression_is_mandatory_and_no_skip(self):
         # An independently reproduced weak-learner case-collision defect
         # must remain a pinned no-skip source gate on PRs and main.  This is
