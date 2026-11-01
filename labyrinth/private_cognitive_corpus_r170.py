@@ -10,6 +10,7 @@ the public non-grant status is constant across corpus contents and labels.
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import json
@@ -18,12 +19,14 @@ import unicodedata
 
 from .approved_cognitive_empathy_train_r90 import (
     CognitiveTrainingRoom, PROVIDER_ID, RUBRIC_ID, _FOCUS,
-    semantic_sha256_from_prompt,
+    prepare_cognitive_empathy_train_rooms, semantic_sha256_from_prompt,
 )
 from .cognitive_rights_candidate_v1 import _prepare_private_steward_bytes
 from .cognitive_train_dataset_export import CognitiveTrainDataset
 from .journey_challenges import PreparedTrainingRoom
 from .maze import Challenge
+from .objective_contract import ObjectiveContract
+from .regenerative_maze import generate_maze_plan
 
 
 SCHEMA_ID = "labyrinth.private-cognitive-corpus-candidate.r170"
@@ -218,6 +221,8 @@ def _parse_dev(dev: bytes) -> tuple[list[dict], list[tuple[str, _LexicalSignatur
                 or row["target_choice"] not in ("A", "B", "C")
                 or type(row["prompt"]) is not str):
             raise ValueError("invalid or unverified DEV source declaration")
+        if any(0xD800 <= ord(char) <= 0xDFFF for char in row["prompt"]):
+            raise ValueError("DEV prompt contains invalid Unicode scalar")
         if not row["prompt"].startswith(f"Case: {row['case_id']}\n"):
             raise ValueError("DEV case ID does not bind its prompt")
         # Reuse the TRAIN parser to independently check exact choice format.
@@ -273,10 +278,47 @@ def _validate_approved_train_gold_and_binding(row: dict) -> None:
     raise ValueError("TRAIN gold/source binding does not match approved provider")
 
 
+def _expected_deterministic_train_roster(
+    contract: ObjectiveContract, cycle_index: int,
+) -> bytes:
+    """Regenerate source-pinned room IDs, seeds, order, prompts and gold.
+
+    Checking the synthetic scenario bank alone is insufficient: a caller can
+    swap two real approved prompts between rooms and regenerate every ordinary
+    SHA. A complete producer ObjectiveContract supplies the deterministic
+    scope fingerprint that was deliberately absent from the JSONL export.
+    This is still an operator-provided source declaration, not an issuer.
+    """
+    plan = generate_maze_plan(contract.scope, cycle_index)
+    rooms = prepare_cognitive_empathy_train_rooms(contract, plan)
+    rows = []
+    for room in rooms:
+        challenge = room.prepared.challenge
+        view = room.trainee_view
+        if room.score_train_choice(challenge.answer) != 100:
+            raise ValueError("canonical TRAIN gold failed approved provider check")
+        row = {
+            "schema": "labyrinth.cognitive-supervised-train-example.v1",
+            "split": "train", "provider_id": PROVIDER_ID,
+            "training_rubric_id": RUBRIC_ID,
+            "objective_id": contract.scope.objective_id,
+            "objective_contract_sha256": contract.fingerprint,
+            "cycle_index": cycle_index,
+            "room_id": view.room_id, "case_id": view.challenge_id,
+            "prompt": view.prompt, "prompt_sha256": view.prompt_sha256,
+            "semantic_sha256": room.semantic_sha256,
+            "source_binding_sha256": room._source_binding_sha256,
+            "target_choice": challenge.answer,
+        }
+        rows.append(_canonical(row) + b"\n")
+    return b"".join(rows)
+
+
 def build_private_cognitive_corpus(
     train_exports: tuple[CognitiveTrainDataset, ...],
     sources: tuple[CorpusSource, ...],
     *,
+    source_contract: ObjectiveContract | None = None,
     dev_candidate_jsonl: bytes | None = None,
     protected_semantic_sha256: tuple[str, ...] = (),
     protected_roster_sha256: str | None = None,
@@ -291,6 +333,10 @@ def build_private_cognitive_corpus(
     if (type(train_exports) is not tuple or not 1 <= len(train_exports) <= 8
             or type(sources) is not tuple or len(sources) != len(train_exports)):
         raise ValueError("expected one bounded declaration for each TRAIN cycle")
+    if type(source_contract) is not ObjectiveContract:
+        raise ValueError("approved ObjectiveContract required for deterministic TRAIN roster")
+    ObjectiveContract.__post_init__(source_contract)
+    contract = deepcopy(source_contract)
     if type(protected_semantic_sha256) is not tuple or len(protected_semantic_sha256) > 4096:
         raise ValueError("protected exclusions must be bounded immutable tuple")
     exclusions = tuple(_valid_digest(item, "excluded semantic")
@@ -311,6 +357,10 @@ def build_private_cognitive_corpus(
         raise ValueError("noncontiguous or replayed TRAIN cycles")
     if len({dataset.contract_fingerprint for dataset, _ in entries}) != 1:
         raise ValueError("multiple unrelated objective contracts")
+    if any(dataset.contract_fingerprint != contract.fingerprint
+           or dataset.objective_id != contract.scope.objective_id
+           for dataset, _ in entries):
+        raise ValueError("TRAIN export does not match provided source contract")
     train_lines: list[bytes] = []
     train_details = []
     seen_ids: set[str] = set()
@@ -326,6 +376,10 @@ def build_private_cognitive_corpus(
             exclusion_semantic_sha256=exclusions,
             exclusion_roster_sha256=protected_roster_sha256,
         )
+        if dataset.jsonl_bytes != _expected_deterministic_train_roster(
+            contract, dataset.cycle_index,
+        ):
+            raise ValueError("deterministic TRAIN roster mismatch")
         for line in dataset.jsonl_bytes.splitlines(keepends=True):
             row = json.loads(line)
             _validate_approved_train_gold_and_binding(row)

@@ -19,7 +19,11 @@ exam prompts or gold answers and always exports **zero EVAL cases**.
 
 - Reuses the strict 15-row private steward parser for every TRAIN export,
   **then independently reconstructs each row's complete approved provider
-  source binding and canonical gold answer**. A caller cannot relabel a TRAIN
+  source binding and canonical gold answer**. The builder now also **requires
+  the original operator-side `source_contract=ObjectiveContract`** so it can
+  deterministically regenerate the entire cycle's room IDs, ordered roster,
+  case seeds, prompts, gold and commitments. Missing or inconsistent contract
+  fails closed. A caller cannot relabel a TRAIN
   example and repair only its dataset SHA to pass corpus assembly. These
   checks validate the checked-in synthetic source bank, not an external issuer
   or the authorship of the cited source commit.
@@ -63,8 +67,11 @@ exam prompts or gold answers and always exports **zero EVAL cases**.
    A second cycle requires the runtime's normal evaluator transition; a
    synthetic development receipt is not independent evaluation evidence.
 2. Supply one `CorpusSource` per cycle, with externally checked source commit
-   and producer-file hash. The candidate assembler checks only syntax and
-   provenance consistency, **not** legal authorship.
+   and producer-file hash. Also supply the exact original `ObjectiveContract`
+   as `source_contract`; a fingerprint alone is insufficient to reconstruct
+   seeded room assignments. The candidate assembler checks deterministic
+   local source consistency and source declaration syntax, **not** legal
+   authorship or an authenticated external source issuer.
 3. Supply separately authored DEV candidate rows and an independently
    authenticated protected exclusion roster when those become available.
    Until then, `dev` remains null and protected custody unverified.

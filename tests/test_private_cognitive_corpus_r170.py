@@ -10,6 +10,7 @@ from labyrinth import private_cognitive_corpus_r170 as corpus_module
 
 from labyrinth.approved_cognitive_empathy_train_r90 import (
     PROVIDER_ID, RUBRIC_ID, _FOCUS, _source_binding_digest,
+    semantic_sha256_from_prompt,
 )
 from labyrinth.cognitive_train_dataset_export import export_cognitive_train_jsonl
 from labyrinth.journey_challenges import PreparedTrainingRoom
@@ -21,7 +22,8 @@ from tests.test_cognitive_objective_training_run import (
 )
 
 from labyrinth.private_cognitive_corpus_r170 import (
-    DEV_ROW_SCHEMA, CorpusSource, build_private_cognitive_corpus,
+    DEV_ROW_SCHEMA, CorpusSource,
+    build_private_cognitive_corpus as _real_build_private_cognitive_corpus,
 )
 
 
@@ -49,6 +51,14 @@ def _sources():
     )
 
 
+def build_private_cognitive_corpus(*args, source_contract=None, **kwargs):
+    """Fixture calls always pin the original source ObjectiveContract."""
+    contract = cognitive_contract(seed=304) if source_contract is None else source_contract
+    return _real_build_private_cognitive_corpus(
+        *args, source_contract=contract, **kwargs,
+    )
+
+
 def _dev_row(train_prompt=None, *, target="B", split="dev", case_id="dev-cognitive-new-01"):
     if train_prompt is None:
         prompt = (
@@ -71,6 +81,66 @@ def _dev_row(train_prompt=None, *, target="B", split="dev", case_id="dev-cogniti
 
 
 class PrivateCognitiveCorpusR170Tests(unittest.TestCase):
+    def test_original_source_contract_is_required_not_guessed_from_digests(self):
+        train0, _ = _cycle_exports()
+        with self.assertRaisesRegex(ValueError, "approved ObjectiveContract required"):
+            _real_build_private_cognitive_corpus((train0,), (_sources()[0],))
+        with self.assertRaisesRegex(ValueError, "source contract"):
+            build_private_cognitive_corpus(
+                (train0,), (_sources()[0],),
+                source_contract=cognitive_contract(seed=313),
+            )
+
+    def test_swapped_genuine_gold_rebound_to_wrong_room_is_rejected(self):
+        train0, _ = _cycle_exports()
+        lines = train0.jsonl_bytes.splitlines(keepends=True)
+        originals = [json.loads(line) for line in lines[:2]]
+
+        def bind(row, focus):
+            challenge = Challenge(
+                id=row["case_id"], kind="synthetic_cognitive_perspective",
+                tier=1, split="train", prompt=row["prompt"],
+                answer=row["target_choice"],
+                metadata=(("provider_id", PROVIDER_ID),
+                          ("training_rubric", RUBRIC_ID),
+                          ("focus_tag", focus),
+                          ("objective_contract_sha256", row["objective_contract_sha256"]),
+                          ("semantic_scenario_sha256", row["semantic_sha256"])),
+            )
+            return _source_binding_digest(
+                PreparedTrainingRoom(row["room_id"], "cognitive_empathy", challenge),
+                row["semantic_sha256"], PROVIDER_ID, RUBRIC_ID,
+            )
+
+        for position in (0, 1):
+            base, donor = originals[position], originals[1 - position]
+            new_row = dict(base)
+            new_row["prompt"] = donor["prompt"].replace(
+                f"Case: {donor['case_id']}\n", f"Case: {base['case_id']}\n", 1,
+            )
+            new_row["target_choice"] = donor["target_choice"]
+            new_row["prompt_sha256"] = hashlib.sha256(new_row["prompt"].encode()).hexdigest()
+            new_row["semantic_sha256"] = semantic_sha256_from_prompt(new_row["prompt"])
+            focus = next(x for x in _FOCUS if bind(base, x) == base["source_binding_sha256"])
+            new_row["source_binding_sha256"] = bind(new_row, focus)
+            lines[position] = json.dumps(new_row, sort_keys=True,
+                                         separators=(",", ":")).encode() + b"\n"
+        payload = b"".join(lines)
+        forged = train0._replace(jsonl_bytes=payload,
+                                 sha256=hashlib.sha256(payload).hexdigest())
+        with self.assertRaisesRegex(ValueError, "deterministic TRAIN roster"):
+            build_private_cognitive_corpus((forged,), (_sources()[0],))
+
+    def test_escaped_lone_surrogate_in_unadmitted_dev_is_rejected(self):
+        train0, _ = _cycle_exports()
+        row = json.loads(_dev_row())
+        row["prompt"] = row["prompt"].replace("switch seats", "switch seats\ud800")
+        payload = json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        with self.assertRaisesRegex(ValueError, "Unicode scalar"):
+            build_private_cognitive_corpus(
+                (train0,), (_sources()[0],), dev_candidate_jsonl=payload,
+            )
+
     def test_lexical_near_duplicate_avoids_quadratic_sequence_matching(self):
         first = "A team participant may need to consider private circumstances. " * 64
         second = first.replace("private circumstances", "personal circumstances", 1)
@@ -122,7 +192,8 @@ class PrivateCognitiveCorpusR170Tests(unittest.TestCase):
         payload = b"".join(lines)
         forged = train0._replace(jsonl_bytes=payload,
                                  sha256=hashlib.sha256(payload).hexdigest())
-        with self.assertRaisesRegex(ValueError, "TRAIN gold/source binding"):
+        with self.assertRaisesRegex(ValueError,
+                                    "TRAIN gold/source binding|deterministic TRAIN roster"):
             build_private_cognitive_corpus((forged,), (_sources()[0],))
 
     def test_tampered_train_label_cannot_launder_digest_and_stale_binding(self):
@@ -138,7 +209,8 @@ class PrivateCognitiveCorpusR170Tests(unittest.TestCase):
             jsonl_bytes=mutated_bytes,
             sha256=hashlib.sha256(mutated_bytes).hexdigest(),
         )
-        with self.assertRaisesRegex(ValueError, "source binding|TRAIN gold"):
+        with self.assertRaisesRegex(ValueError,
+                                    "source binding|TRAIN gold|deterministic TRAIN roster"):
             build_private_cognitive_corpus((forged,), (_sources()[0],))
 
     def test_private_candidate_rejects_ordinary_mutation_and_reinitialization(self):
@@ -278,7 +350,9 @@ class PrivateCognitiveCorpusR170Tests(unittest.TestCase):
             begin_journey(other_contract.scope, checkpoint_sha256="6" * 64),
         )
         first = build_private_cognitive_corpus((train0,), (_sources()[0],))
-        second = build_private_cognitive_corpus((other,), (_sources()[0],))
+        second = build_private_cognitive_corpus(
+            (other,), (_sources()[0],), source_contract=other_contract,
+        )
         self.assertEqual(first.public_status_bytes(), second.public_status_bytes())
         self.assertNotEqual(first.private_train_jsonl(), second.private_train_jsonl())
         self.assertNotIn(hashlib.sha256(first.private_train_jsonl()).hexdigest().encode(),
