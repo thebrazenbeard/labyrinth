@@ -14,7 +14,7 @@ is required to execute real verification; absent dependencies fail closed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import hmac
 import json
@@ -224,7 +224,9 @@ class ExternalMonotonicReservationClient:
         pinned_request.validate()
         if pinned_request.provider_id != self._provider_id:
             raise ExternalAuthorityConflict("host-pinned intent uses foreign provider")
-        self._pinned_request = pinned_request
+        # Store canonical value bytes, not the caller's nominally frozen but
+        # still object.__setattr__-mutable dataclass instance.
+        self._pinned_request_payload = pinned_request.payload()
         if type(pinned_ed25519_public_key) is not bytes or len(pinned_ed25519_public_key) != 32:
             raise ExternalAuthorityError("32-byte pinned Ed25519 public key required")
         self._public_key = pinned_ed25519_public_key
@@ -232,26 +234,31 @@ class ExternalMonotonicReservationClient:
     def reserve(self, request: ExternalReservationRequest) -> ExternalReservationReceipt:
         if type(request) is not ExternalReservationRequest:
             raise ExternalAuthorityError("typed reservation request required")
-        request.validate()
-        if request.provider_id != self._provider_id:
+        # Take a local value snapshot before any external callback. Passing
+        # the same instance to the port would let a mutated transport request
+        # change the expected digest *after* preflight.
+        intent = replace(request)
+        intent.validate()
+        if intent.provider_id != self._provider_id:
             raise ExternalAuthorityConflict("authority provider not pinned")
-        if request != self._pinned_request:
+        if not hmac.compare_digest(intent.payload(), self._pinned_request_payload):
             raise ExternalAuthorityConflict("reservation differs from host-pinned intent")
         try:
-            old = self._port.read_head(request.run_id)
+            old = self._port.read_head(intent.run_id)
         except Exception as exc:
             raise ExternalAuthorityOutcomeUnknown("external authority preflight unavailable") from exc
         if type(old) is not ExternalAuthorityHead:
             raise ExternalAuthorityError("external head must be typed")
         old.validate()
-        if old != request.expected_head():
+        if old != intent.expected_head():
             raise ExternalAuthorityConflict("external monotonic head mismatch; snapshot may be stale")
         # A lost ACK may mean the event was consumed. There is no automatic retry.
         try:
-            receipt = self._port.reserve_once(request)
-        except ExternalAuthorityConflict:
-            raise
+            receipt = self._port.reserve_once(replace(intent))
         except Exception as exc:
+            # Even a provider-labelled Conflict may follow a durable commit.
+            # Only external, independently authenticated no-effect evidence
+            # could distinguish that from a precommit rejection.
             raise ExternalAuthorityOutcomeUnknown("external reservation outcome unknown") from exc
         # Once reserve_once returns (or its ACK is lost), a durable commit
         # may already exist. An invalid receipt is therefore UNKNOWN, not a
@@ -259,20 +266,23 @@ class ExternalMonotonicReservationClient:
         try:
             if type(receipt) is not ExternalReservationReceipt:
                 raise ExternalAuthorityError("external provider returned untyped receipt")
+            # The port may retain and mutate its returned dataclass during the
+            # post-commit readback. Verify and return only this detached value.
+            receipt = replace(receipt)
             payload = receipt.signed_payload()
             if (type(receipt.signature_hex) is not str
                     or not _HEX128.fullmatch(receipt.signature_hex)):
                 raise ExternalAuthorityError("malformed external signature")
-            if (receipt.provider_id != request.provider_id
-                    or receipt.run_id != request.run_id
-                    or receipt.event_id != request.event_id
-                    or not hmac.compare_digest(receipt.request_sha256, request.digest())
-                    or receipt.epoch != request.expected_epoch
-                    or receipt.fence != request.expected_fence
-                    or receipt.commit_index != request.expected_commit_index + 1
-                    or receipt.previous_head_sha256 != request.expected_head_sha256
+            if (receipt.provider_id != intent.provider_id
+                    or receipt.run_id != intent.run_id
+                    or receipt.event_id != intent.event_id
+                    or not hmac.compare_digest(receipt.request_sha256, intent.digest())
+                    or receipt.epoch != intent.expected_epoch
+                    or receipt.fence != intent.expected_fence
+                    or receipt.commit_index != intent.expected_commit_index + 1
+                    or receipt.previous_head_sha256 != intent.expected_head_sha256
                     or receipt.new_head_sha256 != next_head_digest(
-                        request, receipt.reservation_id)):
+                        intent, receipt.reservation_id)):
                 raise ExternalAuthorityConflict("receipt differs from exact reserved request/head")
             _verify_ed25519(self._public_key, payload,
                             bytes.fromhex(receipt.signature_hex))
@@ -280,7 +290,7 @@ class ExternalMonotonicReservationClient:
             raise ExternalAuthorityOutcomeUnknown(
                 "unverified post-reservation receipt; reconcile, do not retry") from exc
         try:
-            current = self._port.read_head(request.run_id)
+            current = self._port.read_head(intent.run_id)
         except Exception as exc:
             raise ExternalAuthorityOutcomeUnknown(
                 "reservation may have committed; external readback unavailable") from exc

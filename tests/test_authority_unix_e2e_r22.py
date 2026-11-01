@@ -260,13 +260,16 @@ class UnixAuthorityProcessE2ETests(unittest.TestCase):
                     pinned_request=requests[index],
                     pinned_ed25519_public_key=self.public_key,
                 ).reserve(requests[index])
-            except ExternalAuthorityConflict:
-                return "CONFLICT"
+            except ExternalAuthorityOutcomeUnknown:
+                # The service may have consumed the exam before rejecting a
+                # competing reservation. After the mutating wire call, the
+                # client cannot prove no effect from a conflict response.
+                return "UNKNOWN"
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             results = list(executor.map(attempt, (0, 1)))
-        self.assertEqual(sum(result == "CONFLICT" for result in results), 1)
-        self.assertEqual(sum(result != "CONFLICT" for result in results), 1)
+        self.assertEqual(sum(result == "UNKNOWN" for result in results), 1)
+        self.assertEqual(sum(result != "UNKNOWN" for result in results), 1)
         self.assertEqual(self.parent_core.read_head("run-a").commit_index
                          + self.parent_core.read_head("run-b").commit_index, 1)
 

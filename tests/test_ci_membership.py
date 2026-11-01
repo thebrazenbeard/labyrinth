@@ -482,6 +482,8 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
                     self.assertTrue((root / path).is_file())
                     self.assertIn(f'      - "{path}"', manifest)
         for module, minimum in (
+            ("tests.test_qualify_minilm_cpu", 7),
+            ("tests.test_external_monotonic_authority_contract", 17),
             ("tests.test_private_wheel_cli_checkpoint_r70", 1),
             ("tests.test_rezon_receipt_binding_r69", 5),
             ("tests.test_schedule_pin_boundary_w2", 6),
@@ -490,7 +492,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             ("tests.test_q7_temporal_custody_source", 9),
             ("tests.test_q7_witnessed_cas_intake_r93", 12),
             ("tests.test_q8_witness_restore_r93", 23),
-            ("tests.test_q6_stratified_toy_study_r93", 14),
+            ("tests.test_q6_stratified_toy_study_r93", 15),
             ("tests.test_adaptive_minotaur_r93", 9),
             ("tests.test_graduation_gate", 28),
             ("tests.test_objective_challenge_provider_r92", 7),

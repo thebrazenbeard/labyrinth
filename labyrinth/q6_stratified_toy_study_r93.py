@@ -240,7 +240,10 @@ def validate_q6_cohorts(
     previously_exposed_semantics = {
         _semantic_prompt_key(prompt) for prompt in exposure_snapshot
     }
-    for case in cohorts.heldout + cohorts.transfer:
+    # A previous public evaluation problem must never become a later TRAIN
+    # problem either. Checking only the current evaluation splits permits
+    # cross-seed exposure to contaminate the optimizer before it is scored.
+    for case in cohorts.train_a + cohorts.train_b + cohorts.heldout + cohorts.transfer:
         if (case.prompt in exposure_snapshot
                 or semantic_case_key(case) in previously_exposed_semantics):
             raise Q6ExposureReuse("evaluation prompt previously exposed; replay refused")

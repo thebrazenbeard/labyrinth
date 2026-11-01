@@ -33,11 +33,16 @@ assert result["q6_independently_qualified"] is False
   commutative semantic aliases, can be refused but
   cannot establish a durable, nonrollback global exposure register.
 - `run_q6_toy_study(previously_exposed_eval_prompts=...)` now checks that
-  caller-owned history **before any optimizer call**. Its report exports both
+  caller-owned history against **all four current partitions (TRAIN-A,
+  TRAIN-B, heldout, transfer) before any optimizer call**. Its report exports both
   `evaluated_prompts` and `evaluation_prompt_sha256` so a caller can reconcile
   exact and algebraically equivalent expressions across studies. The runner
   cannot prove the history is complete; absent/cleared history replays public
-  seeds. This is never a sealed-private-exam authorization service.
+  seeds. In particular, exporting only prior evaluation prompts does not rule
+  out earlier TRAIN cases reappearing in a later heldout/transfer cohort. A
+  multi-run independent holdout requires a complete, independently custodied
+  exposure history across TRAIN and evaluation. This is never a
+  sealed-private-exam authorization service.
 - R94 source hardening snapshots and validates the supplied public history at
   runner entry, before cohort generation (which may invoke caller-supplied or
   substituted code). Clearing or changing the original set after entry cannot

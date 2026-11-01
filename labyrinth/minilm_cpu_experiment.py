@@ -262,9 +262,9 @@ def frozen_base_digest(model: Any) -> str:
         base_count += 1
         feed_tensor("parameter", name, parameter)
     for name, buffer in sorted(model.named_buffers()):
-        # PEFT adapter state may contain tensors which legitimately change.
-        if ".lora_A." in name or ".lora_B." in name:
-            continue
+        # LoRA trainable weights are parameters, not an exemption for arbitrary
+        # registered buffers. A changing adapter buffer is unsupported until
+        # explicitly accounted for in the frozen-state contract.
         feed_tensor("buffer", name, buffer)
     if not base_count:
         raise RuntimeError("no frozen pretrained base parameters")

@@ -138,6 +138,33 @@ class Q6StratifiedToyStudyTests(unittest.TestCase):
             with self.assertRaisesRegex(Q6StudyError, "previously exposed"):
                 run_q6_toy_study(seed=12, previously_exposed_eval_prompts=previous)
 
+    def test_runner_refuses_prior_eval_reused_in_later_train_before_optimizer(self):
+        # A held-out arithmetic problem from one public seed can become TRAIN
+        # on another seed, even when neither new evaluation partition collides.
+        previous_cohorts = [
+            construct_q6_cohorts(seed=seed, per_profile=6) for seed in range(10)
+        ]
+        previous = {
+            case.prompt for cohorts in previous_cohorts
+            for case in cohorts.heldout + cohorts.transfer
+        }
+        previous_semantics = {
+            semantic_case_key(case) for cohorts in previous_cohorts
+            for case in cohorts.heldout + cohorts.transfer
+        }
+        later = construct_q6_cohorts(seed=10, per_profile=6)
+        self.assertTrue(previous_semantics & {
+            semantic_case_key(case) for case in later.train_a + later.train_b
+        })
+        self.assertFalse(previous_semantics & {
+            semantic_case_key(case) for case in later.heldout + later.transfer
+        })
+        with patch.object(ToyLinearAdapter, "train",
+                          side_effect=AssertionError("optimizer ran before exposure refusal")):
+            with self.assertRaisesRegex(Q6ExposureReuse, "previously exposed"):
+                run_q6_toy_study(seed=10, per_profile=6,
+                                 previously_exposed_eval_prompts=previous)
+
     def test_runner_exports_public_eval_prompt_exposure_for_next_seed(self):
         first = run_q6_toy_study(seed=4, per_profile=3)
         exposures = first["evaluated_prompts"]

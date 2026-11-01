@@ -142,7 +142,9 @@ class ExternalMonotonicAuthoritySourceTests(TestCase):
             event_id="new-event-same-exam", operation_nonce="second-nonce",
             expected_commit_index=1,
             expected_head_sha256=port.head.head_sha256)
-        with self.assertRaisesRegex(ExternalAuthorityConflict, "already consumed"):
+        # Once an external reservation call was made, the client cannot
+        # authenticate that a reported Conflict preceded any commit.
+        with self.assertRaisesRegex(ExternalAuthorityOutcomeUnknown, "unknown"):
             self._reserve(source_client(port, pinned_request=second), second)
 
     def test_stale_local_snapshot_cannot_roll_back_external_head(self):
@@ -201,10 +203,71 @@ class ExternalMonotonicAuthoritySourceTests(TestCase):
         forged = request(candidate_artifact_sha256="e" * 64,
                          scope_fingerprint="f" * 64)
         port = FakeExternalHost()
-        with self.assertRaisesRegex(ExternalAuthorityConflict, "host-pinned"):
+        with self.assertRaisesRegex(ExternalAuthorityOutcomeUnknown, "unknown"):
             self._reserve(source_client(port, pinned_request=forged), forged)
         self.assertEqual(port.head.commit_index, 0)
         self.assertFalse(port.consumed_events)
+
+    def test_pinned_intent_is_snapshot_before_caller_mutates_frozen_object(self):
+        port = FakeExternalHost()
+        intent = request()
+        client = source_client(port, pinned_request=intent)
+        # Frozen dataclasses are not an immutable authority boundary: an
+        # in-process caller can still bypass their generated __setattr__.
+        object.__setattr__(intent, "candidate_artifact_sha256", "e" * 64)
+        with self.assertRaisesRegex(ExternalAuthorityConflict, "host-pinned intent"):
+            self._reserve(client, intent)
+        self.assertEqual(port.reserve_calls, 0)
+        self.assertEqual(port.head.commit_index, 0)
+
+    def test_port_cannot_rebind_post_preflight_request_by_mutating_transport(self):
+        class MutatingHost(FakeExternalHost):
+            def reserve_once(self, intent):
+                # Simulate an untrusted/malfunctioning transport that changes
+                # the request after source preflight, then signs that rewrite.
+                # This does not model a qualified independently run host.
+                object.__setattr__(intent, "candidate_artifact_sha256", "e" * 64)
+                self.pinned_intent = replace(
+                    self.pinned_intent, candidate_artifact_sha256="e" * 64)
+                return super().reserve_once(intent)
+
+        port = MutatingHost()
+        original = request()
+        expected_digest = original.digest()
+        with self.assertRaisesRegex(ExternalAuthorityOutcomeUnknown, "unverified"):
+            self._reserve(source_client(port), original)
+        self.assertEqual(original.digest(), expected_digest)
+        self.assertEqual(port.reserve_calls, 1)
+        self.assertEqual(port.head.commit_index, 1)
+
+    def test_postcommit_readback_cannot_mutate_verified_receipt(self):
+        class ReadbackMutatingHost(FakeExternalHost):
+            mutate_field = None
+            mutate_value = None
+
+            def read_head(self, run_id):
+                head = super().read_head(run_id)
+                if self._has_reserved:
+                    # The untrusted port retains its own receipt instance.
+                    # A post-ACK callback may mutate it despite frozen=True.
+                    object.__setattr__(self.last_receipt,
+                                       self.mutate_field, self.mutate_value)
+                return head
+
+        for field, value in (
+            ("request_sha256", "e" * 64),
+            ("graduation_authorized", True),
+        ):
+            with self.subTest(field=field):
+                port = ReadbackMutatingHost()
+                port.mutate_field = field
+                port.mutate_value = value
+                intent = request()
+                receipt = self._reserve(source_client(port), intent)
+                self.assertIsNot(receipt, port.last_receipt)
+                self.assertEqual(receipt.request_sha256, intent.digest())
+                self.assertIs(receipt.graduation_authorized, False)
+                self.assertEqual(port.head.commit_index, 1)
 
     def test_signed_receipt_cannot_be_rebound_to_other_candidate_or_event(self):
         for field, value in (
@@ -235,6 +298,19 @@ class ExternalMonotonicAuthoritySourceTests(TestCase):
         self.assertEqual(port.head.commit_index, 1)
         with self.assertRaises(ExternalAuthorityConflict):
             self._reserve(client, request())
+
+    def test_postcommit_conflict_is_unknown_not_proof_of_no_effect(self):
+        class CommitThenConflictHost(FakeExternalHost):
+            def reserve_once(self, intent):
+                super().reserve_once(intent)
+                raise ExternalAuthorityConflict("conflict after durable commit")
+
+        port = CommitThenConflictHost()
+        with self.assertRaisesRegex(ExternalAuthorityOutcomeUnknown, "unknown"):
+            self._reserve(source_client(port), request())
+        self.assertEqual(port.reserve_calls, 1)
+        self.assertEqual(port.head.commit_index, 1)
+        self.assertEqual(len(port.consumed_events), 1)
 
     def test_postcommit_readback_loss_is_unknown(self):
         port = FakeExternalHost()
