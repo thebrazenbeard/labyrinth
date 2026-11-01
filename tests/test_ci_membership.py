@@ -787,6 +787,42 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn("does **not** provide rollback-proof host custody", doc)
         self.assertIn("graduation permission", doc)
 
+    def test_r160_evaluator_custody_source_rejection_is_pinned_without_authority(self):
+        # R160 accepts only metadata and ALWAYS rejects self-issued examiner
+        # authority; the CPU source gate must exercise all 12 hostile tests.
+        # A passing run cannot appoint an issuer or open protected prompts.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        triggers = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        required = (
+            "labyrinth/independent_evaluator_custody_r160.py",
+            "tests/test_independent_evaluator_custody_r160.py",
+            "docs/qualification/R160_INDEPENDENT_EVALUATOR_ADMISSION_SOURCE.md",
+        )
+        for path in required:
+            self.assertTrue((root / path).is_file())
+            for event, manifest in triggers.items():
+                with self.subTest(event=event, path=path):
+                    self.assertIn(f'      - "{path}"', manifest)
+        module = "tests.test_independent_evaluator_custody_r160"
+        self.assertIn(f'("{module}", 12)', workflow)
+        suite = unittest.defaultTestLoader.loadTestsFromName(module)
+        self.assertEqual(suite.countTestCases(), 12)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:',
+                      workflow)
+        doc = (root / required[2]).read_text()
+        self.assertIn("**Status: `UNVERIFIED_REJECTED`", doc)
+        self.assertIn("always raises a `HARD HOLD`", doc)
+        source = (root / required[0]).read_text()
+        self.assertIn("raise IndependentEvaluatorIssuerUnavailable(", source)
+        self.assertIn("HARD HOLD", source)
+
     def test_minotaur_feedback_novelty_regression_is_mandatory_and_no_skip(self):
         # An independently reproduced weak-learner case-collision defect
         # must remain a pinned no-skip source gate on PRs and main.  This is
