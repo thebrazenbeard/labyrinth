@@ -119,6 +119,9 @@ on:
       - "tests/test_cognitive_objective_training_run.py"
       - "tests/test_cognitive_train_demo.py"
       - "scripts/experiments/cognitive_train_demo.py"
+      - "labyrinth/cognitive_train_dataset_export.py"
+      - "tests/test_cognitive_train_dataset_export.py"
+      - "docs/qualification/R111_COGNITIVE_TRAIN_EXPORT_SOURCE.md"
       - "tests/test_approved_cognitive_empathy_train_r90.py"
       - "docs/qualification/R104_COGNITIVE_TRAIN_RUNTIME_SOURCE.md"
       - "docs/qualification/R107_COGNITIVE_CLI_SOURCE_ONLY.md"
@@ -387,6 +390,9 @@ on:
       - "tests/test_cognitive_objective_training_run.py"
       - "tests/test_cognitive_train_demo.py"
       - "scripts/experiments/cognitive_train_demo.py"
+      - "labyrinth/cognitive_train_dataset_export.py"
+      - "tests/test_cognitive_train_dataset_export.py"
+      - "docs/qualification/R111_COGNITIVE_TRAIN_EXPORT_SOURCE.md"
       - "tests/test_approved_cognitive_empathy_train_r90.py"
       - "docs/qualification/R104_COGNITIVE_TRAIN_RUNTIME_SOURCE.md"
       - "docs/qualification/R107_COGNITIVE_CLI_SOURCE_ONLY.md"
@@ -761,6 +767,10 @@ jobs:
               # Offline two-cycle user-facing smoke: no network, model, Q6
               # host admission, private gold, or mastery claim. No skips.
               ("tests.test_cognitive_train_demo", 5),
+              # Separate trusted-operator synthetic TRAIN label export:
+              # source-only, with no examination, host custody, or optimizer.
+              # Labeled rows MUST NOT enter the public learner/CLI interface.
+              ("tests.test_cognitive_train_dataset_export", 7),
               # A bounded, synthetic 30-scenario perspective TRAIN corpus;
               # enforce all lexical-shortcut, replay, and source-binding tests.
               # Scores never claim independent empathy mastery or host custody.
