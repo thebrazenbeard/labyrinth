@@ -136,7 +136,8 @@ class CorpusSource:
 
     def __post_init__(self) -> None:
         if (type(self.cycle_index) is not int or self.cycle_index < 0
-                or self.cycle_index > 7 or self.repository != "thebrazenbeard/labyrinth"
+                or self.cycle_index > 7 or type(self.repository) is not str
+                or self.repository != "thebrazenbeard/labyrinth"
                 or type(self.source_commit) is not str
                 or _HEX40.fullmatch(self.source_commit) is None):
             raise ValueError("invalid supported cognitive source declaration")
