@@ -38,6 +38,29 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
 
 
 class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_cognitive_objective_training_runtime_is_mandatory_on_pr_and_main(self):
+        # The source-only cognitive objective adapter is distinct from the
+        # arithmetic/program scorer; fail CI if the runtime can avoid tests.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        events = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for path in (
+            "labyrinth/cognitive_objective_training_run.py",
+            "tests/test_cognitive_objective_training_run.py",
+            "docs/qualification/R104_COGNITIVE_TRAIN_RUNTIME_SOURCE.md",
+        ):
+            self.assertTrue((root / path).is_file())
+            for event, manifest in events.items():
+                with self.subTest(path=path, event=event):
+                    self.assertIn(f'      - "{path}"', manifest)
+        self.assertIn('("tests.test_cognitive_objective_training_run", 7)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
     def test_cognitive_perspective_train_source_is_mandatory_on_pr_and_main(self):
         # The source-only synthetic perspective provider is a new TRAIN
         # boundary.  All 34 hostile/corpus tests must run with no skips in
