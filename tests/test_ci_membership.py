@@ -598,6 +598,78 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
                 self.assertIn(f'("{module}", {minimum})', workflow)
         self.assertIn('or result.skipped', workflow)
 
+    def test_q6_governed_campaign_contract_is_mandatory_with_crypto(self):
+        # A source-only reservation wrapper cannot become an authority by
+        # passing CI.  Its fail-closed cryptographic/provenance cases must,
+        # however, execute under the pinned dependency-present CPU runner.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        path_groups = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for path in (
+            "labyrinth/q6_governed_campaign_contract.py",
+            "tests/test_q6_governed_campaign_contract.py",
+        ):
+            self.assertTrue((root / path).is_file())
+            for event, manifest in path_groups.items():
+                with self.subTest(event=event, path=path):
+                    self.assertIn(f'      - "{path}"', manifest)
+        self.assertIn('"cryptography==50.0.2"', workflow)
+        self.assertIn('("tests.test_q6_governed_campaign_contract", 25)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+
+    def test_minotaur_feedback_novelty_regression_is_mandatory_and_no_skip(self):
+        # An independently reproduced weak-learner case-collision defect
+        # must remain a pinned no-skip source gate on PRs and main.  This is
+        # not a claim of neural learning or protected evaluation custody.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        self.assertTrue((root / "tests/test_minotaur_feedback_divergence_r93.py").is_file())
+        sections = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for event, paths in sections.items():
+            with self.subTest(event=event):
+                self.assertIn('      - "tests/test_minotaur_feedback_divergence_r93.py"', paths)
+        self.assertIn('("tests.test_minotaur_feedback_divergence_r93", 6)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_approved_objective_train_routing_and_execution_are_mandatory(self):
+        # This is a bounded source-local TRAIN interface, not a Q6 host
+        # authority or independent-exam result. Preserve the explicit no-skip
+        # checks so a missing optional dependency cannot silently erase the
+        # mutation, novelty, or provider-binding regressions on PRs and main.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        event_paths = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for path in (
+            "labyrinth/approved_train_provider_r90.py",
+            "labyrinth/objective_training_run.py",
+            "tests/test_approved_train_provider_r90.py",
+            "tests/test_objective_training_run.py",
+        ):
+            self.assertTrue((root / path).is_file())
+            for event, manifest in event_paths.items():
+                with self.subTest(event=event, path=path):
+                    self.assertIn(f'      - "{path}"', manifest)
+        self.assertIn('("tests.test_approved_train_provider_r90", 7)', workflow)
+        self.assertIn('("tests.test_objective_training_run", 14)', workflow)
+        self.assertIn('("tests.test_minotaur_feedback_divergence_r93", 6)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
     def test_r92_combined_r68_r72_docs_trigger_pinned_neural_ci(self):
         # PR #77 and #82 were independently green, but the union must keep
         # each newly documented qualification contract under BOTH triggers.
