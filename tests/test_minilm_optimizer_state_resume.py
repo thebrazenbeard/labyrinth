@@ -7,8 +7,13 @@ genuine CPU AdamW, but is not a pretrained MiniLM execution or a host fence.
 from __future__ import annotations
 
 from dataclasses import replace
+from hashlib import sha256
 import importlib.util
+import json
+import os
 from pathlib import Path
+import random
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -285,6 +290,21 @@ class MazeFullStateSourceTests(unittest.TestCase):
                         saved, combined=object(), optimizer=object(),
                         plan=plan(arm="zero_update"), completed_steps=0)
 
+    def test_boolean_saved_adamw_state_key_cannot_alias_integer_parameter_id(self):
+        # bool is a Python int subclass: False == 0 and dict.get(0) finds
+        # state[False]. An attested optimizer cursor must reject that type
+        # confusion even when the control arm has no optimizer moments.
+        saved = {"state": {False: {}}, "param_groups": [self._canonical_group()]}
+        with patch.dict("sys.modules", {"torch": SimpleNamespace()}):
+            with patch(
+                "labyrinth.minilm_optimizer_state_resume._trainable_and_groups",
+                return_value=({"encoder.a": object()}, [["encoder.a"]]),
+            ):
+                with self.assertRaisesRegex(FullCheckpointError, "state keys"):
+                    _require_complete_adamw_state(
+                        saved, combined=object(), optimizer=object(),
+                        plan=plan(arm="zero_update"), completed_steps=0)
+
     @staticmethod
     def _canonical_group():
         # Explicit trainer AdamW defaults; never derive the test oracle from
@@ -379,6 +399,139 @@ class PhysicalMazeAdamWResumeTests(unittest.TestCase):
         loss = torch.nn.functional.cross_entropy(head(encoder(x)), y)
         loss.backward()
         optimizer.step()
+
+    @staticmethod
+    def _stochastic_step(encoder, head, optimizer):
+        """Make all three persisted RNG streams affect the next update."""
+        import numpy as np
+        import torch
+
+        optimizer.zero_grad(set_to_none=True)
+        x = (torch.rand((1, 3), dtype=torch.float32)
+             + random.random() + float(np.random.random()))
+        loss = torch.nn.functional.cross_entropy(
+            head(encoder(x)), torch.tensor([1]))
+        loss.backward()
+        optimizer.step()
+
+    @staticmethod
+    def _state_fingerprint(encoder, head, optimizer):
+        """Match weights, moments, step counters and post-step RNG streams."""
+        import numpy as np
+        import torch
+
+        groups = optimizer.state_dict()
+        numpy_state = np.random.get_state()
+        state = {
+            "parameters": {
+                f"{prefix}.{name}": param.detach().tolist()
+                for prefix, module in (("encoder", encoder), ("head", head))
+                for name, param in module.named_parameters()
+            },
+            "optimizer": {
+                str(ident): {name: value.detach().tolist()
+                             for name, value in sorted(moment.items())}
+                for ident, moment in sorted(groups["state"].items())
+            },
+            "torch_rng": torch.get_rng_state().tolist(),
+            "python_rng": repr(random.getstate()),
+            "numpy_rng": [numpy_state[0], numpy_state[1].tolist(),
+                          numpy_state[2], numpy_state[3], numpy_state[4]],
+        }
+        return sha256(json.dumps(state, sort_keys=True, allow_nan=False).encode()).hexdigest()
+
+    @unittest.skipUnless(importlib.util.find_spec("numpy"),
+                         "optional NumPy physical RNG dependency unavailable")
+    def test_fresh_python_process_restarts_v2_cycle_with_optimizer_rng_continuity(self):
+        """A reconstructed in-process model is not a crash/restart proof.
+
+        This deliberately launches a separate Python interpreter from the
+        durable checkpoint at the end of cycle zero and compares its next
+        update to uninterrupted training. It still cannot attest Qwen,
+        external GPU/host lease, independent corpus or live NAS provenance.
+        """
+        import numpy as np
+        import torch
+
+        conf = plan()
+        encoder, head, optimizer = self._make()
+        torch.manual_seed(1201)
+        random.seed(1202)
+        np.random.seed(1203)
+        for _ in range(conf.steps_per_cycle):
+            self._stochastic_step(encoder, head, optimizer)
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "cycle-zero-v2"
+            receipt = save_maze_optimizer_snapshot(
+                target, encoder=encoder, head=head, optimizer=optimizer,
+                plan=conf, completed_steps=conf.steps_per_cycle,
+                cycle_index=0,
+                immediate_predecessor_sha256=conf.prior_checkpoint_sha256)
+            self._stochastic_step(encoder, head, optimizer)
+            expected = self._state_fingerprint(encoder, head, optimizer)
+
+            # The fresh child must import its own Python module graph and
+            # reconstruct weights, optimizer slots and all RNG streams from
+            # persisted bytes, not reuse any parent-process Python objects.
+            source = """
+import json
+import os
+import random
+import sys
+import numpy as np
+import torch
+from test_minilm_optimizer_state_resume import (
+    FullCheckpointError, PhysicalMazeAdamWResumeTests as T,
+    plan, load_maze_optimizer_snapshot,
+)
+config = plan()
+encoder, head, optimizer = T._make()
+torch.manual_seed(9999)
+random.seed(9999)
+np.random.seed(9999)
+before = T._state_fingerprint(encoder, head, optimizer)
+wrong_pin = ('0' if sys.argv[2][0] != '0' else '1') + sys.argv[2][1:]
+try:
+    load_maze_optimizer_snapshot(
+        sys.argv[1], encoder=encoder, head=head, optimizer=optimizer,
+        plan=config, completed_steps=config.steps_per_cycle,
+        independently_pinned_checkpoint_sha256=wrong_pin,
+        cycle_index=0,
+        immediate_predecessor_sha256=config.prior_checkpoint_sha256,
+    )
+except FullCheckpointError:
+    pass
+else:
+    raise AssertionError('wrong independently pinned digest was accepted')
+assert T._state_fingerprint(encoder, head, optimizer) == before
+load_maze_optimizer_snapshot(
+    sys.argv[1], encoder=encoder, head=head, optimizer=optimizer,
+    plan=config, completed_steps=config.steps_per_cycle,
+    independently_pinned_checkpoint_sha256=sys.argv[2],
+    cycle_index=0,
+    immediate_predecessor_sha256=config.prior_checkpoint_sha256,
+)
+T._stochastic_step(encoder, head, optimizer)
+print(json.dumps({
+    'pid': os.getpid(), 'checkpoint_sha256': sys.argv[2],
+    'wrong_pin_rejected_without_mutation': True,
+    'fingerprint': T._state_fingerprint(encoder, head, optimizer),
+}, sort_keys=True))
+"""
+            root = Path(__file__).resolve().parents[1]
+            env = os.environ.copy()
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
+            env["PYTHONPATH"] = os.pathsep.join((str(root / "tests"), str(root)))
+            outcome = subprocess.run(
+                [sys.executable, "-c", source, str(target), receipt.sha256],
+                cwd=str(root), env=env, capture_output=True, text=True,
+                timeout=60, check=True,
+            )
+            child = json.loads(outcome.stdout)
+            self.assertNotEqual(child["pid"], os.getpid())
+            self.assertEqual(child["checkpoint_sha256"], receipt.sha256)
+            self.assertTrue(child["wrong_pin_rejected_without_mutation"])
+            self.assertEqual(child["fingerprint"], expected)
 
     def test_real_cpu_adamw_moments_and_parameters_match_continuous_training(self):
         import torch

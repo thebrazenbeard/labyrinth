@@ -127,6 +127,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "tests.test_v2_checkpoint_cpu_smoke_r22.ToyV2CpuPhysicalTests.test_real_toy_torch_adamw_two_cycle_resume_and_fresh_reload",
             "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_real_torch_tensor_updates_frozen_base_and_optimizer_moments",
             "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_noop_training_cannot_claim_real_learning",
+            "tests.test_minilm_optimizer_state_resume.PhysicalMazeAdamWResumeTests.test_fresh_python_process_restarts_v2_cycle_with_optimizer_rng_continuity",
         )
         for exact_case in required:
             self.assertIn('"' + exact_case + '"', workflow)

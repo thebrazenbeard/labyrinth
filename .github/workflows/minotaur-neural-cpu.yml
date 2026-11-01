@@ -579,7 +579,7 @@ jobs:
               ("tests.test_arithmetic_retention_admission", 8),
               ("tests.test_development_event_reservation_service", 15),
               ("tests.test_measured_sentiment_corridors", 5),
-              ("tests.test_minilm_optimizer_state_resume", 15),
+              ("tests.test_minilm_optimizer_state_resume", 18),
               ("tests.test_sealed_semantic_exam_protocol", 17),
               ("tests.test_external_monotonic_authority_contract", 13),
               ("tests.test_measured_neural_batch_binding", 6),
@@ -675,6 +675,7 @@ jobs:
               "tests.test_v2_checkpoint_cpu_smoke_r22.ToyV2CpuPhysicalTests.test_real_toy_torch_adamw_two_cycle_resume_and_fresh_reload",
               "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_real_torch_tensor_updates_frozen_base_and_optimizer_moments",
               "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_noop_training_cannot_claim_real_learning",
+              "tests.test_minilm_optimizer_state_resume.PhysicalMazeAdamWResumeTests.test_fresh_python_process_restarts_v2_cycle_with_optimizer_rng_continuity",
           )
           discovered_ids = []
           for module_name, min_count in new_required:

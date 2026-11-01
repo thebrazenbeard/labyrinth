@@ -347,6 +347,11 @@ def _require_complete_adamw_state(
     if (type(states) is not dict or type(saved_groups) is not list
             or len(saved_groups) != len(names_by_group)):
         raise FullCheckpointError("incomplete AdamW parameter-group inventory")
+    # bool aliases int in Python dict lookup/set equality (False == 0).
+    # Require exact serialized parameter-ID types before matching moments;
+    # otherwise an attested key can silently stand in for a different type.
+    if any(type(ident) is not int or ident < 0 for ident in states):
+        raise FullCheckpointError("AdamW state keys must be nonnegative integer IDs")
     expected_ids: set[int] = set()
     for group, names in zip(saved_groups, names_by_group):
         if type(group) is not dict or type(group.get("params")) is not list:
