@@ -38,6 +38,32 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
 
 
 class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_cognitive_supervised_train_export_is_required_and_private(self):
+        # Labeled TRAIN examples contain the synthetic answer key. They are
+        # never part of the public CLI's answerless learner interface.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        events = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for path in (
+            "labyrinth/cognitive_train_dataset_export.py",
+            "tests/test_cognitive_train_dataset_export.py",
+            "docs/qualification/R111_COGNITIVE_TRAIN_EXPORT_SOURCE.md",
+        ):
+            self.assertTrue((root / path).is_file())
+            for event, manifest in events.items():
+                with self.subTest(path=path, event=event):
+                    self.assertIn(f'      - "{path}"', manifest)
+        self.assertIn('("tests.test_cognitive_train_dataset_export", 7)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        cli_source = (root / "scripts/experiments/cognitive_train_demo.py").read_text()
+        self.assertNotIn("cognitive_train_dataset_export", cli_source)
+        self.assertNotIn("export_cognitive_train_jsonl", cli_source)
+
     def test_cognitive_cli_demo_is_mandatory_on_pr_and_main(self):
         # The user-facing source-only two-cycle walkthrough must never
         # silently disappear from the pinned CPU gate or become optional.
