@@ -196,6 +196,11 @@ def preflight_resume(
     report = load_json(source_file, strict=True)
     if type(report) is not dict or report.get("schema") not in (SCHEMA, PRE_EXPOSURE_SCHEMA):
         raise ValueError("only current v3 LoRA pilot reports can be resumed")
+    if "minotaur_staged_train" in report:
+        # This source-only feedback-conditioned catalog has no independently
+        # held predecessor/exam lineage. It cannot become a same-objective
+        # scoped successor simply by reusing the ordinary LoRA resume path.
+        raise ValueError("staged Minotaur TRAIN is not resumable as a qualified scoped journey")
     if report["schema"] == SCHEMA:
         from .hf_report_audit import audit_hf_report
         if audit_hf_report(report)["status"] == "FAIL":

@@ -162,6 +162,13 @@ def _arithmetic_equivalence_key(challenge: Challenge) -> tuple[str, int, int] | 
     Unrecognized arithmetic templates fail closed; this is not a general
     mathematical equivalence checker or a private-exam isolation guarantee.
     """
+    # Adaptive Minotaur TRAIN uses three source-controlled prompt structures.
+    # Import at use time to preserve the HF pilot -> staged roster layering.
+    # Contrast computes 2*b and is semantically equivalent to the public
+    # arithmetic expression b+b; never omit it from split screening.
+    if challenge.id.startswith("train-taskmaster-"):
+        from .minotaur_hf_roster_bridge import _source_arithmetic
+        return _source_arithmetic(challenge)[1]
     if challenge.kind != "arithmetic":
         return None
     if challenge.tier != 1:
@@ -321,7 +328,7 @@ def training_cases(config: PilotConfig) -> tuple[list[Challenge], list[Challenge
     train_ids = {case.id for case in train}
     train_prompts = {case.prompt for case in train}
     train_arithmetic = {_arithmetic_equivalence_key(case) for case in train
-                        if case.kind == "arithmetic"}
+                        if case.kind in ("arithmetic", "arithmetic_contrast")}
     for attempt in range(EVAL_SPLIT_MAX_ATTEMPTS):
         heldout = generate_maze(
             seed=config.seed ^ EVAL_SEED_XOR ^ attempt, count=config.eval_count,
@@ -337,7 +344,7 @@ def training_cases(config: PilotConfig) -> tuple[list[Challenge], list[Challenge
 
 
 def _scoped_public_heldout(config: PilotConfig, scope: Any, cycle_index: int,
-                           train: list[Challenge]) -> list[Challenge]:
+                           train: list[Challenge] | tuple[Challenge, ...]) -> list[Challenge]:
     """Deterministic, cycle-specific *public development* diagnostic cases.
 
     The seed is committed to the declared scope and cycle, never influenced by
@@ -359,7 +366,7 @@ def _scoped_public_heldout(config: PilotConfig, scope: Any, cycle_index: int,
     train_ids = {case.id for case in train}
     train_prompts = {case.prompt for case in train}
     train_arithmetic = {_arithmetic_equivalence_key(case) for case in train
-                        if case.kind == "arithmetic"}
+                        if case.kind in ("arithmetic", "arithmetic_contrast")}
     for attempt in range(EVAL_SPLIT_MAX_ATTEMPTS):
         heldout = generate_maze(
             seed=seed ^ attempt, count=config.eval_count,
@@ -985,7 +992,8 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
               predecessor_run_dir: str | Path | None = None, resume_context: Any = None,
               weak_skills: tuple[str, ...] = (),
               allow_unscoped_predecessor: bool = False,
-              unauthenticated_research_resume: bool = False) -> dict[str, Any]:
+              unauthenticated_research_resume: bool = False,
+              minotaur_roster: Any = None) -> dict[str, Any]:
     """Run fixed-budget LoRA-SFT and controls, save a new adapter and report.
 
     For ordinary runs, baseline and sham share the base checkpoint. With an
@@ -993,6 +1001,8 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     arms start from identical, verified previous LoRA *tensor values*. No
     optimizer state is retained. Cycle zero can start a new scoped journey.
     A separate process must run `reload_evaluate` to qualify persistence.
+    An explicitly supplied Minotaur TRAIN roster is a narrow cycle-zero-only,
+    self-reported research input. It never carries host/exam/graduation authority.
     """
     if type(unauthenticated_research_resume) is not bool:
         raise ValueError("research-only resume flag must be a boolean")
@@ -1032,7 +1042,23 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     resume_source = None
     resume_receipt = None
     plan = None
-    if scope is None:
+    staged_report = None
+    if minotaur_roster is not None:
+        from .minotaur_hf_roster_bridge import snapshot_staged_roster
+        from .training_scope import TrainingScopeSpec
+
+        if (type(scope) is not TrainingScopeSpec
+                or type(cycle_index) is not int or cycle_index != 0
+                or predecessor_run_dir is not None or resume_context is not None
+                or type(weak_skills) is not tuple or weak_skills
+                or allow_unscoped_predecessor
+                or unauthenticated_research_resume):
+            raise ValueError("Minotaur HF staging is cycle-zero-only without resume/legacy authority")
+        # The source-created catalog is cloned and checked before any tokenizer,
+        # model, or mutable operator callback; no protected/eval case is used.
+        train, staged_report = snapshot_staged_roster(minotaur_roster, config, scope)
+        heldout = _scoped_public_heldout(config, scope, 0, train)
+    elif scope is None:
         if (cycle_index is not None or predecessor_run_dir is not None or resume_context is not None
                 or weak_skills or allow_unscoped_predecessor):
             raise ValueError("journey options require an explicit training scope")
@@ -1071,10 +1097,33 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     # invoking any optimizer arm. All three arms must consume this same roster.
     # Independent schedule custody and physical optimizer witnessing remain
     # outside this source-only pilot.
+    # Source-only staged cases are fresh Challenge clones, and all controls
+    # capture the same fixed TRAIN/label tuples before model-side callbacks.
+    # Each arm gets its own disposable list of labels, never the source tuple.
+    if staged_report is not None:
+        train = tuple(train)
+        # Evaluation is public development only, but it must remain invariant
+        # across baseline/sham/candidate/corrupted model-side callbacks.
+        heldout = tuple(Challenge(case.id, case.kind, case.tier, case.split,
+                                  case.prompt, case.answer) for case in heldout)
     ordered_train_exposures = _training_visit_exposures(
         train, seed=config.seed, steps=config.steps,
     )
-    corrupted_answers = derange_answers(train)
+    correct_answers = tuple(case.answer for case in train)
+    corrupted_answers = tuple(derange_answers(train))
+    def _arm_train_cases() -> list[Challenge] | tuple[Challenge, ...]:
+        # A test/model callback may mutate even a frozen dataclass through
+        # object.__setattr__. Give each staged control its own copies so it
+        # cannot poison later arms or the pinned source manifest.
+        if staged_report is None:
+            return train
+        return tuple(Challenge(case.id, case.kind, case.tier, case.split,
+                               case.prompt, case.answer) for case in train)
+    def _arm_eval_cases() -> list[Challenge] | tuple[Challenge, ...]:
+        if staged_report is None:
+            return heldout
+        return tuple(Challenge(case.id, case.kind, case.tier, case.split,
+                               case.prompt, case.answer) for case in heldout)
     torch, auto_model, auto_tokenizer, peft_parts, device = _deps(config.device)
     cuda_headroom = _device_headroom(torch, device, weights)
     lora_config, _, get_peft_model = peft_parts
@@ -1110,7 +1159,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         _encode_pair(tokenizer, case.prompt, answer, config.max_tokens,
                      answer_only=config.answer_only)
     baseline = _score_model(model if resume_source is not None else base,
-                            tokenizer, torch, heldout, device=device,
+                            tokenizer, torch, _arm_eval_cases(), device=device,
                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
     if resume_source is None:
@@ -1131,7 +1180,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     # examples and optimiser steps, but LR=0. Verify all trainable tensors are
     # unchanged, then start the candidate from the same initialization.
     sham_training = _train_steps(
-        model, tokenizer, torch, train, [c.answer for c in train], config,
+        model, tokenizer, torch, _arm_train_cases(), list(correct_answers), config,
         learning_rate=0.0, expected_visit_exposures=ordered_train_exposures,
     )
     if _parameter_digest(model, torch) != initial_digest:
@@ -1140,7 +1189,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "zero-LR placebo",
     )
-    sham = _score_model(model, tokenizer, torch, heldout, device=device,
+    sham = _score_model(model, tokenizer, torch, _arm_eval_cases(), device=device,
                         max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
     _assert_frozen_state(
@@ -1150,7 +1199,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     if _parameter_digest(model, torch) != initial_digest:
         raise RuntimeError("zero-LR placebo evaluation changed initial LoRA tensor values")
     correct_training = _train_steps(
-        model, tokenizer, torch, train, [c.answer for c in train], config,
+        model, tokenizer, torch, _arm_train_cases(), list(correct_answers), config,
         expected_visit_exposures=ordered_train_exposures,
     )
     trained_digest = _parameter_digest(model, torch)
@@ -1163,7 +1212,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "correct-label training",
     )
-    candidate = _score_model(model, tokenizer, torch, heldout, device=device,
+    candidate = _score_model(model, tokenizer, torch, _arm_eval_cases(), device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
     _assert_frozen_state(
@@ -1189,7 +1238,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         "restoration before corrupted-label training",
     )
     corrupted_training = _train_steps(
-        model, tokenizer, torch, train, corrupted_answers, config,
+        model, tokenizer, torch, _arm_train_cases(), list(corrupted_answers), config,
         expected_visit_exposures=ordered_train_exposures,
     )
     if any(tuple(training["visited_exposures"]) != ordered_train_exposures
@@ -1200,7 +1249,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "corrupted-label training",
     )
-    corrupted = _score_model(model, tokenizer, torch, heldout, device=device,
+    corrupted = _score_model(model, tokenizer, torch, _arm_eval_cases(), device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
     _assert_frozen_state(
@@ -1249,6 +1298,12 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
                         "Only the adapter was persisted; base weights remain unchanged.",
                         "Same-process scores do not qualify independent checkpoint reload."],
     }
+    if staged_report is not None:
+        result["minotaur_staged_train"] = staged_report
+        result["limitations"].append(
+            "Minotaur feedback-conditioned TRAIN was staged before HF SGD; source-only "
+            "operator cases/labels are not independently authenticated or online neural adaptation."
+        )
     if plan is not None:
         historical_ids = {case.id for case in train + heldout}
         historical_prompts = {hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
@@ -1433,7 +1488,14 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     if actual_adapters != report.get("candidate_adapter_sha256"):
         raise ValueError("candidate adapter changed after training")
     cycle_receipt = report.get("resumed_journey")
-    if cycle_receipt is None:
+    staged = report.get("minotaur_staged_train")
+    if staged is not None:
+        if cycle_receipt is not None:
+            raise ValueError("source-staged TRAIN cannot claim a resumed journey")
+        from .minotaur_hf_roster_bridge import replay_staged_roster
+        scope, staged_train, _ = replay_staged_roster(staged, config)
+        heldout = _scoped_public_heldout(config, scope, 0, staged_train)
+    elif cycle_receipt is None:
         _, heldout = training_cases(config)
     else:
         from .training_scope import TrainingScopeSpec

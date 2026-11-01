@@ -442,6 +442,46 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
         self.assertIn('This does NOT witness a physical', workflow)
 
+    def test_r84_staged_minotaur_train_entrypoint_is_required_by_cpu_ci(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        for event_paths in (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        ):
+            for name in (
+                "labyrinth/hf_pilot.py",
+                "labyrinth/minotaur_hf_roster_bridge.py",
+                "labyrinth/hf_report_audit.py",
+                "labyrinth/hf_resume_bridge.py",
+                "tests/test_minotaur_hf_run_pilot_r84.py",
+            ):
+                self.assertIn(f'      - "{name}"', event_paths)
+        self.assertIn('("tests.test_minotaur_hf_run_pilot_r84", 3)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:',
+                      workflow)
+
+    def test_r85_minotaur_train_roster_manifest_is_required_on_pr_and_main(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        pr_paths = workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+            "  push:\n", 1)[0]
+        main_paths = workflow.split("  push:\n", 1)[1].split(
+            "  workflow_dispatch:\n", 1)[0]
+        for path in (
+            "labyrinth/minotaur_train_roster_manifest_v1.py",
+            "tests/test_minotaur_train_roster_manifest_v1.py",
+        ):
+            with self.subTest(path=path):
+                self.assertIn(f'      - "{path}"', pr_paths)
+                self.assertIn(f'      - "{path}"', main_paths)
+        self.assertIn('("tests.test_minotaur_train_roster_manifest_v1", 9)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:',
+                      workflow)
+        self.assertIn('NOT accepted by the older model-training corpus importer', workflow)
+
     def test_r60_private_wheel_contract_is_required_by_both_cpu_ci_triggers(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()

@@ -72,6 +72,7 @@ on:
       - "labyrinth/rezon_pointer_mapping_r57.py"
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/rezon_toy_pair_consumer_r76.py"
+      - "labyrinth/minotaur_train_roster_manifest_v1.py"
       - "labyrinth/final_exam_precommit.py"
       - "labyrinth/q5_evaluation_preregistration_r68.py"
       - "labyrinth/q5_signed_data_witness_r72.py"
@@ -97,6 +98,8 @@ on:
       - "tests/test_r72_minotaur_registry_transition.py"
       - "tests/test_minotaur_measured_toy_bridge_r72.py"
       - "tests/test_minotaur_hf_roster_bridge.py"
+      - "tests/test_minotaur_hf_run_pilot_r84.py"
+      - "tests/test_minotaur_train_roster_manifest_v1.py"
       - "tests/test_q5_toy_authority_combination_r79.py"
       - "tests/test_optimizer_lifecycle_r8.py"
       - "tests/test_retention_sample_planning_r57.py"
@@ -265,6 +268,7 @@ on:
       - "labyrinth/rezon_pointer_mapping_r57.py"
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/rezon_toy_pair_consumer_r76.py"
+      - "labyrinth/minotaur_train_roster_manifest_v1.py"
       - "labyrinth/final_exam_precommit.py"
       - "labyrinth/q5_evaluation_preregistration_r68.py"
       - "labyrinth/q5_signed_data_witness_r72.py"
@@ -290,6 +294,8 @@ on:
       - "tests/test_r72_minotaur_registry_transition.py"
       - "tests/test_minotaur_measured_toy_bridge_r72.py"
       - "tests/test_minotaur_hf_roster_bridge.py"
+      - "tests/test_minotaur_hf_run_pilot_r84.py"
+      - "tests/test_minotaur_train_roster_manifest_v1.py"
       - "tests/test_q5_toy_authority_combination_r79.py"
       - "tests/test_optimizer_lifecycle_r8.py"
       - "tests/test_retention_sample_planning_r57.py"
@@ -547,6 +553,13 @@ jobs:
               # must be tested without skips. This does NOT witness a physical
               # pretrained optimizer, online learning, or graduation authority.
               ("tests.test_minotaur_hf_roster_bridge", 6),
+              # Explicit cycle-zero adaptive TRAIN controls, answerless
+              # replay, cross-arm isolation and source-only audit status.
+              ("tests.test_minotaur_hf_run_pilot_r84", 3),
+              # R85 versioned answerless TRAIN roster exchange with explicit
+              # raw and R18-normalized prompt digests; this is source-only and
+              # NOT accepted by the older model-training corpus importer.
+              ("tests.test_minotaur_train_roster_manifest_v1", 9),
               ("tests.test_hf_pilot", 28),
               # Explicit exposure-v1 reports are strict by default: remove the
               # marker/ledger, downgrade schema, or resume incorrectly -> FAIL.

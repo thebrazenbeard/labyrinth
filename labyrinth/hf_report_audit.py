@@ -17,7 +17,8 @@ from .hf_pilot import (
     RESEARCH_ONLY_RESUME, SIGNED_DEVELOPMENT_RESUME, _prompt_commitment,
     _arithmetic_semantic_commitments, _historical_arithmetic_case_count,
     _arithmetic_history_witnesses, _verified_arithmetic_history_witnesses,
-    _scoped_training_cases, _training_visit_indices, derange_answers, training_cases,
+    _scoped_training_cases, _scoped_public_heldout, _training_visit_indices,
+    derange_answers, training_cases,
 )
 from .runner import _source_state
 from .training_scope import TrainingScopeSpec
@@ -164,8 +165,17 @@ def audit_hf_report(report: Any, *, allow_legacy: bool = False) -> dict[str, Any
         fail("invalid seed/count/steps/tiers in pilot config")
         return result()
     journey = report.get("resumed_journey")
+    staged = report.get("minotaur_staged_train")
     try:
-        if journey is None:
+        if staged is not None:
+            if journey is not None:
+                raise ValueError("source-staged TRAIN cannot claim a resumed journey")
+            from .minotaur_hf_roster_bridge import replay_staged_roster
+            pilot = PilotConfig(**{**config, "tiers": tuple(tiers)})
+            scope, train, _ = replay_staged_roster(staged, pilot)
+            heldout = _scoped_public_heldout(pilot, scope, 0, train)
+            incomplete("Minotaur staged TRAIN originates in the operator process, not independent custody")
+        elif journey is None:
             # Match the pilot's bounded semantic split regeneration. A fixed
             # eval seed would falsely reject a legitimate rerolled heldout
             # report whenever commutative TRAIN/EVAL expressions collide.
