@@ -790,6 +790,21 @@ def _training_visit_exposures(train: list[Challenge], *, seed: int,
     )
 
 
+def _training_case_content(train: list[Challenge] | tuple[Challenge, ...]) -> tuple[tuple[Any, ...], ...]:
+    """Copy every Challenge field, including nested public metadata pairs."""
+    return tuple(
+        (case.id, case.kind, case.tier, case.split, case.prompt, case.answer,
+         tuple(tuple(pair) for pair in case.metadata))
+        for case in train
+    )
+
+
+def _assert_training_case_content(train: list[Challenge] | tuple[Challenge, ...],
+                                  snapshot: tuple[tuple[Any, ...], ...]) -> None:
+    if _training_case_content(train) != snapshot:
+        raise RuntimeError("TRAIN case content changed after source snapshot")
+
+
 def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
                  labels: list[str], config: PilotConfig, *,
                  learning_rate: float | None = None,
@@ -814,18 +829,18 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
     separate; this private seam alone is not full-state resume authority or
     an independently authenticated physical TRAIN witness.
     """
-    # Snapshot the public catalog and label sequence before invoking any
-    # tokenizer/optimizer callback. Mutable caller lists must not be able to
-    # redirect encoded supervision while restoring the original pinned case
-    # IDs/prompts before the per-step source-ledger checks. Challenge objects
-    # themselves are immutable; this is still only a same-process guard, not
-    # an independently witnessed physical optimizer exposure.
+    # Detach mutable caller collections; verify Challenge values across
+    # tokenizer, model and optimizer callbacks, including partial failures.
     train = tuple(train)
     labels = tuple(labels)
+    source_case_content = _training_case_content(train)
     if len(train) != len(labels) or not train:
         raise ValueError("training supervision must match every training case")
     if scheduler is not None:
         raise ValueError("scheduler-dependent continuation is unsupported")
+    if (any(case.split != "train" for case in train)
+            or len({case.id for case in train}) != len(train)):
+        raise ValueError("training catalog requires TRAIN-only cases with unique IDs")
     external_optimizer = optimizer is not None
     if not external_optimizer:
         if rng_policy != "seed_for_control":
@@ -844,8 +859,6 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
         if (type(visit_cursor) is not int or visit_cursor < 0
                 or visit_cursor + config.steps > 100000):
             raise ValueError("externally restored exposure cursor is missing or out of bounds")
-        if any(case.split != "train" for case in train) or len({case.id for case in train}) != len(train):
-            raise ValueError("externally restored training catalog is invalid")
         if not isinstance(optimizer, torch.optim.AdamW):
             raise ValueError("externally restored optimizer must be AdamW")
         trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
@@ -870,32 +883,33 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
                 or {id(parameter) for parameter in optimizer_params}
                 != {id(parameter) for parameter in trainable}):
             raise ValueError("externally restored optimizer does not own the model's trainable parameters")
-    if expected_visit_exposures is not None:
+    if external_optimizer or expected_visit_exposures is not None:
         if (type(expected_visit_exposures) is not tuple
                 or len(expected_visit_exposures) != config.steps
                 or any(type(pair) is not tuple or len(pair) != 2
                        or type(pair[0]) is not str or type(pair[1]) is not str
                        or not re.fullmatch(r"[0-9a-f]{64}", pair[1])
                        for pair in expected_visit_exposures)):
-            raise ValueError("pinned TRAIN exposure slice is malformed")
-    elif external_optimizer:
-        raise ValueError("externally restored exposure slice is missing")
+            raise ValueError("pinned exposure slice is missing or malformed")
     if optimizer is None:
         indices = _training_visit_indices(train, seed=config.seed, steps=config.steps)
     else:
         full_indices = _training_visit_indices(train, seed=config.seed,
                                                steps=visit_cursor + config.steps)
         indices = full_indices[visit_cursor:]
+    actual_exposures = tuple(
+        (train[index].id, hashlib.sha256(train[index].prompt.encode("utf-8")).hexdigest())
+        for index in indices
+    )
     if expected_visit_exposures is not None:
-        actual_schedule = tuple(
-            (train[index].id, hashlib.sha256(train[index].prompt.encode("utf-8")).hexdigest())
-            for index in indices
-        )
-        if actual_schedule != expected_visit_exposures:
-            raise ValueError("TRAIN exposure schedule differs from pinned slice")
-    prepared = [_encode_pair(tokenizer, case.prompt, answer, config.max_tokens,
-                             answer_only=config.answer_only)
-                for case, answer in zip(train, labels)]
+        if actual_exposures != expected_visit_exposures:
+            raise ValueError("training exposure schedule differs from pinned slice")
+    prepared = []
+    for case, answer in zip(train, labels):
+        _assert_training_case_content(train, source_case_content)
+        prepared.append(_encode_pair(tokenizer, case.prompt, answer, config.max_tokens,
+                                     answer_only=config.answer_only))
+        _assert_training_case_content(train, source_case_content)
     if learning_rate is not None and learning_rate != 0.0:
         raise ValueError("control override only admits exact zero learning rate")
     if optimizer is None:
@@ -906,39 +920,52 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
         if config.device == "cuda":
             torch.cuda.manual_seed_all(config.seed)
     model.train()
+    _assert_training_case_content(train, source_case_content)
     if optimizer is None:
         optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
                                       lr=config.learning_rate if learning_rate is None else learning_rate)
+    _assert_training_case_content(train, source_case_content)
     token_total = 0
     losses: list[float] = []
     completed_exposures: list[tuple[str, str]] = []
-    for step in range(config.steps):
-        case = train[indices[step]]
-        exposure = (case.id, hashlib.sha256(case.prompt.encode("utf-8")).hexdigest())
-        if expected_visit_exposures is not None and exposure != expected_visit_exposures[step]:
-            raise RuntimeError("TRAIN exposure changed before optimizer step")
-        inputs, target = prepared[indices[step]]
-        ids = torch.tensor([inputs], dtype=torch.long, device=config.device)
-        targets = torch.tensor([target], dtype=torch.long, device=config.device)
-        optimizer.zero_grad(set_to_none=True)
-        loss = model(input_ids=ids, labels=targets).loss
-        if not bool(torch.isfinite(loss)):
-            raise RuntimeError("non-finite SFT loss")
-        loss.backward()
-        _clip_trainable_gradients(
-            torch, (p for p in model.parameters() if p.requires_grad)
-        )
-        optimizer.step()
-        for parameter in model.parameters():
-            if parameter.requires_grad and not bool(torch.isfinite(parameter).all()):
-                raise RuntimeError("non-finite trained LoRA parameter")
-        completed_exposures.append(exposure)
-        value = float(loss.detach().cpu().item())
-        losses.append(value)
-        token_total += len(inputs)
+    try:
+        for step in range(config.steps):
+            _assert_training_case_content(train, source_case_content)
+            case = train[indices[step]]
+            exposure = (case.id, hashlib.sha256(case.prompt.encode("utf-8")).hexdigest())
+            if expected_visit_exposures is not None and exposure != expected_visit_exposures[step]:
+                raise RuntimeError("TRAIN exposure changed before optimizer step")
+            inputs, target = prepared[indices[step]]
+            ids = torch.tensor([inputs], dtype=torch.long, device=config.device)
+            targets = torch.tensor([target], dtype=torch.long, device=config.device)
+            optimizer.zero_grad(set_to_none=True)
+            loss = model(input_ids=ids, labels=targets).loss
+            if not bool(torch.isfinite(loss)):
+                raise RuntimeError("non-finite SFT loss")
+            loss.backward()
+            _clip_trainable_gradients(
+                torch, (p for p in model.parameters() if p.requires_grad)
+            )
+            _assert_training_case_content(train, source_case_content)
+            optimizer.step()
+            # Never mark a visit complete before the optimizer update returns.
+            completed_exposures.append(exposure)
+            _assert_training_case_content(train, source_case_content)
+            for parameter in model.parameters():
+                if parameter.requires_grad and not bool(torch.isfinite(parameter).all()):
+                    raise RuntimeError("non-finite trained LoRA parameter")
+            value = float(loss.detach().cpu().item())
+            losses.append(value)
+            token_total += len(inputs)
+            _assert_training_case_content(train, source_case_content)
+        _assert_training_case_content(train, source_case_content)
+    except Exception as exc:
+        # Diagnostic only: failed runs never produce a full-success report.
+        exc.completed_visit_exposures = tuple(completed_exposures)
+        raise
     result = {"steps": config.steps, "example_visits": config.steps,
               "visited_case_ids": [case_id for case_id, _ in completed_exposures],
-              "visited_exposures": completed_exposures,
+              "visited_exposures": list(completed_exposures),
               "input_tokens_seen": token_total, "losses": losses}
     if external_optimizer:
         result["visit_cursor_before"] = visit_cursor
@@ -1106,10 +1133,11 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         # across baseline/sham/candidate/corrupted model-side callbacks.
         heldout = tuple(Challenge(case.id, case.kind, case.tier, case.split,
                                   case.prompt, case.answer) for case in heldout)
-    ordered_train_exposures = _training_visit_exposures(
+    planned_train_exposures = _training_visit_exposures(
         train, seed=config.seed, steps=config.steps,
     )
-    correct_answers = tuple(case.answer for case in train)
+    planned_train_content = _training_case_content(train)
+    canonical_train_answers = tuple(case.answer for case in train)
     corrupted_answers = tuple(derange_answers(train))
     def _arm_train_cases() -> list[Challenge] | tuple[Challenge, ...]:
         # A test/model callback may mutate even a frozen dataclass through
@@ -1162,6 +1190,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
                             tokenizer, torch, _arm_eval_cases(), device=device,
                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
+    _assert_training_case_content(train, planned_train_content)
     if resume_source is None:
         model = get_peft_model(base, lora_config(r=config.lora_rank, lora_alpha=config.lora_alpha,
                                                  lora_dropout=0, bias="none", task_type="CAUSAL_LM",
@@ -1180,9 +1209,12 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     # examples and optimiser steps, but LR=0. Verify all trainable tensors are
     # unchanged, then start the candidate from the same initialization.
     sham_training = _train_steps(
-        model, tokenizer, torch, _arm_train_cases(), list(correct_answers), config,
-        learning_rate=0.0, expected_visit_exposures=ordered_train_exposures,
+        model, tokenizer, torch, _arm_train_cases(), list(canonical_train_answers), config,
+        learning_rate=0.0, expected_visit_exposures=planned_train_exposures,
     )
+    _assert_training_case_content(train, planned_train_content)
+    if tuple(sham_training["visited_exposures"]) != planned_train_exposures:
+        raise RuntimeError("zero-LR sham optimizer visits differ from pinned TRAIN source")
     if _parameter_digest(model, torch) != initial_digest:
         raise RuntimeError("zero-LR placebo changed trainable adapter parameters")
     _assert_frozen_state(
@@ -1198,10 +1230,14 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     )
     if _parameter_digest(model, torch) != initial_digest:
         raise RuntimeError("zero-LR placebo evaluation changed initial LoRA tensor values")
+    _assert_training_case_content(train, planned_train_content)
     correct_training = _train_steps(
-        model, tokenizer, torch, _arm_train_cases(), list(correct_answers), config,
-        expected_visit_exposures=ordered_train_exposures,
+        model, tokenizer, torch, _arm_train_cases(), list(canonical_train_answers), config,
+        expected_visit_exposures=planned_train_exposures,
     )
+    _assert_training_case_content(train, planned_train_content)
+    if tuple(correct_training["visited_exposures"]) != planned_train_exposures:
+        raise RuntimeError("candidate optimizer visits differ from pinned TRAIN source")
     trained_digest = _parameter_digest(model, torch)
     if trained_digest == initial_digest:
         raise RuntimeError("no trainable LoRA parameter changed; refusing learning claim")
@@ -1233,17 +1269,18 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
                 parameter.copy_(initial_state[name])
     if _parameter_digest(model, torch) != initial_digest:
         raise RuntimeError("failed to restore LoRA initialization for corrupted-label control")
+    _assert_training_case_content(train, planned_train_content)
     _assert_frozen_state(
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "restoration before corrupted-label training",
     )
     corrupted_training = _train_steps(
         model, tokenizer, torch, _arm_train_cases(), list(corrupted_answers), config,
-        expected_visit_exposures=ordered_train_exposures,
+        expected_visit_exposures=planned_train_exposures,
     )
-    if any(tuple(training["visited_exposures"]) != ordered_train_exposures
-           for training in (sham_training, correct_training, corrupted_training)):
-        raise RuntimeError("optimizer TRAIN exposure differs across controlled arms")
+    _assert_training_case_content(train, planned_train_content)
+    if tuple(corrupted_training["visited_exposures"]) != planned_train_exposures:
+        raise RuntimeError("corrupted-label optimizer visits differ from pinned TRAIN source")
     corrupted_digest = _parameter_digest(model, torch)
     _assert_frozen_state(
         model, torch, initial_frozen_digest, initial_buffer_digest,
@@ -1252,6 +1289,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     corrupted = _score_model(model, tokenizer, torch, _arm_eval_cases(), device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
+    _assert_training_case_content(train, planned_train_content)
     _assert_frozen_state(
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "corrupted-label evaluation",
@@ -1412,6 +1450,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
             result["limitations"].append(
                 "Resumed only adapter tensor values, not AdamW optimizer moments or any subjective experience."
             )
+    _assert_training_case_content(train, planned_train_content)
     _save_new(output_dir / "pilot_report.json", result)
     return result
 

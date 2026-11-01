@@ -18,6 +18,74 @@ SPEC.loader.exec_module(MODULE)
 
 
 class MiniLMCPUProbeTests(unittest.TestCase):
+    def test_frozen_pretrained_base_fingerprint_and_lora_trainability(self):
+        class FakeTensor:
+            def __init__(self, payload: bytes, requires_grad: bool):
+                self.payload = payload
+                self.requires_grad = requires_grad
+                self.dtype = "float32"
+                self.shape = (len(payload),)
+
+            def detach(self): return self
+            def cpu(self): return self
+            def contiguous(self): return self
+            def numpy(self): return self
+            def tobytes(self): return self.payload
+
+        class FakeModel:
+            def __init__(self, base: FakeTensor, lora: FakeTensor,
+                         *, lora_b: FakeTensor | None = None,
+                         buffer: FakeTensor | None = None,
+                         lora_named_buffer: FakeTensor | None = None):
+                self.params = (
+                    ("base_model.model.encoder.query.base_layer.weight", base),
+                    ("base_model.model.encoder.query.lora_A.default.weight", lora),
+                    ("base_model.model.encoder.query.lora_B.default.weight",
+                     lora if lora_b is None else lora_b),
+                )
+                self.buffers = tuple(
+                    (name, tensor) for name, tensor in (
+                        ("base_model.model.encoder.position_ids", buffer),
+                        ("base_model.model.encoder.query.lora_A.default.registered_state",
+                         lora_named_buffer),
+                    ) if tensor is not None
+                )
+
+            def named_parameters(self): return iter(self.params)
+            def named_buffers(self): return iter(self.buffers)
+
+        base = FakeTensor(b"actual-frozen-base-bytes", False)
+        lora = FakeTensor(b"trainable-adapter", True)
+        fingerprint = MODULE.frozen_base_digest(FakeModel(base, lora))
+        self.assertEqual(fingerprint, MODULE.frozen_base_digest(FakeModel(base, lora)))
+        self.assertEqual(fingerprint, MODULE.frozen_base_digest(FakeModel(
+            base, FakeTensor(b"updated-adapter-weights", True))))
+        self.assertNotEqual(fingerprint, MODULE.frozen_base_digest(
+            FakeModel(FakeTensor(b"changed-base-weights", False), lora)))
+        self.assertNotEqual(fingerprint, MODULE.frozen_base_digest(
+            FakeModel(base, lora, buffer=FakeTensor(b"buffer", False))))
+        self.assertNotEqual(
+            MODULE.frozen_base_digest(FakeModel(base, lora,
+                                                buffer=FakeTensor(b"buffer-a", False))),
+            MODULE.frozen_base_digest(FakeModel(base, lora,
+                                                buffer=FakeTensor(b"buffer-b", False))),
+        )
+        # The frozen-state contract cannot exempt arbitrary registered buffers
+        # merely because their names resemble adapter parameters.
+        self.assertNotEqual(
+            MODULE.frozen_base_digest(FakeModel(
+                base, lora, lora_named_buffer=FakeTensor(b"before", False))),
+            MODULE.frozen_base_digest(FakeModel(
+                base, lora, lora_named_buffer=FakeTensor(b"after", False))),
+        )
+        with self.assertRaisesRegex(RuntimeError, "non-LoRA base parameter is trainable"):
+            MODULE.frozen_base_digest(FakeModel(FakeTensor(b"unsafe", True), lora))
+        with self.assertRaisesRegex(RuntimeError, "trainable LoRA"):
+            MODULE.frozen_base_digest(FakeModel(base, FakeTensor(b"frozen-adapter", False)))
+        with self.assertRaisesRegex(RuntimeError, "trainable LoRA"):
+            MODULE.frozen_base_digest(FakeModel(
+                base, lora, lora_b=FakeTensor(b"untracked-frozen-B", False)))
+
     def test_frozen_public_fixture_has_nonoverlapping_balanced_splits(self):
         sizes = MODULE.validate_fixtures()
         self.assertEqual(sizes, {"cycle0": 12, "cycle1": 12,

@@ -28,6 +28,7 @@ on:
       - "labyrinth/checkpoint_schema_bridge.py"
       - "labyrinth/hf_pilot.py"
       - "labyrinth/cli.py"
+      - "labyrinth/minotaur_train_roster_manifest_v1.py"
       - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
@@ -70,6 +71,42 @@ on:
       - "labyrinth/five_arm_statistical_screen.py"
       - "labyrinth/evidence_pointer.py"
       - "labyrinth/rezon_pointer_mapping_r57.py"
+      - "labyrinth/rezon_receipt_binding_r69.py"
+      - "labyrinth/schedule_pin_boundary_w2.py"
+      - "labyrinth/graduation_state_external_custody_w4.py"
+      - "labyrinth/q7_temporal_custody_source.py"
+      - "labyrinth/q7_witnessed_cas_intake_r93.py"
+      - "labyrinth/q8_witness_restore_r93.py"
+      - "labyrinth/q6_stratified_toy_study_r93.py"
+      - "labyrinth/adaptive_minotaur_r93.py"
+      - "labyrinth/q8_host_authority_probe.py"
+      - "labyrinth/graduation_gate.py"
+      - "labyrinth/objective_challenge_provider_r92.py"
+      - "labyrinth/minotaur_counterfactual_corridors_r92.py"
+      - "labyrinth/neural_cycle_checkpoint_r92.py"
+      - "scripts/experiments/q5_multiseed_campaign.py"
+      - "docs/qualification/REZON_RECEIPT_BINDING_R69.md"
+      - "docs/qualification/Q7_TEMPORAL_CUSTODY_SOURCE.md"
+      - "docs/qualification/Q7_WITNESSED_SOURCE_CAS_R93.md"
+      - "docs/qualification/Q8_HOST_WITNESS_RESTORE_R93.md"
+      - "docs/qualification/Q6_STRATIFIED_TOY_SOURCE_STUDY_R93.md"
+      - "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md"
+      - "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md"
+      - "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md"
+      - "docs/qualification/MINOTAUR_REGISTRY_TRANSITION_R72.md"
+      - "docs/qualification/Q5_EVALUATION_PREREG_R68.md"
+      - "docs/qualification/Q5_SIGNED_DATA_WITNESS_R72.md"
+      - "docs/qualification/Q7_PRECOMMIT_SUMMARY_IMMUTABILITY_R68.md"
+      - "docs/qualification/Q8_SOURCE_ACCEPTANCE_VALIDATOR_R68.md"
+      - "docs/qualification/R72_MINOTAUR_MEASURED_TOY_CORRIDOR.md"
+      - "docs/qualification/RETENTION_TRANSFER_COHORT_R68.md"
+      - "docs/qualification/REZON_TWO_ADAPTER_SOURCE_PARTITION_R68.md"
+      - "docs/qualification/R76_REZON_TWO_TOY_CONSUMER.md"
+      - "docs/qualification/Q5_PRIVATE_HOLDOUT_EVAL_R92.md"
+      - "labyrinth/q5_holdout_eval_r92.py"
+      - "tests/test_q5_holdout_eval_r92.py"
+      - "labyrinth/objective_learning_loop_r92.py"
+      - "tests/test_objective_learning_loop_r92.py"
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/rezon_toy_pair_consumer_r76.py"
       - "labyrinth/minotaur_train_roster_manifest_v1.py"
@@ -105,6 +142,21 @@ on:
       - "tests/test_retention_sample_planning_r57.py"
       - "tests/test_retention_transfer_cohort_r68.py"
       - "tests/test_rezon_pointer_mapping_r57.py"
+      - "tests/test_rezon_receipt_binding_r69.py"
+      - "tests/test_schedule_pin_boundary_w2.py"
+      - "tests/test_graduation_state_external_custody_w4.py"
+      - "tests/test_q5_multiseed_campaign.py"
+      - "tests/test_q7_temporal_custody_source.py"
+      - "tests/test_q7_witnessed_cas_intake_r93.py"
+      - "tests/test_q8_witness_restore_r93.py"
+      - "tests/test_q6_stratified_toy_study_r93.py"
+      - "tests/test_adaptive_minotaur_r93.py"
+      - "tests/test_q8_host_authority_probe.py"
+      - "tests/test_graduation_gate.py"
+      - "tests/test_objective_challenge_provider_r92.py"
+      - "tests/test_minotaur_counterfactual_corridors_r92.py"
+      - "tests/test_neural_cycle_checkpoint_r92.py"
+      - "tests/test_private_wheel_cli_checkpoint_r70.py"
       - "tests/test_rezon_two_adapter_source_partition_r68.py"
       - "tests/test_rezon_toy_pair_consumer_r76.py"
       - "tests/test_q5_evaluation_preregistration_r68.py"
@@ -134,6 +186,7 @@ on:
       - "tests/test_checkpoint_schema_bridge.py"
       - "tests/test_hf_regenerative_harness.py"
       - "tests/test_hf_pilot.py"
+      - "tests/test_minotaur_hf_roster_bridge.py"
       - "tests/test_neural_resume_checkpoint.py"
       - "tests/test_hf_event_recovery.py"
       - "tests/test_recovery_composition.py"
@@ -224,6 +277,7 @@ on:
       - "labyrinth/checkpoint_schema_bridge.py"
       - "labyrinth/hf_pilot.py"
       - "labyrinth/cli.py"
+      - "labyrinth/minotaur_train_roster_manifest_v1.py"
       - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
@@ -266,6 +320,42 @@ on:
       - "labyrinth/five_arm_statistical_screen.py"
       - "labyrinth/evidence_pointer.py"
       - "labyrinth/rezon_pointer_mapping_r57.py"
+      - "labyrinth/rezon_receipt_binding_r69.py"
+      - "labyrinth/schedule_pin_boundary_w2.py"
+      - "labyrinth/graduation_state_external_custody_w4.py"
+      - "labyrinth/q7_temporal_custody_source.py"
+      - "labyrinth/q7_witnessed_cas_intake_r93.py"
+      - "labyrinth/q8_witness_restore_r93.py"
+      - "labyrinth/q6_stratified_toy_study_r93.py"
+      - "labyrinth/adaptive_minotaur_r93.py"
+      - "labyrinth/q8_host_authority_probe.py"
+      - "labyrinth/graduation_gate.py"
+      - "labyrinth/objective_challenge_provider_r92.py"
+      - "labyrinth/minotaur_counterfactual_corridors_r92.py"
+      - "labyrinth/neural_cycle_checkpoint_r92.py"
+      - "scripts/experiments/q5_multiseed_campaign.py"
+      - "docs/qualification/REZON_RECEIPT_BINDING_R69.md"
+      - "docs/qualification/Q7_TEMPORAL_CUSTODY_SOURCE.md"
+      - "docs/qualification/Q7_WITNESSED_SOURCE_CAS_R93.md"
+      - "docs/qualification/Q8_HOST_WITNESS_RESTORE_R93.md"
+      - "docs/qualification/Q6_STRATIFIED_TOY_SOURCE_STUDY_R93.md"
+      - "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md"
+      - "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md"
+      - "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md"
+      - "docs/qualification/MINOTAUR_REGISTRY_TRANSITION_R72.md"
+      - "docs/qualification/Q5_EVALUATION_PREREG_R68.md"
+      - "docs/qualification/Q5_SIGNED_DATA_WITNESS_R72.md"
+      - "docs/qualification/Q7_PRECOMMIT_SUMMARY_IMMUTABILITY_R68.md"
+      - "docs/qualification/Q8_SOURCE_ACCEPTANCE_VALIDATOR_R68.md"
+      - "docs/qualification/R72_MINOTAUR_MEASURED_TOY_CORRIDOR.md"
+      - "docs/qualification/RETENTION_TRANSFER_COHORT_R68.md"
+      - "docs/qualification/REZON_TWO_ADAPTER_SOURCE_PARTITION_R68.md"
+      - "docs/qualification/R76_REZON_TWO_TOY_CONSUMER.md"
+      - "docs/qualification/Q5_PRIVATE_HOLDOUT_EVAL_R92.md"
+      - "labyrinth/q5_holdout_eval_r92.py"
+      - "tests/test_q5_holdout_eval_r92.py"
+      - "labyrinth/objective_learning_loop_r92.py"
+      - "tests/test_objective_learning_loop_r92.py"
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/rezon_toy_pair_consumer_r76.py"
       - "labyrinth/minotaur_train_roster_manifest_v1.py"
@@ -301,6 +391,21 @@ on:
       - "tests/test_retention_sample_planning_r57.py"
       - "tests/test_retention_transfer_cohort_r68.py"
       - "tests/test_rezon_pointer_mapping_r57.py"
+      - "tests/test_rezon_receipt_binding_r69.py"
+      - "tests/test_schedule_pin_boundary_w2.py"
+      - "tests/test_graduation_state_external_custody_w4.py"
+      - "tests/test_q5_multiseed_campaign.py"
+      - "tests/test_q7_temporal_custody_source.py"
+      - "tests/test_q7_witnessed_cas_intake_r93.py"
+      - "tests/test_q8_witness_restore_r93.py"
+      - "tests/test_q6_stratified_toy_study_r93.py"
+      - "tests/test_adaptive_minotaur_r93.py"
+      - "tests/test_q8_host_authority_probe.py"
+      - "tests/test_graduation_gate.py"
+      - "tests/test_objective_challenge_provider_r92.py"
+      - "tests/test_minotaur_counterfactual_corridors_r92.py"
+      - "tests/test_neural_cycle_checkpoint_r92.py"
+      - "tests/test_private_wheel_cli_checkpoint_r70.py"
       - "tests/test_rezon_two_adapter_source_partition_r68.py"
       - "tests/test_rezon_toy_pair_consumer_r76.py"
       - "tests/test_q5_evaluation_preregistration_r68.py"
@@ -330,6 +435,7 @@ on:
       - "tests/test_checkpoint_schema_bridge.py"
       - "tests/test_hf_regenerative_harness.py"
       - "tests/test_hf_pilot.py"
+      - "tests/test_minotaur_hf_roster_bridge.py"
       - "tests/test_neural_resume_checkpoint.py"
       - "tests/test_hf_event_recovery.py"
       - "tests/test_recovery_composition.py"
@@ -485,6 +591,10 @@ jobs:
               ("tests.test_monotonic_anchor_protocol", 10),
               ("tests.test_retention_family_registry", 8),
               ("tests.test_retention_entrypoint_guard", 9),
+              ("tests.test_qualify_minilm_cpu", 7),
+              ("tests.test_hf_pilot", 39),
+              ("tests.test_minotaur_hf_roster_bridge", 14),
+              ("tests.test_hf_report_audit", 20),
               ("tests.test_qualify_maze_conditioned_minilm_cpu", 12),
               ("tests.test_qualify_neural_journey_e2e_cpu", 13),
               ("tests.test_qualify_taskmaster_counterfactual_cpu", 11),
@@ -499,9 +609,9 @@ jobs:
               ("tests.test_arithmetic_retention_admission", 8),
               ("tests.test_development_event_reservation_service", 15),
               ("tests.test_measured_sentiment_corridors", 5),
-              ("tests.test_minilm_optimizer_state_resume", 15),
+              ("tests.test_minilm_optimizer_state_resume", 18),
               ("tests.test_sealed_semantic_exam_protocol", 17),
-              ("tests.test_external_monotonic_authority_contract", 13),
+              ("tests.test_external_monotonic_authority_contract", 17),
               ("tests.test_measured_neural_batch_binding", 6),
               ("tests.test_minilm_runner_optimizer_optin", 5),
               ("tests.test_train_exposure_attestation", 10),
@@ -548,11 +658,11 @@ jobs:
               ("tests.test_minotaur_measured_toy_bridge_r72", 5),
               # The runner must bind its predecessor to observe()'s atomic
               # policy receipt, not a separate mutable model_hash read.
-              ("tests.test_journey_policy_runner", 8),
+              ("tests.test_journey_policy_runner", 9),
               # R80 source-only Minotaur->HF TRAIN roster and optimizer exposure
               # must be tested without skips. This does NOT witness a physical
               # pretrained optimizer, online learning, or graduation authority.
-              ("tests.test_minotaur_hf_roster_bridge", 6),
+              ("tests.test_minotaur_hf_roster_bridge", 14),
               # Explicit cycle-zero adaptive TRAIN controls, answerless
               # replay, cross-arm isolation and source-only audit status.
               ("tests.test_minotaur_hf_run_pilot_r84", 3),
@@ -564,7 +674,7 @@ jobs:
               # Explicit exposure-v1 reports are strict by default: remove the
               # marker/ledger, downgrade schema, or resume incorrectly -> FAIL.
               # Older v2/v3 reports require explicit allow_legacy opt-in.
-              ("tests.test_hf_report_audit", 17),
+              ("tests.test_hf_report_audit", 20),
               ("tests.test_hf_resume_bridge", 24),
               # Metadata classification may route exposure.v1 to the actual
               # strict preflight, never silently bypass ledger validation;
@@ -580,6 +690,25 @@ jobs:
               # R60 installed-wheel import contract: package-private MiniLM
               # implementation, no global scripts namespace, no import side effects.
               ("tests.test_private_wheel_minilm_contract_r60", 1),
+              ("tests.test_private_wheel_cli_checkpoint_r70", 1),
+              ("tests.test_rezon_receipt_binding_r69", 5),
+              ("tests.test_schedule_pin_boundary_w2", 6),
+              ("tests.test_graduation_state_external_custody_w4", 10),
+              ("tests.test_q5_multiseed_campaign", 9),
+              ("tests.test_q7_temporal_custody_source", 9),
+              ("tests.test_q7_witnessed_cas_intake_r93", 12),
+              ("tests.test_q8_witness_restore_r93", 23),
+              ("tests.test_q6_stratified_toy_study_r93", 21),
+              ("tests.test_adaptive_minotaur_r93", 9),
+              ("tests.test_graduation_gate", 28),
+              ("tests.test_objective_challenge_provider_r92", 7),
+              ("tests.test_minotaur_counterfactual_corridors_r92", 19),
+              ("tests.test_q8_host_authority_probe", 18),
+              ("tests.test_q5_holdout_eval_r92", 23),
+              ("tests.test_objective_learning_loop_r92", 5),
+              # Pinned CPU runner installs Torch + safetensors. Enforce all
+              # source and real-tensor checkpoint tests with zero skips here.
+              ("tests.test_neural_cycle_checkpoint_r92", 23),
               ("tests.test_signed_minotaur_pair_r25", 10),
               ("tests.test_qualify_v2_weight_updates_cpu_r25", 18),
               ("tests.test_v2_checkpoint_cpu_smoke_r22", 5),
@@ -604,6 +733,7 @@ jobs:
               "tests.test_v2_checkpoint_cpu_smoke_r22.ToyV2CpuPhysicalTests.test_real_toy_torch_adamw_two_cycle_resume_and_fresh_reload",
               "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_real_torch_tensor_updates_frozen_base_and_optimizer_moments",
               "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_noop_training_cannot_claim_real_learning",
+              "tests.test_minilm_optimizer_state_resume.PhysicalMazeAdamWResumeTests.test_fresh_python_process_restarts_v2_cycle_with_optimizer_rng_continuity",
           )
           discovered_ids = []
           for module_name, min_count in new_required:

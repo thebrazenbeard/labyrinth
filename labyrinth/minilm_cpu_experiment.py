@@ -230,6 +230,49 @@ def reload_logit_delta(expected: list[list[float]], observed: list[list[float]],
     return delta
 
 
+def frozen_base_digest(model: Any) -> str:
+    """Fingerprint frozen model parameters/buffers and enforce adapter-only updates.
+
+    This is a *runtime value* check. It cannot establish publisher provenance,
+    training-data rights, or that a cached model ID refers to genuine MiniLM.
+    """
+    digest = hashlib.sha256()
+    base_count = 0
+    trainable_lora_a_count = 0
+    trainable_lora_b_count = 0
+
+    def feed_tensor(kind: str, name: str, tensor: Any) -> None:
+        for field in (kind, name, str(tensor.dtype), str(tuple(tensor.shape))):
+            encoded = field.encode("utf-8")
+            digest.update(len(encoded).to_bytes(8, "big") + encoded)
+        raw = tensor.detach().cpu().contiguous().numpy().tobytes()
+        digest.update(len(raw).to_bytes(8, "big") + raw)
+
+    for name, parameter in sorted(model.named_parameters()):
+        is_lora_a = ".lora_A." in name
+        is_lora_b = ".lora_B." in name
+        if is_lora_a or is_lora_b:
+            if not parameter.requires_grad:
+                raise RuntimeError(f"expected trainable LoRA adapter parameter: {name}")
+            trainable_lora_a_count += int(is_lora_a)
+            trainable_lora_b_count += int(is_lora_b)
+            continue
+        if parameter.requires_grad:
+            raise RuntimeError(f"non-LoRA base parameter is trainable: {name}")
+        base_count += 1
+        feed_tensor("parameter", name, parameter)
+    for name, buffer in sorted(model.named_buffers()):
+        # LoRA trainable weights are parameters, not an exemption for arbitrary
+        # registered buffers. A changing adapter buffer is unsupported until
+        # explicitly accounted for in the frozen-state contract.
+        feed_tensor("buffer", name, buffer)
+    if not base_count:
+        raise RuntimeError("no frozen pretrained base parameters")
+    if not trainable_lora_a_count or not trainable_lora_b_count:
+        raise RuntimeError("no trainable LoRA A/B adapter parameter pair")
+    return digest.hexdigest()
+
+
 def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
             learning_rate: float) -> dict[str, Any]:
     import os
@@ -316,9 +359,12 @@ def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
         "device": "cpu", "torch_version": str(torch.__version__),
         "cpu_torch_threads": 2,
         "reload_method": "NEW_MODEL_OBJECT_SAME_PROCESS",
+        "optimizer_resume": "NOT_RESTORED_NEW_ADAMW_PER_CYCLE",
+        "rng_resume": "NOT_RESTORED_SEED_REINITIALIZED_PER_CYCLE",
         "zero_update_control": "SAME_FORWARD_BACKWARD_ADAMW_STEP_WITH_ZERO_LR",
         "private_final_exam": "NOT_RUN", "graduation_authorized": False,
         "physical_model_byte_custody": "SELF_REPORTED",
+        "frozen_base_identity": "RUNTIME_VALUE_SHA256_NOT_PUBLISHER_ATTESTED",
         "arm_contracts": {arm: arm_contract(arm, learning_rate)
                           for arm in PHYSICAL_ARMS},
         "baseline_compute_matched_to_training": False,
@@ -333,16 +379,23 @@ def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
         cycle_results = []
         initial_digest = None
         initial_adapter_digest = None
+        initial_frozen_base_digest = None
         preceding_after_digest = None
         preceding_adapter_digest = None
+        preceding_frozen_base_digest = None
         preceding_heldout_logits = None
         for cycle, rows in enumerate(TRAIN):
             model, head = create_model(previous)
+            frozen_base_before = frozen_base_digest(model)
             before = digest_state(model, head)
             adapter_before = digest_adapter(model)
             if initial_digest is None:
                 initial_digest = before
                 initial_adapter_digest = adapter_before
+                initial_frozen_base_digest = frozen_base_before
+            if (preceding_frozen_base_digest is not None
+                    and frozen_base_before != preceding_frozen_base_digest):
+                raise RuntimeError("pretrained base changed during checkpoint reload")
             if preceding_after_digest is not None and before != preceding_after_digest:
                 raise RuntimeError("adapter/head checkpoint failed full trainable-value reload")
             if (preceding_adapter_digest is not None
@@ -381,6 +434,9 @@ def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
                     changed_optimizer_steps += int(digest_state(model, head) != step_before)
             after = digest_state(model, head)
             adapter_after = digest_adapter(model)
+            frozen_base_after = frozen_base_digest(model)
+            if frozen_base_before != frozen_base_after:
+                raise RuntimeError("pretrained base changed during adapter/head training")
             if arm in ("baseline", "zero_update") and after != before:
                 raise RuntimeError("frozen control arm unexpectedly mutated")
             if arm in ("baseline", "zero_update") and adapter_after != adapter_before:
@@ -403,6 +459,8 @@ def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
                 "trainable_sha256_after": after,
                 "lora_sha256_before": adapter_before,
                 "lora_sha256_after": adapter_after,
+                "frozen_base_sha256_before": frozen_base_before,
+                "frozen_base_sha256_after": frozen_base_after,
                 "adapter_file_sha256": _sha_file(checkpoint / "adapter" / "adapter_model.safetensors"),
                 "head_file_sha256": _sha_file(checkpoint / "head.safetensors"),
                 "optimizer_updates": changed_optimizer_steps,
@@ -424,17 +482,22 @@ def execute(root: Path, *, model_id: str, seed: int, steps_per_cycle: int,
             })
             preceding_after_digest = after
             preceding_adapter_digest = adapter_after
+            preceding_frozen_base_digest = frozen_base_after
             preceding_heldout_logits = heldout_logits(model, head)
             previous = checkpoint
             print(f"arm={arm} cycle={cycle} saved", flush=True)
         report["arms"][arm] = {"initial_trainable_sha256": initial_digest,
                                "initial_lora_sha256": initial_adapter_digest,
+                               "initial_frozen_base_sha256": initial_frozen_base_digest,
                                "cycles": cycle_results}
     initial = {report["arms"][arm]["initial_trainable_sha256"] for arm in PHYSICAL_ARMS}
     if len(initial) != 1:
         raise RuntimeError("matched arms did not have identical initial trainable values")
     if len({report["arms"][arm]["initial_lora_sha256"] for arm in PHYSICAL_ARMS}) != 1:
         raise RuntimeError("matched arms did not start from the same LoRA adapter")
+    if len({report["arms"][arm]["initial_frozen_base_sha256"]
+            for arm in PHYSICAL_ARMS}) != 1:
+        raise RuntimeError("matched arms did not start from the same pretrained base")
     for cycle in range(len(TRAIN)):
         exposures = {tuple(report["arms"][arm]["cycles"][cycle]["training_prompt_sha256"])
                      for arm in TRAINING_ARMS}

@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import unittest
+from unittest.mock import patch
 
 from labyrinth.graduation_gate import (
     GateState, GraduationPolicy, SCHEMA, _one_sided_exact_paired_p,
@@ -174,6 +175,34 @@ class MinotaurGraduationTests(unittest.TestCase):
             decide_graduation(ForgedPolicy(**POLICY.__dict__), GateState(), None, None,
                               independent_evaluator_key=None)
 
+    def test_post_validation_mutation_cannot_forge_prior_trusted_graduation(self):
+        # A frozen dataclass remains writable through object.__setattr__.
+        # The state is initially fresh, unbound, and never graduated.  An
+        # interleaving at the policy-binding boundary must not let a caller
+        # forge a prior trusted graduation without an evaluator receipt.
+        from labyrinth import graduation_gate as gate
+
+        caller_state = GateState()
+        original_fingerprint = gate._policy_fingerprint
+
+        def adversarial_interleaving(policy):
+            binding = original_fingerprint(policy)
+            object.__setattr__(caller_state, "policy_fingerprint", binding)
+            object.__setattr__(caller_state, "graduated", True)
+            return binding
+
+        self.assertIsNone(caller_state.policy_fingerprint)
+        self.assertFalse(caller_state.graduated)
+        with patch.object(gate, "_policy_fingerprint", side_effect=adversarial_interleaving):
+            result = decide_graduation(POLICY, caller_state, None, None,
+                                       independent_evaluator_key=None)
+
+        # The mutation did happen; the decision must use its prior snapshot,
+        # never the later attacker-modified caller-owned object.
+        self.assertTrue(caller_state.graduated)
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertEqual(result.state, GateState())
+
     def test_tamper_binding_subject_session_run_and_attempt(self):
         for field, value in (
             ("objective_id", "other"), ("trainee_sha256", "d" * 64),
@@ -319,6 +348,24 @@ class MinotaurGraduationTests(unittest.TestCase):
                     {"min_gain_over_controls": 0.0}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 replace(POLICY, **bad)
+
+    def test_mutated_frozen_policy_cannot_graduate_all_wrong_model(self):
+        # Frozen dataclasses are not a security boundary: object.__setattr__
+        # can change a previously valid instance after __post_init__. The
+        # direct gate must revalidate before consuming any signed evidence.
+        tampered = replace(POLICY)
+        for field, value in (
+            ("objective_kind", "skill_mastery"),
+            ("min_accuracy", 0.0),
+            ("min_format_rate", 0.0),
+            ("significance_alpha", 100.0),
+        ):
+            object.__setattr__(tampered, field, value)
+        evidence = evaluated_receipt(candidate_correct=False)
+        result = decision(evidence, policy=tampered)
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertFalse(result.state.graduated)
+        self.assertEqual(result.state.next_attempt, 1)
 
     def test_graduation_policy_cannot_skip_private_holdout_or_transfer(self):
         # Before this fix a caller could rename a training-only slice into an

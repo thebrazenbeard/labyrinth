@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -16,6 +17,7 @@ from labyrinth.hf_pilot import (
     EVAL_SEED_XOR,
     EVAL_SPLIT_MAX_ATTEMPTS,
     _metadata_digest,
+    _training_visit_indices,
     _weights_digest,
     _device_headroom,
     _encode_pair,
@@ -28,6 +30,7 @@ from labyrinth.hf_pilot import (
     validate_config,
 )
 from labyrinth.maze import Challenge, generate_maze
+from tests.test_optimizer_lifecycle_r8 import AdamW, Model, Torch, inputs
 
 
 class DummyTokenizer:
@@ -51,6 +54,288 @@ class HfPilotContractTests(unittest.TestCase):
 
     def spec(self, **kwargs):
         return PilotConfig(model_path=str(self.model), output_dir=str(self.output), **kwargs)
+
+    def _source_visit_fixture(self):
+        from labyrinth import hf_pilot
+
+        cases, config = inputs()
+        # This independent oracle deliberately does not use the helper under test.
+        planned = tuple(
+            (cases[index].id, hashlib.sha256(cases[index].prompt.encode("utf-8")).hexdigest())
+            for index in (1, 0)
+        )
+        return hf_pilot, cases, config, planned
+
+    def test_source_visit_helper_and_fresh_control_arms_record_exact_optimizer_visits(self):
+        hf_pilot, cases, config, planned = self._source_visit_fixture()
+        self.assertEqual(hf_pilot._training_visit_exposures(cases, seed=17, steps=2), planned)
+        for learning_rate in (None, 0.0):
+            with self.subTest(learning_rate=learning_rate):
+                AdamW.created = 0
+                model, torch = Model(), Torch()
+                with patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])):
+                    result = hf_pilot._train_steps(
+                        model, object(), torch, cases, [case.answer for case in cases], config,
+                        learning_rate=learning_rate, expected_visit_exposures=planned,
+                    )
+                self.assertEqual(result["visited_exposures"], list(planned))
+                self.assertEqual(result["visited_case_ids"], [case_id for case_id, _ in planned])
+                self.assertEqual(result["example_visits"], 2)
+                self.assertEqual(AdamW.created, 1)
+
+    def test_pinned_fresh_training_rejects_changed_case_id_prompt_and_order(self):
+        hf_pilot, cases, config, planned = self._source_visit_fixture()
+        invalid_slices = (
+            (("substituted-id", planned[0][1]), planned[1]),
+            ((planned[0][0], "0" * 64), planned[1]),
+            tuple(reversed(planned)),
+        )
+        for invalid in invalid_slices:
+            with self.subTest(invalid=invalid):
+                AdamW.created = 0
+                with patch("labyrinth.hf_pilot._encode_pair", side_effect=AssertionError("encoding began")):
+                    with self.assertRaisesRegex(ValueError, "exposure schedule"):
+                        hf_pilot._train_steps(
+                            Model(), object(), Torch(), cases, [case.answer for case in cases], config,
+                            expected_visit_exposures=invalid,
+                        )
+                self.assertEqual(AdamW.created, 0)
+
+    def test_pinned_fresh_catalog_rejects_heldout_and_duplicate_case_ids(self):
+        hf_pilot, cases, config, _ = self._source_visit_fixture()
+        bad_catalogs = (
+            [Challenge(cases[0].id, cases[0].kind, cases[0].tier, "eval", cases[0].prompt, cases[0].answer), cases[1]],
+            [cases[0], Challenge(cases[0].id, cases[1].kind, cases[1].tier,
+                                 "train", cases[1].prompt, cases[1].answer)],
+        )
+        for bad in bad_catalogs:
+            with self.subTest(cases=bad):
+                expected = hf_pilot._training_visit_exposures(bad, seed=17, steps=2)
+                AdamW.created = 0
+                with patch("labyrinth.hf_pilot._encode_pair", side_effect=AssertionError("encoding began")):
+                    with self.assertRaisesRegex(ValueError, "training catalog"):
+                        hf_pilot._train_steps(Model(), object(), Torch(), bad,
+                                              [c.answer for c in bad], config,
+                                              expected_visit_exposures=expected)
+                self.assertEqual(AdamW.created, 0)
+
+    def test_tokenizer_cannot_rewrite_pinned_source_or_supervision_lists(self):
+        hf_pilot, cases, config, planned = self._source_visit_fixture()
+        labels = [case.answer for case in cases]
+        seen = []
+
+        def encode(_tokenizer, prompt, answer, _max_tokens, **_kwargs):
+            seen.append((prompt, answer))
+            if len(seen) == 1:
+                cases[1] = cases[0]
+                labels[1] = "tampered supervision"
+            return [1], [1]
+
+        with patch("labyrinth.hf_pilot._encode_pair", side_effect=encode):
+            result = hf_pilot._train_steps(Model(), object(), Torch(), cases, labels, config,
+                                           expected_visit_exposures=planned)
+        self.assertEqual(seen, [("Question 0", "5"), ("Question 1", "6")])
+        self.assertEqual(result["visited_exposures"], list(planned))
+
+    def test_partial_optimizer_failure_never_reports_full_success(self):
+        hf_pilot, cases, _, _ = self._source_visit_fixture()
+        config = PilotConfig("unused", "unused", seed=17, steps=3, device="cpu")
+        planned = hf_pilot._training_visit_exposures(cases, seed=17, steps=3)
+
+        class FailOnSecondStep(AdamW):
+            latest = None
+
+            def __init__(self, params, *, lr):
+                super().__init__(params, lr=lr)
+                FailOnSecondStep.latest = self
+
+            def step(self):
+                if self.steps == 1:
+                    raise RuntimeError("injected optimizer failure")
+                return super().step()
+
+        torch = Torch()
+        torch.optim.AdamW = FailOnSecondStep
+        with patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])):
+            with self.assertRaisesRegex(RuntimeError, "injected optimizer failure") as raised:
+                hf_pilot._train_steps(Model(), object(), torch, cases,
+                                       [c.answer for c in cases], config,
+                                       expected_visit_exposures=planned)
+        self.assertEqual(FailOnSecondStep.latest.steps, 1)
+        self.assertEqual(raised.exception.completed_visit_exposures, planned[:1])
+
+    def test_step_boundary_rejects_case_mutation_after_first_optimizer_update(self):
+        hf_pilot, cases, config, planned = self._source_visit_fixture()
+
+        class MutatingAdamW(AdamW):
+            latest = None
+
+            def __init__(self, params, *, lr):
+                super().__init__(params, lr=lr)
+                MutatingAdamW.latest = self
+
+            def step(self):
+                super().step()
+                if self.steps == 1:
+                    # Deliberately bypass the frozen dataclass, simulating a
+                    # hostile callback that tampers with a source object.
+                    object.__setattr__(cases[0], "prompt", "changed after first update")
+
+        torch = Torch()
+        torch.optim.AdamW = MutatingAdamW
+        with patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])):
+            with self.assertRaisesRegex(RuntimeError, "TRAIN case content changed") as raised:
+                hf_pilot._train_steps(Model(), object(), torch, cases,
+                                       [case.answer for case in cases], config,
+                                       expected_visit_exposures=planned)
+        self.assertEqual(MutatingAdamW.latest.steps, 1)
+        self.assertEqual(raised.exception.completed_visit_exposures, planned[:1])
+
+    def test_final_optimizer_update_cannot_hide_changed_case_content(self):
+        hf_pilot, _, _, _ = self._source_visit_fixture()
+        config = PilotConfig("unused", "unused", seed=17, steps=1, device="cpu")
+
+        for field, replacement in (("id", "tampered-after-final-step"),
+                                   ("prompt", "tampered after final step"),
+                                   ("answer", "tampered answer after final step")):
+            with self.subTest(field=field):
+                current, _ = inputs()
+                planned = hf_pilot._training_visit_exposures(current, seed=17, steps=1)
+
+                class FinalMutatingAdamW(AdamW):
+                    latest = None
+
+                    def __init__(self, params, *, lr):
+                        super().__init__(params, lr=lr)
+                        FinalMutatingAdamW.latest = self
+
+                    def step(self):
+                        super().step()
+                        object.__setattr__(current[1], field, replacement)
+
+                torch = Torch()
+                torch.optim.AdamW = FinalMutatingAdamW
+                with patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])):
+                    with self.assertRaisesRegex(RuntimeError, "TRAIN case content changed") as raised:
+                        hf_pilot._train_steps(Model(), object(), torch, current,
+                                               [case.answer for case in current], config,
+                                               expected_visit_exposures=planned)
+                self.assertEqual(FinalMutatingAdamW.latest.steps, 1)
+                self.assertEqual(raised.exception.completed_visit_exposures, planned)
+
+    def test_tokenizer_callback_cannot_change_non_exposure_case_fields(self):
+        hf_pilot, _, config, _ = self._source_visit_fixture()
+        for field, replacement in (("split", "eval"), ("tier", 2),
+                                   ("answer", "wrong answer"),
+                                   ("metadata", (("altered", "yes"),))):
+            with self.subTest(field=field):
+                current, _ = inputs()
+                planned = hf_pilot._training_visit_exposures(current, seed=17, steps=2)
+
+                def encode(_tokenizer, _prompt, _answer, _max_tokens, **_kwargs):
+                    object.__setattr__(current[0], field, replacement)
+                    return [1], [1]
+
+                AdamW.created = 0
+                with patch("labyrinth.hf_pilot._encode_pair", side_effect=encode):
+                    with self.assertRaisesRegex(RuntimeError, "TRAIN case content changed"):
+                        hf_pilot._train_steps(Model(), object(), Torch(), current,
+                                               [case.answer for case in current], config,
+                                               expected_visit_exposures=planned)
+                self.assertEqual(AdamW.created, 0)
+
+    def test_mutated_unvisited_case_fails_at_final_boundary(self):
+        hf_pilot, cases, _, _ = self._source_visit_fixture()
+        config = PilotConfig("unused", "unused", seed=17, steps=1, device="cpu")
+        planned = hf_pilot._training_visit_exposures(cases, seed=17, steps=1)
+
+        class MutatingAdamW(AdamW):
+            def step(self):
+                super().step()
+                object.__setattr__(cases[0], "split", "eval")
+
+        torch = Torch()
+        torch.optim.AdamW = MutatingAdamW
+        with patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])):
+            with self.assertRaisesRegex(RuntimeError, "TRAIN case content changed") as raised:
+                hf_pilot._train_steps(Model(), object(), torch, cases,
+                                       [case.answer for case in cases], config,
+                                       expected_visit_exposures=planned)
+        self.assertEqual(raised.exception.completed_visit_exposures, planned)
+
+    def test_nonfinite_after_optimizer_update_retains_completed_prefix(self):
+        hf_pilot, cases, _, _ = self._source_visit_fixture()
+        config = PilotConfig("unused", "unused", seed=17, steps=1, device="cpu")
+        planned = hf_pilot._training_visit_exposures(cases, seed=17, steps=1)
+        model = Model()
+
+        class NonfiniteParamTorch(Torch):
+            def isfinite(self, value):
+                if value is model.param:
+                    return type("FiniteCheck", (), {"all": lambda self: False})()
+                return super().isfinite(value)
+
+        with patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])):
+            with self.assertRaisesRegex(RuntimeError, "non-finite trained LoRA parameter") as raised:
+                hf_pilot._train_steps(model, object(), NonfiniteParamTorch(), cases,
+                                       [case.answer for case in cases], config,
+                                       expected_visit_exposures=planned)
+        self.assertEqual(raised.exception.completed_visit_exposures, planned)
+
+    def test_run_pilot_rejects_sham_answer_mutation_before_candidate_arm(self):
+        config = self.spec()
+        train, heldout = training_cases(config)
+        scheduled = tuple(
+            (train[index].id, hashlib.sha256(train[index].prompt.encode("utf-8")).hexdigest())
+            for index in _training_visit_indices(train, seed=config.seed, steps=config.steps)
+        )
+
+        class FakeParameter:
+            requires_grad = True
+
+            def detach(self):
+                return self
+
+            def clone(self):
+                return self
+
+        class FakeModel:
+            def named_parameters(self):
+                return [("layer.lora_A", FakeParameter())]
+
+        fake_model = FakeModel()
+        torch = SimpleNamespace(
+            get_num_threads=lambda: 4, set_num_threads=lambda _n: None,
+            manual_seed=lambda _seed: None,
+            use_deterministic_algorithms=lambda _enabled: None,
+        )
+
+        def sham_tampers(_model, _tokenizer, _torch, cases, _labels, _config,
+                         *, learning_rate=None, expected_visit_exposures=None):
+            self.assertEqual(learning_rate, 0.0)
+            self.assertEqual(expected_visit_exposures, scheduled)
+            object.__setattr__(cases[0], "answer", "tampered after sham")
+            return {"visited_exposures": list(scheduled)}
+
+        with (
+            patch("labyrinth.hf_pilot.training_cases", return_value=(train, heldout)),
+            patch("labyrinth.hf_pilot._deps", return_value=(
+                torch, object(), object(),
+                (lambda **_kwargs: object(), object(), lambda base, _cfg: base), "cpu",
+            )),
+            patch("labyrinth.hf_pilot._load_base", return_value=(fake_model, object())),
+            patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])),
+            patch("labyrinth.hf_pilot._score_model", return_value={"total": 0}),
+            patch("labyrinth.hf_pilot._device_headroom", return_value=None),
+            patch("labyrinth.hf_pilot._parameter_digest", return_value="a" * 64),
+            patch("labyrinth.hf_pilot._frozen_parameter_digest", return_value="b" * 64),
+            patch("labyrinth.hf_pilot._buffer_digest", return_value="c" * 64),
+            patch("labyrinth.hf_pilot._train_steps", side_effect=sham_tampers) as trainer,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "TRAIN case content changed"):
+                run_pilot(config)
+        self.assertEqual(trainer.call_count, 1)
+        self.assertFalse(self.output.exists())
 
     def test_preflight_does_not_create_output_or_download(self):
         model, output, weights = validate_config(self.spec())

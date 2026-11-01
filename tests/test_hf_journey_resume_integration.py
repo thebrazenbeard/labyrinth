@@ -22,7 +22,7 @@ from labyrinth.hf_pilot import (
     _arithmetic_semantic_commitments, _arithmetic_history_witnesses,
     _arithmetic_case_binding_records, _arithmetic_case_binding_root,
     _resume_training_cases, _scoped_public_heldout, _scoped_training_cases,
-    RESEARCH_ONLY_RESUME, reload_evaluate, run_pilot, training_cases,
+    _training_visit_indices, RESEARCH_ONLY_RESUME, reload_evaluate, run_pilot, training_cases,
 )
 from labyrinth.hf_resume_bridge import ResumeContext
 from labyrinth.maze import generate_maze
@@ -297,12 +297,17 @@ class ResumeIntegrationTests(unittest.TestCase):
         evaluated_ids = []
         def fake_train(current, _tokenizer, _torch, train, labels, config, *,
                        learning_rate=None, expected_visit_exposures=None):
+            scheduled = tuple(
+                (train[index].id, hashlib.sha256(train[index].prompt.encode("utf-8")).hexdigest())
+                for index in _training_visit_indices(train, seed=config.seed, steps=config.steps)
+            )
+            self.assertEqual(expected_visit_exposures, scheduled)
             visits.append(("sham" if learning_rate == 0 else "correct" if labels == [c.answer for c in train] else "corrupt", current.value))
             if learning_rate != 0:
                 current.value = trained if labels == [c.answer for c in train] else corrupt
             return {"steps": config.steps,
-                    "visited_case_ids": [case_id for case_id, _ in expected_visit_exposures],
-                    "visited_exposures": list(expected_visit_exposures)}
+                    "visited_case_ids": [case_id for case_id, _ in scheduled],
+                    "visited_exposures": list(scheduled)}
 
         def fake_score(_model, _tokenizer, _torch, cases, **_kwargs):
             evaluated_ids.append(tuple(case.id for case in cases))

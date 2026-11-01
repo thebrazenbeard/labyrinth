@@ -316,11 +316,21 @@ def audit_hf_report(report: Any, *, allow_legacy: bool = False) -> dict[str, Any
             fail("v3-exposure.v1 requires explicit optimizer in-loop exposure recording marker")
         elif exposure_marker is not None and exposure_marker != EXPOSURE_MARKER:
             fail("unsupported optimizer exposure recording marker")
+        # Existing v2/v3 reports predate this source-only visit receipt. Once
+        # any arm reports it, require *all* arms to carry exactly the same
+        # independently regenerated case/prompt schedule. This checks internal
+        # consistency, not whether an optimizer actually ran on those inputs.
+        has_exposure_receipts = any(
+            isinstance(training[arm], dict) and "visited_exposures" in training[arm]
+            for arm in arms
+        )
         for arm in arms:
             record = training[arm]
             if not isinstance(record, dict) or record.get("visited_case_ids") != expected_visits:
                 fail(f"{arm}: training visit order mismatch")
                 continue
+            # The strict current schema requires receipts unconditionally;
+            # legacy reports require complete arm coverage if any are present.
             if (record.get("steps") != steps or type(record.get("steps")) is not int
                     or record.get("example_visits") != steps or type(record.get("example_visits")) is not int
                     or not _integer(record.get("input_tokens_seen"), 1, 100000)
@@ -333,7 +343,8 @@ def audit_hf_report(report: Any, *, allow_legacy: bool = False) -> dict[str, Any
             # must match the exact public source roster, including prompts;
             # this is internal consistency, never physical attestation.
             reported_exposures = record.get("visited_exposures")
-            if current_schema or exposure_marker is not None or reported_exposures is not None:
+            if (current_schema or exposure_marker is not None
+                    or has_exposure_receipts):
                 if (type(reported_exposures) is not list
                         or len(reported_exposures) != len(expected_exposures)
                         or any(type(pair) not in (list, tuple)

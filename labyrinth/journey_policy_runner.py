@@ -26,6 +26,7 @@ from .adaptive_corridors import (
 )
 from .journey_challenges import TraineeRoomView
 from .journey import JourneyState, TrainingCompletionReceipt
+from .maze import Challenge
 from .minotaur_model import RoomContext, RoomPlan, plan_training_room
 from .maze import Challenge
 from .minotaur_policy_learning import (
