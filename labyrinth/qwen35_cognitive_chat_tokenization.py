@@ -64,7 +64,12 @@ def _chat_ids(tokenizer: Any, messages: list[dict[str, str]], *, generate: bool)
 def _require_public_source_binding(tokenizer: Any, binding: Qwen35ChatSourceBinding) -> int:
     if type(binding) is not Qwen35ChatSourceBinding:
         raise ValueError("explicit Qwen3.5 public source binding required")
-    if (binding.model_id != OFFICIAL_QWEN35_MODEL_ID
+    # Reject str subclasses before comparing source pins: a caller can override
+    # __eq__/__ne__ to make a forged revision or tokenizer digest compare equal.
+    if (type(binding.model_id) is not str
+            or type(binding.revision) is not str
+            or type(binding.tokenizer_json_sha256) is not str
+            or binding.model_id != OFFICIAL_QWEN35_MODEL_ID
             or binding.revision != OFFICIAL_QWEN35_REVISION
             or binding.tokenizer_json_sha256 != OFFICIAL_QWEN35_TOKENIZER_JSON_SHA256
             or binding.enable_thinking is not False):
