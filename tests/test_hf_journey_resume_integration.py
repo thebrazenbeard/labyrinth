@@ -195,12 +195,23 @@ class ResumeIntegrationTests(unittest.TestCase):
         report_path = run_dir / "pilot_report.json"
         report_path.write_text(json.dumps(report), encoding="utf-8")
         with mock.patch("labyrinth.hf_pilot._deps", side_effect=AssertionError("deps reached")):
-            with self.assertRaisesRegex(AssertionError, "deps reached"):
+            # Historical v3 reports have no in-loop exposure ledger. The
+            # combined default must reject them before any neural model load.
+            with self.assertRaisesRegex(ValueError, "legacy HF reload requires explicit"):
                 reload_evaluate(run_dir, run_dir / "reload.json")
-            report["heldout_case_ids"] = [case.id for case in unscoped]
-            report_path.write_text(json.dumps(report), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "heldout generation differs"):
-                reload_evaluate(run_dir, run_dir / "reload.json")
+            # This test's deliberately minimal legacy fixture cannot pass a
+            # full independent audit; isolate the subsequent diagnostic
+            # reconstruction only after simulating a separately successful
+            # historical compatibility audit. The fail-closed audit itself
+            # is exercised by the dedicated report/reload tests.
+            with mock.patch("labyrinth.hf_report_audit.audit_hf_report",
+                            return_value={"status": "PASS", "failures": [], "unchecked": []}):
+                with self.assertRaisesRegex(AssertionError, "deps reached"):
+                    reload_evaluate(run_dir, run_dir / "reload.json", allow_legacy_reload=True)
+                report["heldout_case_ids"] = [case.id for case in unscoped]
+                report_path.write_text(json.dumps(report), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "heldout generation differs"):
+                    reload_evaluate(run_dir, run_dir / "reload.json", allow_legacy_reload=True)
             report["schema"] = SCHEMA
             report_path.write_text(json.dumps(report), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "current exposure ledger"):

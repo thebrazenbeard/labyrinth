@@ -22,6 +22,7 @@ from .hf_pilot import (
 )
 from .runner import _source_state
 from .training_scope import TrainingScopeSpec
+from .hf_adaptive_source_v1 import ADAPTIVE_SCHEMA, reconstruct_adaptive_source
 
 AUDIT_SCHEMA = "labyrinth.hf-pilot-audit.v1"
 ARMS = ("baseline", "sham", "candidate", "corrupted")
@@ -68,7 +69,9 @@ def audit_hf_report(report: Any, *, allow_legacy: bool = False) -> dict[str, Any
         if message not in unknown and len(unknown) < 40:
             unknown.append(message)
 
-    current_schema = type(report) is dict and report.get("schema") == SCHEMA
+    schema = report.get("schema") if type(report) is dict else None
+    current_schema = schema == SCHEMA
+    adaptive = schema == ADAPTIVE_SCHEMA
 
     def result() -> dict[str, Any]:
         return {
@@ -76,8 +79,10 @@ def audit_hf_report(report: Any, *, allow_legacy: bool = False) -> dict[str, Any
             "status": "FAIL" if failures else "INCOMPLETE" if unknown else "PASS",
             "meaning": "internal_consistency_only", "authenticated_model_execution": False,
             "evidence_contract": (
-                "v3-exposure-v1-complete-in-loop-source-ledger-required" if current_schema
-                else "legacy-internal-consistency-only"
+                "adaptive-feedback-source-v1-complete-in-loop-source-ledger-required"
+                if adaptive else
+                "v3-exposure-v1-complete-in-loop-source-ledger-required"
+                if current_schema else "legacy-internal-consistency-only"
             ),
             "checked_trials": checked_trials, "unverifiable_trials": unverifiable_trials,
             "failures": failures, "unchecked": unknown,
@@ -86,16 +91,26 @@ def audit_hf_report(report: Any, *, allow_legacy: bool = False) -> dict[str, Any
                 "A self-consistent fabricated pilot report can pass this audit without neural inference.",
                 "PASS is neither checkpoint verification nor evidence of learned reasoning.",
                 "Legacy v2/v3 reports are accepted only under explicit compatibility mode and lack required in-loop exposure proof."
-                if not current_schema else "v3-exposure.v1 in-loop proof is trainer-reported source data, not independent attestation.",
+                if not (current_schema or adaptive) else
+                "Versioned in-loop proof and adaptive feedback are trainer-reported source data, not independent attestation.",
             ],
         }
 
-    allowed_schemas = ((SCHEMA, PRE_EXPOSURE_SCHEMA, LEGACY_SCHEMA)
-                       if allow_legacy else (SCHEMA,))
-    if type(report) is not dict or report.get("schema") not in allowed_schemas:
+    allowed_schemas = ((SCHEMA, ADAPTIVE_SCHEMA, PRE_EXPOSURE_SCHEMA, LEGACY_SCHEMA)
+                       if allow_legacy else (SCHEMA, ADAPTIVE_SCHEMA))
+    if type(report) is not dict or schema not in allowed_schemas:
         fail("invalid or unapproved legacy HF pilot report schema")
         return result()
-    matched = report["schema"] in (SCHEMA, PRE_EXPOSURE_SCHEMA)
+    matched = schema in (SCHEMA, PRE_EXPOSURE_SCHEMA, ADAPTIVE_SCHEMA)
+    if not adaptive and "adaptive_train_source_v1" in report:
+        fail("adaptive TRAIN source manifest forbidden outside adaptive HF schema")
+        return result()
+    if adaptive and "minotaur_staged_train" in report:
+        fail("staged Minotaur source forbidden under adaptive HF schema")
+        return result()
+    if schema != SCHEMA and "minotaur_staged_train" in report:
+        fail("staged Minotaur source forbidden outside strict HF schema")
+        return result()
     source = report.get("source")
     if not isinstance(source, dict) or not _digest(source.get("source_tree_sha256")):
         fail("missing or malformed HF pilot source fingerprint")
@@ -167,7 +182,14 @@ def audit_hf_report(report: Any, *, allow_legacy: bool = False) -> dict[str, Any
     journey = report.get("resumed_journey")
     staged = report.get("minotaur_staged_train")
     try:
-        if staged is not None:
+        if adaptive:
+            if journey is not None:
+                raise ValueError("adaptive source v1 is cycle-zero only, not an HF resume")
+            train, heldout, _ = reconstruct_adaptive_source(
+                PilotConfig(**{**config, "tiers": tuple(tiers)}),
+                report.get("adaptive_train_source_v1"),
+            )
+        elif staged is not None:
             if journey is not None:
                 raise ValueError("source-staged TRAIN cannot claim a resumed journey")
             from .minotaur_hf_roster_bridge import replay_staged_roster
@@ -312,8 +334,8 @@ def audit_hf_report(report: Any, *, allow_legacy: bool = False) -> dict[str, Any
             for i in expected_indices
         ]
         exposure_marker = report.get("optimizer_exposure_recording")
-        if current_schema and exposure_marker != EXPOSURE_MARKER:
-            fail("v3-exposure.v1 requires explicit optimizer in-loop exposure recording marker")
+        if (current_schema or adaptive) and exposure_marker != EXPOSURE_MARKER:
+            fail("versioned HF source requires explicit optimizer in-loop exposure recording marker")
         elif exposure_marker is not None and exposure_marker != EXPOSURE_MARKER:
             fail("unsupported optimizer exposure recording marker")
         # Existing v2/v3 reports predate this source-only visit receipt. Once
@@ -324,13 +346,13 @@ def audit_hf_report(report: Any, *, allow_legacy: bool = False) -> dict[str, Any
             isinstance(training[arm], dict) and "visited_exposures" in training[arm]
             for arm in arms
         )
+        if adaptive and not has_exposure_receipts:
+            fail("adaptive source requires complete optimizer exposure receipts")
         for arm in arms:
             record = training[arm]
             if not isinstance(record, dict) or record.get("visited_case_ids") != expected_visits:
                 fail(f"{arm}: training visit order mismatch")
                 continue
-            # The strict current schema requires receipts unconditionally;
-            # legacy reports require complete arm coverage if any are present.
             if (record.get("steps") != steps or type(record.get("steps")) is not int
                     or record.get("example_visits") != steps or type(record.get("example_visits")) is not int
                     or not _integer(record.get("input_tokens_seen"), 1, 100000)
@@ -343,7 +365,7 @@ def audit_hf_report(report: Any, *, allow_legacy: bool = False) -> dict[str, Any
             # must match the exact public source roster, including prompts;
             # this is internal consistency, never physical attestation.
             reported_exposures = record.get("visited_exposures")
-            if (current_schema or exposure_marker is not None
+            if (current_schema or adaptive or exposure_marker is not None
                     or has_exposure_receipts):
                 if (type(reported_exposures) is not list
                         or len(reported_exposures) != len(expected_exposures)

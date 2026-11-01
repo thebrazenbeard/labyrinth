@@ -10,18 +10,25 @@ import unittest
 
 from labyrinth.evaluation import score_response
 from labyrinth.hf_pilot import (
-    EVAL_SEED_XOR, LEGACY_SCHEMA, PRE_EXPOSURE_SCHEMA, PilotConfig,
+    EVAL_SEED_XOR, LEGACY_SCHEMA, PRE_EXPOSURE_SCHEMA, SCHEMA, PilotConfig,
     _prompt_commitment, _training_visit_exposures, _training_visit_indices,
+    derange_answers,
     training_cases,
 )
+from labyrinth.hf_adaptive_source_v1 import (
+    ADAPTIVE_SCHEMA, build_adaptive_manifest, reconstruct_adaptive_source,
+)
+from labyrinth.minotaur_hf_roster_bridge import collect_minotaur_hf_roster
 from labyrinth.maze import generate_maze
 from labyrinth.runner import _source_state
 from labyrinth.hf_report_audit import audit_hf_report as strict_audit_hf_report
+from tests.test_minotaur_hf_roster_bridge import _config, _runner, _scope
+from tests.test_journey_policy_runner import toy_arithmetic_learner
 
 
-def audit_hf_report(report):
+def audit_hf_report(report, *, allow_legacy=True):
     """The original fixture exercises historical v2 internal-consistency only."""
-    return strict_audit_hf_report(report, allow_legacy=True)
+    return strict_audit_hf_report(report, allow_legacy=allow_legacy)
 
 
 def pilot_fixture(*, seed=13, count=2):
@@ -101,6 +108,70 @@ def matched_v3_fixture():
     return report
 
 
+def adaptive_pilot_fixture():
+    """Source-only fixture: no inference or optimizer execution is claimed."""
+    config = _config()
+    roster = collect_minotaur_hf_roster(_runner(), config, toy_arithmetic_learner)
+    manifest = build_adaptive_manifest(config, _scope(), roster)
+    train, heldout, planned = reconstruct_adaptive_source(config, manifest)
+    report = pilot_fixture(seed=config.seed, count=config.train_count)
+    report["schema"] = ADAPTIVE_SCHEMA
+    report["config"].update({
+        "answer_only": config.answer_only,
+        "eval_count": config.eval_count,
+        "steps": config.steps,
+    })
+    report["initial_persistent_buffers_sha256"] = "a" * 64
+    report["adaptive_train_source_v1"] = manifest
+    report["training_case_ids"] = [case.id for case in train]
+    report["heldout_case_ids"] = [case.id for case in heldout]
+    report["heldout_public_prompt_sha256"] = _prompt_commitment(heldout)
+    report["control_data"].update({
+        "corrupted_label_collisions": sum(
+            case.answer == label for case, label in zip(train, derange_answers(train))
+        ),
+        "sham_optimizer_steps": config.steps,
+        "sham_train_case_visits": config.steps,
+        "sham_evaluation_before_updates": False,
+        "sham_is_compute_matched": True,
+        "answer_scaffold_supplied": False,
+    })
+    visits = {
+        "steps": config.steps, "example_visits": config.steps,
+        "visited_case_ids": [case_id for case_id, _ in planned],
+        "visited_exposures": [list(pair) for pair in planned],
+        "input_tokens_seen": 200,
+        "losses": [2.5] * config.steps,
+    }
+    report["training"] = {arm: dict(visits) for arm in ("sham", "candidate", "corrupted")}
+    report["optimizer_exposure_recording"] = (
+        "in-loop-completed-optimizer-step.v1:source-only")
+    trials = []
+    for case in heldout:
+        response = "ANSWER: 0"
+        score = score_response(case, response)
+        trials.append({
+            "id": case.id,
+            "correct": score.correct,
+            "response_sha256": hashlib.sha256(response.encode()).hexdigest(),
+            "response_preview": response,
+            "score_reason": score.reason,
+        })
+    summary = {
+        "correct": sum(t["correct"] for t in trials),
+        "total": len(trials),
+        "accuracy": sum(t["correct"] for t in trials) / len(trials),
+        "format_valid": len(trials),
+        "format_rate": 1.0,
+        "trials": trials,
+    }
+    report["evaluations"] = {
+        arm: {**summary, "trials": [dict(t) for t in trials]}
+        for arm in ("baseline", "sham", "candidate", "corrupted")
+    }
+    return report
+
+
 class HfReportAuditTests(unittest.TestCase):
     def test_legacy_schema_cannot_downgrade_a_default_required_exposure_audit(self):
         report = matched_v3_fixture()
@@ -138,6 +209,36 @@ class HfReportAuditTests(unittest.TestCase):
         compatible = strict_audit_hf_report(tampered, allow_legacy=True)
         self.assertEqual(compatible["status"], "PASS", compatible["failures"])
         self.assertEqual(compatible["evidence_contract"], "legacy-internal-consistency-only")
+
+    def test_adaptive_schema_requires_replayed_public_manifest_and_all_source_visits(self):
+        report = adaptive_pilot_fixture()
+        checked = audit_hf_report(report)
+        self.assertEqual(checked["status"], "PASS", checked)
+        self.assertFalse(checked["authenticated_model_execution"])
+        invalid = []
+        stripped = json.loads(json.dumps(report))
+        stripped.pop("adaptive_train_source_v1")
+        invalid.append(stripped)
+        stripped_visits = json.loads(json.dumps(report))
+        for arm in ("sham", "candidate", "corrupted"):
+            stripped_visits["training"][arm].pop("visited_exposures")
+        invalid.append(stripped_visits)
+        downgraded = json.loads(json.dumps(report))
+        downgraded["schema"] = SCHEMA
+        downgraded.pop("adaptive_train_source_v1")
+        invalid.append(downgraded)
+        mislabeled = json.loads(json.dumps(report))
+        mislabeled["schema"] = SCHEMA
+        invalid.append(mislabeled)
+        falsely_resumed = json.loads(json.dumps(report))
+        falsely_resumed["resumed_journey"] = {"cycle_index": 1}
+        invalid.append(falsely_resumed)
+        swapped = json.loads(json.dumps(report))
+        swapped["adaptive_train_source_v1"]["train_rooms"][0]["tactic"] = "transfer"
+        invalid.append(swapped)
+        for attack in invalid:
+            with self.subTest(schema=attack["schema"]):
+                self.assertEqual(strict_audit_hf_report(attack)["status"], "FAIL")
 
     def test_report_audit_rejects_forged_optional_visit_exposures(self):
         report = pilot_fixture()
