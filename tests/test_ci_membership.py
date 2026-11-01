@@ -819,6 +819,30 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn("no independent implementation or attestation", doc.lower())
         self.assertIn("**HOLD**", doc)
 
+    def test_q6_remote_signed_witness_client_is_pinned_and_source_only(self):
+        # A real TLS handshake with a same-process fake server is not
+        # independent high-water ownership. Keep its mandatory source tests
+        # and every modified path in BOTH neural triggers.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        trigger_paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for path in (
+            "labyrinth/q6_signed_remote_witness_client_r121.py",
+            "tests/test_q6_signed_remote_witness_client_r121.py",
+            "docs/qualification/Q6_SIGNED_REMOTE_WITNESS_CLIENT_SOURCE_R121.md",
+        ):
+            self.assertTrue((root / path).is_file())
+            for trigger in trigger_paths:
+                self.assertIn(f'      - "{path}"', trigger)
+        self.assertIn('("tests.test_q6_signed_remote_witness_client_r121", 13)', workflow)
+        doc = (root / "docs/qualification/Q6_SIGNED_REMOTE_WITNESS_CLIENT_SOURCE_R121.md").read_text()
+        self.assertIn("SOURCE ONLY", doc)
+        self.assertIn("No authenticated witness endpoint", doc)
+        self.assertIn("HARD HOLD", doc)
+
     def test_minotaur_feedback_novelty_regression_is_mandatory_and_no_skip(self):
         # An independently reproduced weak-learner case-collision defect
         # must remain a pinned no-skip source gate on PRs and main.  This is
