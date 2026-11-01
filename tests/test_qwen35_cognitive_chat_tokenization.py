@@ -23,10 +23,13 @@ class TemplateTokenizer:
         self.bad_prefix = False
         self.bad_suffix = False
         self.early_eos = False
+        self.trailing_newline = True
         self.seen_modes = []
         self.completed_contents = []
 
     def __call__(self, text, *, add_special_tokens):
+        if text == "\n" and not add_special_tokens:
+            return {"input_ids": [198]}
         if add_special_tokens or not text or text[-1] not in "ABC" or text not in (
             "A", "B", "C", " A", " B", " C",
         ):
@@ -59,6 +62,8 @@ class TemplateTokenizer:
         if self.bad_prefix:
             prefix = [999] + prefix[1:]
         output = prefix + [400 + ord(choice)] + [self.eos_token_id]
+        if self.trailing_newline:
+            output.append(198)
         if self.bad_suffix:
             output.append(777)
         return output
@@ -117,10 +122,25 @@ class Qwen35CognitiveChatTokenizationTests(TestCase):
         batch = self._encode()
         self.assertEqual(len(batch.samples), 15)
 
+    def test_official_template_terminal_newline_is_not_supervised(self):
+        # The real pinned HF template finishes an assistant turn with
+        # <|im_end|> plus a newline token 198. Only choice + EOS are labels.
+        batch = self._encode()
+        self.assertEqual(len(batch.samples), 15)
+        for sample in batch.samples:
+            self.assertEqual(sample.input_ids[-1], 248046)
+            self.assertEqual(sample.labels[-1], 248046)
+            self.assertEqual(sum(token != -100 for token in sample.labels), 2)
+
+    def test_missing_or_noncanonical_terminal_newline_fails(self):
+        self.tokenizer.trailing_newline = False
+        with self.assertRaisesRegex(ValueError, "terminal newline"):
+            self._encode()
+
     def test_chat_prefix_mismatch_and_extra_template_suffix_fail_closed(self):
         for flag, expected in (
             ("bad_prefix", "generation prefix"),
-            ("bad_suffix", "choice and EOS"),
+            ("bad_suffix", "terminal newline"),
             ("early_eos", "EOS before"),
         ):
             setattr(self.tokenizer, flag, True)

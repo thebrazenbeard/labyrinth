@@ -30,6 +30,10 @@ OFFICIAL_QWEN35_TOKENIZER_JSON_SHA256 = (
     "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"
 )
 OFFICIAL_QWEN35_EOS_ID = 248046
+# The exact pinned HF chat template renders a final assistant message as
+# `choice<|im_end|>\n`. The terminal newline is template framing, not a
+# supervised choice token. Qwen3.5 tokenizer.json encodes it as token 198.
+OFFICIAL_QWEN35_TEMPLATE_NEWLINE_ID = 198
 
 
 class Qwen35ChatSourceBinding(NamedTuple):
@@ -122,6 +126,9 @@ def tokenize_qwen35_cognitive_chat_dataset(
     if (len(set(choices.values())) != 3
             or any(eos_id in values for values in choices.values())):
         raise ValueError("ambiguous or prematurely ended cognitive choice tokens")
+    terminal_newline = _token_ids(tokenizer, "\n", add_special_tokens=False)
+    if terminal_newline != (OFFICIAL_QWEN35_TEMPLATE_NEWLINE_ID,):
+        raise ValueError("wrong Qwen3.5 chat terminal newline tokenization")
 
     samples: list[CognitiveSftExample] = []
     case_ids: set[str] = set()
@@ -153,14 +160,18 @@ def tokenize_qwen35_cognitive_chat_dataset(
         )
         if full[:len(prefix)] != prefix:
             raise ValueError("Qwen generation prefix differs from completed chat prefix")
-        if full[len(prefix):] != completion + (eos_id,):
-            raise ValueError("completed chat must supervise exactly choice and EOS")
-        if len(full) > max_tokens:
+        if full[len(prefix):] != completion + (eos_id,) + terminal_newline:
+            raise ValueError("completed chat must end with choice, EOS and terminal newline")
+        # Ignore only the single validated template framing newline after
+        # EOS. Both input IDs and labels then end at EOS, so R18 sees exactly
+        # the choice+EOS supervised segment rather than an unlabeled tail.
+        supervised_full = full[:-len(terminal_newline)]
+        if len(supervised_full) > max_tokens:
             raise ValueError("cognitive Qwen3.5 TRAIN example exceeds fixed token budget")
         samples.append(CognitiveSftExample(
             case_id=row["case_id"], prompt_sha256=row["prompt_sha256"],
-            semantic_sha256=row["semantic_sha256"], input_ids=full,
-            attention_mask=(1,) * len(full),
+            semantic_sha256=row["semantic_sha256"], input_ids=supervised_full,
+            attention_mask=(1,) * len(supervised_full),
             labels=(IGNORE_LABEL,) * len(prefix) + completion + (eos_id,),
         ))
     if not samples or len(samples) != canonical.case_count:
