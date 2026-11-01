@@ -72,7 +72,7 @@ class TrainingCorridorRunner:
         policy: MinotaurTrainingPolicy | None = None,
         admissions: tuple[TrainCaseApproval, ...] = (),
         journey_provenance: JourneyState | None = None,
-        semantic_history: tuple[tuple[str, int, int], ...] = (),
+        semantic_history: tuple[frozenset[tuple[str, int, int]], ...] = (),
     ) -> None:
         # The supplied state is revalidated by these public interfaces, not
         # trusted solely because it is a frozen dataclass.
@@ -100,14 +100,20 @@ class TrainingCorridorRunner:
         # record is *source-level*; it is not a substitute for externally
         # authenticated Q6 prior-exposure custody.
         if (type(semantic_history) is not tuple
-                or len(semantic_history) != len(admissions)
-                or any(type(key) is not tuple or len(key) != 3
-                       or key[0] not in ("+", "-")
-                       or type(key[1]) is not int or type(key[2]) is not int
-                       or not 1 <= key[1] <= 99999 or not 1 <= key[2] <= 99999
-                       for key in semantic_history)
-                or len(set(semantic_history)) != len(semantic_history)):
+                or len(semantic_history) != len(admissions)):
             raise ValueError("exact nonduplicated TRAIN semantic history required")
+        seen_atoms: set[tuple[str, int, int]] = set()
+        for atoms in semantic_history:
+            if (type(atoms) is not frozenset or not 1 <= len(atoms) <= 3
+                    or any(type(key) is not tuple or len(key) != 3
+                           or key[0] not in ("+", "-")
+                           or type(key[1]) is not int or type(key[2]) is not int
+                           or not 1 <= key[1] <= 99999 or not 1 <= key[2] <= 99999
+                           or (key[0] == "+" and key[1] > key[2])
+                           for key in atoms)
+                    or atoms.intersection(seen_atoms)):
+                raise ValueError("exact disjoint TRAIN arithmetic-atom history required")
+            seen_atoms.update(atoms)
         self.state = state
         self._policy = policy
         self._admissions = admissions
@@ -232,19 +238,21 @@ class TrainingCorridorRunner:
         # bounded, deterministic, domain-separated sequence until both exact
         # and semantic identities are fresh. This is not a source of new
         # authority, nor can it override sealed exam case/prompt commitments.
-        # Use the staging bridge's exact arithmetic grammar/normalizer so
-        # case admission and later HF catalog replay use identical semantics.
-        from .minotaur_hf_roster_bridge import _source_arithmetic
+        # Use the staging bridge's exact grammar/normalizer and all exposed
+        # arithmetic atoms so admission and later HF replay agree. Contrast
+        # tasks contain both a+b and a-b in addition to their b+b result.
+        from .minotaur_hf_roster_bridge import _source_arithmetic, _source_arithmetic_atoms
 
         known_ids = {previous.case_id for previous in self._admissions}
         known_prompts = {previous.prompt_sha256 for previous in self._admissions}
-        seen_semantics = set(self._semantic_history)
+        seen_semantics = set().union(*self._semantic_history)
         for redraw in range(_MAX_DETERMINISTIC_REDRAWS + 1):
             challenge = _arithmetic_challenge(
                 assigned.room, self.state.scope, selection,
                 redraw_attempt=redraw,
             )
-            computed_answer, semantic_key = _source_arithmetic(challenge)
+            computed_answer, _semantic_key = _source_arithmetic(challenge)
+            candidate_atoms = _source_arithmetic_atoms(challenge)
             if computed_answer != challenge.answer:
                 raise ValueError("source arithmetic TRAIN gold diverged from staging oracle")
             routed = RoutedTrainingRoom(assigned.room_id, assigned.skill, selection, challenge)
@@ -261,7 +269,7 @@ class TrainingCorridorRunner:
                     or admission.prompt_sha256 in self.state.forbidden_prompt_sha256
                     or admission.case_id in known_ids
                     or admission.prompt_sha256 in known_prompts
-                    or semantic_key in seen_semantics):
+                    or candidate_atoms.intersection(seen_semantics)):
                 continue
             break
         else:
@@ -284,7 +292,7 @@ class TrainingCorridorRunner:
             self._registry_transitions.append(transition)
         self._policy = policy
         self._admissions += (admission,)
-        self._semantic_history += (semantic_key,)
+        self._semantic_history += (candidate_atoms,)
         self._in_flight = routed
         self.state = assigned_state
         return view
