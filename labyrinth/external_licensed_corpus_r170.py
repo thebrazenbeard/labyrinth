@@ -40,6 +40,11 @@ _PHONE_LIKE = re.compile(
     r"(?![A-Za-z0-9])"
 )
 _CREDENTIAL = re.compile(r"(?i)(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_ -]?key|secret|password|access[_ -]?token)\s*(?:=|:))")
+# Untrusted instruction/answer text may otherwise masquerade as chat framing.
+_STRUCTURAL_CHAT_DELIMITER = re.compile(
+    r"(?i)(?:<\|(?:im_start|im_end|start_header_id|end_header_id|eot_id|fim_prefix|fim_middle)\|>|\[/?INST\])"
+)
+_RESERVED_CONTROLS = (chr(0), chr(27), chr(127))
 _DOLLY_FIELDS = frozenset({"instruction", "context", "response", "category"})
 _PUBLIC_HOLD = (json.dumps({
     "schema": PUBLIC_SCHEMA_ID,
@@ -66,6 +71,11 @@ def _pairs_unique(pairs: list[tuple[str, object]]) -> dict:
     return obj
 
 
+def _reject_reserved_controls(value: str) -> None:
+    if any(control in value for control in _RESERVED_CONTROLS):
+        raise ValueError("reserved control character in source text")
+
+
 def _normalized(value: str) -> str:
     if type(value) is not str or not 1 <= len(value) <= 4096:
         raise ValueError("invalid bounded prompt")
@@ -73,6 +83,7 @@ def _normalized(value: str) -> str:
         value.encode("utf-8", errors="strict")
     except UnicodeEncodeError as exc:
         raise ValueError("invalid Unicode in source text") from exc
+    _reject_reserved_controls(value)
     cleaned = " ".join(unicodedata.normalize("NFKC", value).casefold().split())
     if not cleaned:
         raise ValueError("empty normalized prompt")
@@ -91,6 +102,7 @@ def private_prompt_sha256(instruction: str, context: str) -> str:
         context.encode("utf-8", errors="strict")
     except UnicodeEncodeError as exc:
         raise ValueError("invalid Unicode in private prompt context") from exc
+    _reject_reserved_controls(context)
     normalized_context = " ".join(unicodedata.normalize("NFKC", context).casefold().split())
     return hashlib.sha256((_normalized(instruction) + "\0" + normalized_context).encode()).hexdigest()
 
@@ -224,18 +236,25 @@ def _parse_source_line(line: bytes) -> dict:
             row["context"].encode("utf-8", errors="strict")
         except UnicodeEncodeError as exc:
             raise ValueError("invalid Unicode in source context") from exc
+        _reject_reserved_controls(row["context"])
     return row
 
 
 def _quarantine_reason(row: dict) -> str | None:
     # Conservative, intentionally imperfect screening: review is mandatory
     # even if no pattern matches. Sources include Wikipedia reference text.
+    all_text = "\n".join(row[field] for field in ("instruction", "context", "response"))
+    # Fingerprints use NFKC, so quarantine cannot inspect only raw glyphs:
+    # fullwidth compatibility spellings otherwise evade PII/framing patterns.
+    screened = (all_text, unicodedata.normalize("NFKC", all_text))
+    if any(_STRUCTURAL_CHAT_DELIMITER.search(text) for text in screened):
+        return "STRUCTURAL_CHAT_DELIMITER"
     if row["context"].strip():
         return "THIRD_PARTY_CONTEXT"
-    all_text = "\n".join(row[field] for field in ("instruction", "context", "response"))
-    if _CREDENTIAL.search(all_text):
+    if any(_CREDENTIAL.search(text) for text in screened):
         return "POSSIBLE_CREDENTIAL"
-    if _EMAIL_OR_LINK.search(all_text) or _PHONE_LIKE.search(all_text):
+    if any(_EMAIL_OR_LINK.search(text) or _PHONE_LIKE.search(text)
+           for text in screened):
         return "POTENTIAL_PII_OR_LINK"
     return None
 
