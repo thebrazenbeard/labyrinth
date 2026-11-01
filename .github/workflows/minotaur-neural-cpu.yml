@@ -122,6 +122,9 @@ on:
       - "labyrinth/cognitive_train_dataset_export.py"
       - "tests/test_cognitive_train_dataset_export.py"
       - "docs/qualification/R111_COGNITIVE_TRAIN_EXPORT_SOURCE.md"
+      - "labyrinth/cognitive_sft_tokenization.py"
+      - "tests/test_cognitive_sft_tokenization.py"
+      - "docs/qualification/R115_COGNITIVE_SFT_TOKENIZATION_SOURCE.md"
       - "tests/test_approved_cognitive_empathy_train_r90.py"
       - "docs/qualification/R104_COGNITIVE_TRAIN_RUNTIME_SOURCE.md"
       - "docs/qualification/R107_COGNITIVE_CLI_SOURCE_ONLY.md"
@@ -393,6 +396,9 @@ on:
       - "labyrinth/cognitive_train_dataset_export.py"
       - "tests/test_cognitive_train_dataset_export.py"
       - "docs/qualification/R111_COGNITIVE_TRAIN_EXPORT_SOURCE.md"
+      - "labyrinth/cognitive_sft_tokenization.py"
+      - "tests/test_cognitive_sft_tokenization.py"
+      - "docs/qualification/R115_COGNITIVE_SFT_TOKENIZATION_SOURCE.md"
       - "tests/test_approved_cognitive_empathy_train_r90.py"
       - "docs/qualification/R104_COGNITIVE_TRAIN_RUNTIME_SOURCE.md"
       - "docs/qualification/R107_COGNITIVE_CLI_SOURCE_ONLY.md"
@@ -771,6 +777,10 @@ jobs:
               # source-only, with no examination, host custody, or optimizer.
               # Labeled rows MUST NOT enter the public learner/CLI interface.
               ("tests.test_cognitive_train_dataset_export", 7),
+              # Synthetic cognitive SFT tokenization revalidates the canonical
+              # TRAIN-only dataset, masks the entire prompt/instruction with
+              # -100, and supervises only choice+EOS. No neural updates.
+              ("tests.test_cognitive_sft_tokenization", 9),
               # A bounded, synthetic 30-scenario perspective TRAIN corpus;
               # enforce all lexical-shortcut, replay, and source-binding tests.
               # Scores never claim independent empathy mastery or host custody.
