@@ -38,6 +38,19 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
 
 
 class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_r90_cognitive_train_source_is_mandatory_on_pr_and_main(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/approved_cognitive_empathy_train_r90.py"', event_paths)
+            self.assertIn('"tests/test_approved_cognitive_empathy_train_r90.py"', event_paths)
+        self.assertIn('("tests.test_approved_cognitive_empathy_train_r90", 28)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
     def test_train_completion_primitive_boundary_is_required_by_cpu_ci(self):
         workflow = (Path(__file__).resolve().parents[1] /
                     ".github/workflows/minotaur-neural-cpu.yml").read_text()
