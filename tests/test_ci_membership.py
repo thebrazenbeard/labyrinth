@@ -547,7 +547,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
                     self.assertIn(f'      - "{path}"', event_paths)
         for module_name, expected in (
             ("tests.test_minotaur_hf_roster_bridge", 14),
-            ("tests.test_hf_pilot", 28),
+            ("tests.test_hf_pilot", 43),
             ("tests.test_hf_report_audit", 20),
             ("tests.test_hf_resume_bridge", 24),
             ("tests.test_checkpoint_schema_bridge", 8),
@@ -650,6 +650,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "labyrinth/q8_witness_restore_r93.py",
             "labyrinth/q6_stratified_toy_study_r93.py",
             "labyrinth/minotaur_hf_roster_bridge.py",
+            "labyrinth/hf_adaptive_source_v1.py",
             "labyrinth/adaptive_minotaur_r93.py",
             "labyrinth/q8_host_authority_probe.py",
             "labyrinth/graduation_gate.py",
@@ -665,6 +666,8 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "docs/qualification/Q6_STRATIFIED_TOY_SOURCE_STUDY_R93.md",
             "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md",
             "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md",
+            "docs/qualification/R105_ADAPTIVE_HF_SOURCE_RESEARCH.md",
+            "docs/qualification/R118_HF_COGNITIVE_SOURCE_CONVERGENCE.md",
             "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md",
             "docs/qualification/Q5_PRIVATE_HOLDOUT_EVAL_R92.md",
             "tests/test_private_wheel_cli_checkpoint_r70.py",
@@ -677,6 +680,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "tests/test_q8_witness_restore_r93.py",
             "tests/test_q6_stratified_toy_study_r93.py",
             "tests/test_minotaur_hf_roster_bridge.py",
+            "tests/test_hf_adaptive_source_v1.py",
             "tests/test_adaptive_minotaur_r93.py",
             "tests/test_q8_host_authority_probe.py",
             "tests/test_graduation_gate.py",
@@ -684,6 +688,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "tests/test_minotaur_counterfactual_corridors_r92.py",
             "tests/test_q5_holdout_eval_r92.py",
             "tests/test_objective_learning_loop_r92.py",
+            "tests/test_objective_learning_semantic_custody.py",
         )
         for trigger, manifest in path_groups.items():
             for path in paths:
@@ -692,7 +697,8 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
                     self.assertIn(f'      - "{path}"', manifest)
         for module, minimum in (
             ("tests.test_qualify_minilm_cpu", 7),
-            ("tests.test_hf_pilot", 39),
+            ("tests.test_hf_pilot", 43),
+            ("tests.test_hf_adaptive_source_v1", 8),
             ("tests.test_minotaur_hf_roster_bridge", 14),
             ("tests.test_hf_report_audit", 20),
             ("tests.test_external_monotonic_authority_contract", 17),
@@ -704,7 +710,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             ("tests.test_q7_temporal_custody_source", 9),
             ("tests.test_q7_witnessed_cas_intake_r93", 12),
             ("tests.test_q8_witness_restore_r93", 23),
-            ("tests.test_q6_stratified_toy_study_r93", 21),
+            ("tests.test_q6_stratified_toy_study_r93", 23),
             ("tests.test_adaptive_minotaur_r93", 9),
             ("tests.test_graduation_gate", 28),
             ("tests.test_objective_challenge_provider_r92", 7),
@@ -712,6 +718,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             ("tests.test_q8_host_authority_probe", 18),
             ("tests.test_q5_holdout_eval_r92", 23),
             ("tests.test_objective_learning_loop_r92", 5),
+            ("tests.test_objective_learning_semantic_custody", 6),
         ):
             with self.subTest(module=module):
                 self.assertIn(f'("{module}", {minimum})', workflow)
@@ -826,6 +833,53 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('("tests.test_objective_training_run", 14)', workflow)
         self.assertIn('("tests.test_minotaur_feedback_divergence_r93", 6)', workflow)
         self.assertIn('or result.skipped', workflow)
+
+    def test_reconciled_hf_source_modes_and_exact_head_matrix_are_mandatory(self):
+        root = Path(__file__).resolve().parents[1]
+        neural = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        normal = (root / ".github/workflows/ci.yml").read_text()
+        pr_paths = neural.split("  pull_request:\n    paths:\n", 1)[1].split(
+            "  push:\n", 1)[0]
+        main_paths = neural.split("  push:\n", 1)[1].split(
+            "  workflow_dispatch:\n", 1)[0]
+        for path in (
+            "labyrinth/hf_adaptive_source_v1.py",
+            "labyrinth/minotaur_train_roster_manifest_v1.py",
+            "labyrinth/minotaur_hf_roster_bridge.py",
+            "labyrinth/hf_report_audit.py",
+            "labyrinth/checkpoint_schema_bridge.py",
+            "tests/test_hf_adaptive_source_v1.py",
+            "tests/test_r110_adaptive_redraw_integration.py",
+            "tests/test_r110_audit_mode_boundaries.py",
+            "tests/test_r110_runner_atom_novelty.py",
+            "tests/test_minotaur_hf_run_pilot_r84.py",
+            "tests/test_minotaur_train_roster_manifest_v1.py",
+            "tests/test_hf_report_audit.py",
+            "tests/test_checkpoint_schema_bridge.py",
+        ):
+            self.assertTrue((root / path).is_file(), path)
+            for paths in (pr_paths, main_paths):
+                with self.subTest(path=path):
+                    self.assertIn(f'      - "{path}"', paths)
+        for module, minimum in (
+            ("tests.test_hf_pilot", 43),
+            ("tests.test_hf_adaptive_source_v1", 8),
+            ("tests.test_r110_adaptive_redraw_integration", 3),
+            ("tests.test_r110_audit_mode_boundaries", 4),
+            ("tests.test_r110_runner_atom_novelty", 3),
+            ("tests.test_minotaur_hf_roster_bridge", 14),
+            ("tests.test_hf_report_audit", 20),
+            ("tests.test_minotaur_hf_run_pilot_r84", 3),
+            ("tests.test_minotaur_train_roster_manifest_v1", 9),
+            ("tests.test_checkpoint_schema_bridge", 8),
+        ):
+            self.assertIn(f'("{module}", {minimum})', neural)
+        for workflow in (neural, normal):
+            self.assertIn("ref: ${{ github.event.pull_request.head.sha || github.sha }}", workflow)
+            self.assertIn("Assert exact event head checkout", workflow)
+            self.assertIn('test "$actual_head_sha" = "$EXPECTED_HEAD_SHA"', workflow)
+        self.assertIn('python-version: ["3.10", "3.12"]', normal)
+        self.assertIn('or result.skipped', neural)
 
     def test_r92_combined_r68_r72_docs_trigger_pinned_neural_ci(self):
         # PR #77 and #82 were independently green, but the union must keep
@@ -1095,9 +1149,11 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "  workflow_dispatch:\n", 1)[0]
         for path in (
             "labyrinth/hf_pilot.py",
+            "labyrinth/hf_adaptive_source_v1.py",
             "labyrinth/hf_report_audit.py",
             "labyrinth/objective_contract.py",
             "tests/test_hf_pilot.py",
+            "tests/test_hf_adaptive_source_v1.py",
             "tests/test_hf_report_audit.py",
             "tests/test_hf_journey_resume_integration.py",
             "tests/test_hf_scoped_report_audit.py",
@@ -1112,6 +1168,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "      - name: Minotaur tests with neural dependencies present\n", 1)[1]
         for module in (
             "tests.test_hf_pilot",
+            "tests.test_hf_adaptive_source_v1",
             "tests.test_hf_report_audit",
             "tests.test_hf_journey_resume_integration",
             "tests.test_hf_scoped_report_audit",

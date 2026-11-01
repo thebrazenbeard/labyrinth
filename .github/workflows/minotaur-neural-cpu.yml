@@ -29,6 +29,7 @@ on:
       - "labyrinth/hf_pilot.py"
       - "labyrinth/cli.py"
       - "labyrinth/minotaur_train_roster_manifest_v1.py"
+      - "labyrinth/hf_adaptive_source_v1.py"
       - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
@@ -99,6 +100,8 @@ on:
       - "docs/qualification/Q6_PER_EXPOSURE_CAS_REFERENCE_R102.md"
       - "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md"
       - "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md"
+      - "docs/qualification/R105_ADAPTIVE_HF_SOURCE_RESEARCH.md"
+      - "docs/qualification/R118_HF_COGNITIVE_SOURCE_CONVERGENCE.md"
       - "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md"
       - "docs/qualification/MINOTAUR_REGISTRY_TRANSITION_R72.md"
       - "docs/qualification/Q5_EVALUATION_PREREG_R68.md"
@@ -114,6 +117,7 @@ on:
       - "tests/test_q5_holdout_eval_r92.py"
       - "labyrinth/objective_learning_loop_r92.py"
       - "tests/test_objective_learning_loop_r92.py"
+      - "tests/test_objective_learning_semantic_custody.py"
       - "tests/test_approved_train_provider_r90.py"
       - "tests/test_objective_training_run.py"
       - "tests/test_cognitive_objective_training_run.py"
@@ -211,6 +215,10 @@ on:
       - "tests/test_checkpoint_schema_bridge.py"
       - "tests/test_hf_regenerative_harness.py"
       - "tests/test_hf_pilot.py"
+      - "tests/test_hf_adaptive_source_v1.py"
+      - "tests/test_r110_adaptive_redraw_integration.py"
+      - "tests/test_r110_audit_mode_boundaries.py"
+      - "tests/test_r110_runner_atom_novelty.py"
       - "tests/test_minotaur_hf_roster_bridge.py"
       - "tests/test_neural_resume_checkpoint.py"
       - "tests/test_hf_event_recovery.py"
@@ -303,6 +311,7 @@ on:
       - "labyrinth/hf_pilot.py"
       - "labyrinth/cli.py"
       - "labyrinth/minotaur_train_roster_manifest_v1.py"
+      - "labyrinth/hf_adaptive_source_v1.py"
       - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
@@ -373,6 +382,8 @@ on:
       - "docs/qualification/Q6_PER_EXPOSURE_CAS_REFERENCE_R102.md"
       - "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md"
       - "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md"
+      - "docs/qualification/R105_ADAPTIVE_HF_SOURCE_RESEARCH.md"
+      - "docs/qualification/R118_HF_COGNITIVE_SOURCE_CONVERGENCE.md"
       - "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md"
       - "docs/qualification/MINOTAUR_REGISTRY_TRANSITION_R72.md"
       - "docs/qualification/Q5_EVALUATION_PREREG_R68.md"
@@ -388,6 +399,7 @@ on:
       - "tests/test_q5_holdout_eval_r92.py"
       - "labyrinth/objective_learning_loop_r92.py"
       - "tests/test_objective_learning_loop_r92.py"
+      - "tests/test_objective_learning_semantic_custody.py"
       - "tests/test_approved_train_provider_r90.py"
       - "tests/test_objective_training_run.py"
       - "tests/test_cognitive_objective_training_run.py"
@@ -485,6 +497,10 @@ on:
       - "tests/test_checkpoint_schema_bridge.py"
       - "tests/test_hf_regenerative_harness.py"
       - "tests/test_hf_pilot.py"
+      - "tests/test_hf_adaptive_source_v1.py"
+      - "tests/test_r110_adaptive_redraw_integration.py"
+      - "tests/test_r110_audit_mode_boundaries.py"
+      - "tests/test_r110_runner_atom_novelty.py"
       - "tests/test_minotaur_hf_roster_bridge.py"
       - "tests/test_neural_resume_checkpoint.py"
       - "tests/test_hf_event_recovery.py"
@@ -606,7 +622,7 @@ jobs:
           python -m scripts.minotaur_ci
           python -m unittest tests.test_adaptive_corridors tests.test_journey_policy_runner tests.test_journey_challenges tests.test_semantic_chambers tests.test_minotaur_exam -v
           python -m unittest tests.test_hf_development_transition tests.test_hf_resume_bridge tests.test_hf_regenerative_harness -v
-          python -m unittest tests.test_hf_pilot tests.test_hf_report_audit tests.test_hf_journey_resume_integration -v
+          python -m unittest tests.test_hf_pilot tests.test_hf_adaptive_source_v1 tests.test_hf_report_audit tests.test_hf_journey_resume_integration -v
           # Full-state optimizer recovery and measured frozen-base binding
           # are required CPU tests, never optional/skip-allowed smoke checks.
           python - <<'PY'
@@ -642,7 +658,13 @@ jobs:
               ("tests.test_retention_family_registry", 8),
               ("tests.test_retention_entrypoint_guard", 9),
               ("tests.test_qualify_minilm_cpu", 7),
-              ("tests.test_hf_pilot", 39),
+              ("tests.test_hf_pilot", 43),
+              ("tests.test_hf_adaptive_source_v1", 8),
+              # Reconciled #94 novelty redraw and #95 adaptive source must
+              # replay together, including forgery and schema downgrade cases.
+              ("tests.test_r110_adaptive_redraw_integration", 3),
+              ("tests.test_r110_audit_mode_boundaries", 4),
+              ("tests.test_r110_runner_atom_novelty", 3),
               ("tests.test_minotaur_hf_roster_bridge", 14),
               ("tests.test_hf_report_audit", 20),
               ("tests.test_qualify_maze_conditioned_minilm_cpu", 12),
@@ -712,7 +734,7 @@ jobs:
               # R80 source-only Minotaur->HF TRAIN roster and optimizer exposure
               # must be tested without skips. This does NOT witness a physical
               # pretrained optimizer, online learning, or graduation authority.
-              ("tests.test_minotaur_hf_roster_bridge", 14),
+              # The roster bridge is already required above in this same loop.
               # Explicit cycle-zero adaptive TRAIN controls, answerless
               # replay, cross-arm isolation and source-only audit status.
               ("tests.test_minotaur_hf_run_pilot_r84", 3),
@@ -720,11 +742,11 @@ jobs:
               # raw and R18-normalized prompt digests; this is source-only and
               # NOT accepted by the older model-training corpus importer.
               ("tests.test_minotaur_train_roster_manifest_v1", 9),
-              ("tests.test_hf_pilot", 28),
+              # HF pilot's stricter 43-test minimum is already required above.
               # Explicit exposure-v1 reports are strict by default: remove the
               # marker/ledger, downgrade schema, or resume incorrectly -> FAIL.
               # Older v2/v3 reports require explicit allow_legacy opt-in.
-              ("tests.test_hf_report_audit", 20),
+              # The 20-test report audit minimum is required above.
               ("tests.test_hf_resume_bridge", 24),
               # Metadata classification may route exposure.v1 to the actual
               # strict preflight, never silently bypass ledger validation;
@@ -748,7 +770,7 @@ jobs:
               ("tests.test_q7_temporal_custody_source", 9),
               ("tests.test_q7_witnessed_cas_intake_r93", 12),
               ("tests.test_q8_witness_restore_r93", 23),
-              ("tests.test_q6_stratified_toy_study_r93", 21),
+              ("tests.test_q6_stratified_toy_study_r93", 23),
               # Q6 governed campaign manifest and reservation are source-only.
               # Pinned cryptography is present here; any skipped signature,
               # mutation, provenance, or lost-ACK test must fail this gate.
@@ -792,6 +814,7 @@ jobs:
               ("tests.test_q8_host_authority_probe", 18),
               ("tests.test_q5_holdout_eval_r92", 23),
               ("tests.test_objective_learning_loop_r92", 5),
+              ("tests.test_objective_learning_semantic_custody", 6),
               # Pinned CPU runner installs Torch + safetensors. Enforce all
               # source and real-tensor checkpoint tests with zero skips here.
               ("tests.test_neural_cycle_checkpoint_r92", 23),

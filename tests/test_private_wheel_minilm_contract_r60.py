@@ -58,6 +58,11 @@ class PrivateMiniLMWheelTests(unittest.TestCase):
                 self.assertFalse(any(name.startswith("scripts/") for name in names))
                 self.assertIn("labyrinth/maze_conditioned_minilm_cpu_experiment.py", names)
                 self.assertIn("labyrinth/minilm_cpu_experiment.py", names)
+                # R110's adaptive training-source replay and HF boundary must
+                # survive an installed-wheel build, not just a source checkout.
+                self.assertIn("labyrinth/hf_adaptive_source_v1.py", names)
+                self.assertIn("labyrinth/minotaur_hf_roster_bridge.py", names)
+                self.assertIn("labyrinth/hf_report_audit.py", names)
                 self.assertFalse(any(name.endswith((".pt", ".safetensors", ".gguf"))
                                      for name in names))
                 entry_paths = [name for name in names
