@@ -35,6 +35,27 @@ def _state(room_count: int = 1):
 
 
 class ObjectiveLoopSemanticCustodyTests(unittest.TestCase):
+    def test_forged_nonstring_gold_comparison_cannot_bypass_train_or_exam(self):
+        class ForgedGold:
+            def __ne__(self, other):
+                return False
+
+        forged = _case("train-forged", "12 + 34", ForgedGold(), split="train")
+        valid = _case("train-valid", "50 - 10", "40", split="train")
+        prepared = (
+            PreparedTrainingRoom("a", "arithmetic", forged),
+            PreparedTrainingRoom("b", "arithmetic", valid),
+        )
+        with self.assertRaisesRegex(ValueError, "canonical Challenge and string gold"):
+            _check_train(prepared, _state(2))
+
+        normal_train = PreparedTrainingRoom(
+            "a", "arithmetic", _case("train-ok", "50 - 10", "40", split="train"),
+        )
+        forged_eval = _case("eval-forged", "12 + 34", ForgedGold(), split="eval")
+        with self.assertRaisesRegex(ValueError, "canonical Challenge and string gold"):
+            _check_exam((("heldout", forged_eval),), (normal_train,), _state())
+
     def test_train_and_heldout_commutative_alias_rejected(self):
         training = PreparedTrainingRoom(
             "room", "arithmetic", _case("train-a", "12 + 34", "46", split="train"),

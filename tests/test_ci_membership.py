@@ -718,7 +718,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             ("tests.test_q8_host_authority_probe", 18),
             ("tests.test_q5_holdout_eval_r92", 23),
             ("tests.test_objective_learning_loop_r92", 5),
-            ("tests.test_objective_learning_semantic_custody", 6),
+            ("tests.test_objective_learning_semantic_custody", 7),
         ):
             with self.subTest(module=module):
                 self.assertIn(f'("{module}", {minimum})', workflow)

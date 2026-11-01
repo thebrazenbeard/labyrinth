@@ -103,6 +103,9 @@ def _arithmetic_semantic_atom(challenge: Challenge) -> tuple[str, int, int]:
     This deliberately covers only the approved canonical tier-one grammar;
     equal numerical answers to different problems are not semantic aliases.
     """
+    if (type(challenge) is not Challenge or type(challenge.prompt) is not str
+            or type(challenge.answer) is not str):
+        raise ValueError("arithmetic source requires canonical Challenge and string gold")
     match = _PROMPT.fullmatch(challenge.prompt)
     if match is None:
         raise ValueError("unsupported development arithmetic semantic grammar")

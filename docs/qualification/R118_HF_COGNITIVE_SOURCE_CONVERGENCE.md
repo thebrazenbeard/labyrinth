@@ -38,8 +38,9 @@ no-skip test floors are retained, and the stricter 23-case Q6 floor wins.
   tokens and EOS. The source does not load Qwen or prove real-tokenizer/chat-
   template parity, gradient steps, or generalization.
 - The toy arithmetic objective loop now rejects commutative arithmetic
-  aliases across TRAIN, development and regeneration cycles. Its optimizer
-  remains a four-coefficient toy, not a pretrained model.
+  aliases across TRAIN, development and regeneration cycles. It also rejects
+  malformed non-string gold objects that could spoof a comparison result.
+  Its optimizer remains a four-coefficient toy, not a pretrained model.
 
 ## Measured local checks (not hosted successor-head qualification)
 
@@ -50,6 +51,10 @@ no-skip test floors are retained, and the stricter 23-case Q6 floor wins.
 - After integrating the semantic-alias fix and pinned CI/wheel tests, the
   complete successor working tree passed **2,352 tests, 70 expected skips,
   no failures/errors** with the same approved local Unix-socket permission.
+- After hostile review reproduced a malformed answer-object comparison bypass,
+  an exact-type guard and negative regression were added. The amended complete
+  source passed **2,353 tests, 70 expected skips, no failures/errors** with
+  local Unix-socket permission. Hosted checks must run on the amended head.
 - Cross-branch R110/cognitive focused suites, CI membership, and actual wheel
   archive inspection passed. The wheel contains the adaptive HF source and
   related roster/auditor modules, and no repository-only `scripts/` package.
