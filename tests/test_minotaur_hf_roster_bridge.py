@@ -71,6 +71,15 @@ class MinotaurHfRosterContractTests(unittest.TestCase):
         self.assertTrue(runner.is_complete)
         self.assertEqual(len(roster.train_cases), 3)
         self.assertEqual(len(runner.observations), 3)
+        self.assertEqual(roster.initial_checkpoint_sha256,
+                         runner.state.initial_checkpoint_sha256)
+        self.assertEqual(roster.adaptive_feedback_rows, tuple(
+            (event.assignment.room_id, event.feedback.case_id,
+             event.feedback.prompt_sha256, event.feedback.score,
+             event.feedback.checkpoint_before_sha256,
+             event.feedback.checkpoint_after_sha256)
+            for event in runner.state.history
+        ))
         self.assertEqual([case.prompt for case in roster.train_cases],
                          [view.prompt for view in public_views])
         self.assertEqual(roster.ordered_optimizer_exposures,
