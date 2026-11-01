@@ -24,7 +24,7 @@ filesystem/hardware fault testing; no such Q8 proof is claimed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import ctypes
 from hashlib import sha256
 import json
@@ -398,6 +398,14 @@ def save_cycle_checkpoint(
     if failure_at not in (None, "after_state", "after_manifest",
                           "before_sync", "after_publish"):
         raise ValueError("unknown crash injection barrier")
+    # The context and previous receipt are caller-owned frozen dataclasses,
+    # which object.__setattr__ can still mutate after validation. All lineage,
+    # serialization and publication decisions must use these stable copies.
+    if type(context) is not FullCheckpointContextV2:
+        raise CycleCheckpointError("v2 immediate-predecessor context required")
+    context = replace(context)
+    if type(previous) is CycleBoundaryReceipt:
+        previous = replace(previous)
     if os.name != "posix" or sys.platform != "linux":
         raise CycleCheckpointError(
             "durable no-replace checkpoint publication not supported on this platform")
@@ -473,6 +481,9 @@ def load_cycle_checkpoint(
     A failed underlying restore may have mutated state: discard the process.
     Pin provenance/latest-stage selection remains the caller's responsibility.
     """
+    if type(expected_context) is not FullCheckpointContextV2:
+        raise CycleCheckpointError("v2 expected full-state context required")
+    expected_context = replace(expected_context)
     root = _check_root(source, existing=True)
     if not all(_digest(s) for s in (independently_pinned_manifest_sha256,
                                    expected_base_artifact_sha256,

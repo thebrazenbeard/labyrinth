@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -261,6 +262,84 @@ class PrivateQ5R92Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(Q5HoldoutError, "digest pin mismatch"):
                 second.evaluate(self._ledger(tmp))
+
+    def test_pinned_role_separation_survives_post_validation_caller_mutation(self):
+        # A frozen dataclass can still be changed by object.__setattr__.
+        # Re-sign each predecessor receipt using the *inference* key; their
+        # signed public-byte commitments are intentionally unchanged. A
+        # caller mutating pins after the distinct-key check must not turn
+        # one key into both inference and predecessor signer roles.
+        from labyrinth import q5_holdout_eval_r92 as module
+        fixture = SyntheticFixture(seeds=self.example)
+        fixture.seeds = tuple(replace(
+            seed, signed_retention=sign_source_bytes(
+                seed.signed_retention.public_bytes, fixture.infer_key,
+                RETENTION_SCHEMA)) for seed in fixture.seeds)
+        real_bank = module._bank
+        switched = False
+
+        def switch_after_pin_validation(seeds):
+            nonlocal switched
+            if not switched:
+                object.__setattr__(fixture.pins, "retention_public_key",
+                                   fixture.pins.inference_public_key)
+                switched = True
+            return real_bank(seeds)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(module, "_bank", side_effect=switch_after_pin_validation):
+                with self.assertRaisesRegex(Q5HoldoutError, "signature"):
+                    fixture.evaluate(self._ledger(tmp))
+        self.assertTrue(switched)
+
+    def test_excluded_private_case_roster_survives_caller_mutation(self):
+        # A caller must not erase a separately pinned exclusion after the
+        # pin-shape check and thereby score a previously exposed case.
+        from labyrinth import q5_holdout_eval_r92 as module
+        fixture = SyntheticFixture(seeds=source_seeds())
+        forbidden = fixture.seeds[0].cases[0].case_id
+        fixture.pins = replace(fixture.pins,
+                               excluded_case_ids=frozenset({forbidden}))
+        real_bank = module._bank
+        switched = False
+
+        def erase_exclusions_after_validation(seeds):
+            nonlocal switched
+            if not switched:
+                object.__setattr__(fixture.pins, "excluded_case_ids",
+                                   frozenset())
+                switched = True
+            return real_bank(seeds)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(module, "_bank",
+                              side_effect=erase_exclusions_after_validation):
+                with self.assertRaisesRegex(Q5HoldoutError, "externally excluded"):
+                    fixture.evaluate(self._ledger(tmp))
+        self.assertTrue(switched)
+
+    def test_gold_change_after_signed_precommit_cannot_change_scoring(self):
+        # The same mutable PrivateCase objects are reachable by the caller
+        # even after the bank's gold HMAC and exam are validated. A source
+        # scorer must snapshot the private data at entry, not read a changed
+        # gold label after it reserves the one-shot exam.
+        from labyrinth import q5_holdout_eval_r92 as module
+        fixture = SyntheticFixture(seeds=source_seeds())
+        with tempfile.TemporaryDirectory() as tmp:
+            baseline = fixture.evaluate(Path(tmp) / "baseline.db")
+            reserve_once = module._reserve_once
+
+            def flip_caller_gold_after_reservation(*args):
+                reserve_once(*args)
+                for seed in fixture.seeds:
+                    for case in seed.cases:
+                        if case.split in ("development", "transfer"):
+                            object.__setattr__(case, "gold", 1 - case.gold)
+
+            with patch.object(module, "_reserve_once",
+                              side_effect=flip_caller_gold_after_reservation):
+                under_mutation = fixture.evaluate(Path(tmp) / "attacked.db")
+        self.assertEqual(under_mutation.public_bytes, baseline.public_bytes)
 
     def test_signed_predecessor_source_sequence_must_claim_pretraining(self):
         # Validly signed, independently pinned receipts with a sequence equal

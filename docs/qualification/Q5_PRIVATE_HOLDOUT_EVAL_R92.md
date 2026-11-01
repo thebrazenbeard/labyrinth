@@ -78,6 +78,16 @@ minimum 10-percentage-point gains (`five_arm_statistical_screen`).
   A trainer that controls the pins or signatures can fabricate plausible source
   records. `retention_sequence < pretraining_sequence` checks signed source
   claims only, not host chronology or physical predecessor performance.
+- The evaluator snapshots its caller-owned `Q5TrustPins` and nested
+  `PrivateSeed` bank when entering the scoring API. Three deterministic hostile
+  regressions cover post-validation signer-key substitution, removal of an
+  external exclusion roster, and post-precommit mutation of private gold
+  labels before scoring. A frozen
+  Python dataclass alone is not a protected authority boundary: the caller
+  can still mutate the original using `object.__setattr__`. This local copy
+  protects later reads from such mutation **after the copy**, but does not
+  establish an atomic external-input handoff under concurrent adversarial
+  mutation *during copying*, independent examiner custody or a host CAS.
 - `ArmClaim` budget/visit/label/checkpoint consistency comes from the existing
   deterministic Q5 source plan, not host-measured optimizer or GPU traces.
   Same number of steps does not imply identical FLOPs or wall time. Raw

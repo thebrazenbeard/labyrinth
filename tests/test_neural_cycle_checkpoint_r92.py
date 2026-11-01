@@ -214,6 +214,95 @@ class SourceBoundaryTests(unittest.TestCase):
                         completed_optimizer_steps=1)
             self.assertFalse(destination.exists())
 
+    def test_caller_context_cannot_change_predecessor_after_transition_validation(self):
+        # Mutation of a frozen caller-owned context at the serializer seam
+        # must not replace the predecessor whose lineage was just checked.
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "published"
+            previous = replace(_prior(), stage="regeneration_ready")
+            context = _context(1, cursor=2,
+                               predecessor=previous.full_state_sha256)
+            observed = []
+
+            def save_state(path, *, model, optimizer, context):
+                observed.append(context)
+                object.__setattr__(
+                    mutable_caller, "immediate_predecessor_sha256", "e" * 64)
+                path.mkdir()
+                (path / "manifest.json").write_text("mock-state")
+                (path / "state.safetensors").write_bytes(b"mock-tensors")
+                return SimpleNamespace(sha256="4" * 64)
+
+            mutable_caller = context
+            with (patch.object(cycle, "_dependencies", return_value=(None, None, None)),
+                  patch.object(cycle, "_tensor_digest",
+                               side_effect=lambda _m, _t, *, frozen: "2" * 64 if frozen else "3" * 64),
+                  patch.object(cycle, "_optimizer_moments_digest", return_value="5" * 64),
+                  patch.object(cycle, "save_full_checkpoint", side_effect=save_state),
+                  patch.object(cycle, "_readback_digests", return_value=("3" * 64, "5" * 64))):
+                receipt = cycle.save_cycle_checkpoint(
+                    destination, model=object(), optimizer=object(),
+                    context=context, stage="trained", previous=previous,
+                    base_artifact_sha256=_BASE,
+                    expected_frozen_base_sha256="2" * 64,
+                    completed_optimizer_steps=2)
+            self.assertEqual(receipt.predecessor_manifest_sha256, previous.manifest_sha256)
+            self.assertEqual(observed[0].immediate_predecessor_sha256,
+                             previous.full_state_sha256)
+            self.assertIsNot(observed[0], mutable_caller)
+
+    def test_restore_uses_stable_context_after_signed_readback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            source.mkdir()
+            (source / "full_state").mkdir()
+            context = _context()
+            obj = {
+                "schema": cycle.SCHEMA, "run_id": context.run_id,
+                "cycle_index": 0, "stage": "trained",
+                "base_artifact_sha256": _BASE,
+                "frozen_base_sha256": "2" * 64,
+                "adapter_head_sha256": "3" * 64,
+                "optimizer_moments_sha256": "5" * 64,
+                "full_state_sha256": "4" * 64,
+                "predecessor_manifest_sha256": cycle._ZERO,
+                "completed_optimizer_steps": 1, "cursor": 1,
+                "optimizer": "AdamW", "optimizer_state_required": True,
+                "graduation_authorized": False,
+                "change_class": "model_component_update",
+                "state_scope": "local_adapter_head_and_optimizer_only",
+                "memory_or_identity_write_authorized": False,
+            }
+            manifest = cycle._canonical(obj)
+            (source / "cycle_manifest.json").write_bytes(manifest)
+            observed = []
+
+            def readback(*_args, **_kwargs):
+                object.__setattr__(context, "immediate_predecessor_sha256", "e" * 64)
+                return "3" * 64, "5" * 64
+
+            def restore_state(*_args, **kwargs):
+                observed.append(kwargs["expected_context"])
+
+            with (patch.object(cycle, "_dependencies", return_value=(None, None, None)),
+                  patch.object(cycle, "_tensor_digest",
+                               side_effect=lambda _m, _t, *, frozen: "2" * 64 if frozen else "3" * 64),
+                  patch.object(cycle, "_optimizer_moments_digest", return_value="5" * 64),
+                  patch.object(cycle, "_readback_digests", side_effect=readback),
+                  patch.object(cycle, "load_full_checkpoint", side_effect=restore_state),
+                  patch.object(cycle, "_assert_complete_adamw")):
+                receipt = cycle.load_cycle_checkpoint(
+                    source, model=object(), optimizer=object(),
+                    expected_context=context,
+                    independently_pinned_manifest_sha256=cycle._receipt_digest(manifest),
+                    expected_base_artifact_sha256=_BASE,
+                    expected_frozen_base_sha256="2" * 64,
+                    expected_predecessor_manifest_sha256=cycle._ZERO,
+                    expected_stage="trained", completed_optimizer_steps=1)
+            self.assertEqual(receipt.stage, "trained")
+            self.assertEqual(observed[0].immediate_predecessor_sha256, _INITIAL)
+            self.assertIsNot(observed[0], context)
+
     def test_publish_crash_seams_distinguish_unsynced_and_durable_rename(self):
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary)

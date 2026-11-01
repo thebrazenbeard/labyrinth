@@ -439,6 +439,10 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "labyrinth/schedule_pin_boundary_w2.py",
             "labyrinth/graduation_state_external_custody_w4.py",
             "labyrinth/q7_temporal_custody_source.py",
+            "labyrinth/q7_witnessed_cas_intake_r93.py",
+            "labyrinth/q8_witness_restore_r93.py",
+            "labyrinth/q6_stratified_toy_study_r93.py",
+            "labyrinth/adaptive_minotaur_r93.py",
             "labyrinth/q8_host_authority_probe.py",
             "labyrinth/graduation_gate.py",
             "labyrinth/objective_challenge_provider_r92.py",
@@ -448,6 +452,10 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "scripts/experiments/q5_multiseed_campaign.py",
             "docs/qualification/REZON_RECEIPT_BINDING_R69.md",
             "docs/qualification/Q7_TEMPORAL_CUSTODY_SOURCE.md",
+            "docs/qualification/Q7_WITNESSED_SOURCE_CAS_R93.md",
+            "docs/qualification/Q8_HOST_WITNESS_RESTORE_R93.md",
+            "docs/qualification/Q6_STRATIFIED_TOY_SOURCE_STUDY_R93.md",
+            "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md",
             "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md",
             "docs/qualification/Q5_PRIVATE_HOLDOUT_EVAL_R92.md",
             "tests/test_private_wheel_cli_checkpoint_r70.py",
@@ -456,6 +464,10 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "tests/test_graduation_state_external_custody_w4.py",
             "tests/test_q5_multiseed_campaign.py",
             "tests/test_q7_temporal_custody_source.py",
+            "tests/test_q7_witnessed_cas_intake_r93.py",
+            "tests/test_q8_witness_restore_r93.py",
+            "tests/test_q6_stratified_toy_study_r93.py",
+            "tests/test_adaptive_minotaur_r93.py",
             "tests/test_q8_host_authority_probe.py",
             "tests/test_graduation_gate.py",
             "tests/test_objective_challenge_provider_r92.py",
@@ -475,11 +487,15 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             ("tests.test_graduation_state_external_custody_w4", 10),
             ("tests.test_q5_multiseed_campaign", 9),
             ("tests.test_q7_temporal_custody_source", 9),
+            ("tests.test_q7_witnessed_cas_intake_r93", 12),
+            ("tests.test_q8_witness_restore_r93", 16),
+            ("tests.test_q6_stratified_toy_study_r93", 9),
+            ("tests.test_adaptive_minotaur_r93", 6),
             ("tests.test_graduation_gate", 27),
             ("tests.test_objective_challenge_provider_r92", 7),
             ("tests.test_minotaur_counterfactual_corridors_r92", 19),
             ("tests.test_q8_host_authority_probe", 18),
-            ("tests.test_q5_holdout_eval_r92", 20),
+            ("tests.test_q5_holdout_eval_r92", 23),
             ("tests.test_objective_learning_loop_r92", 5),
         ):
             with self.subTest(module=module):
@@ -530,7 +546,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             for manifest in triggers:
                 self.assertIn(f'      - "{path}"', manifest)
         self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
-        self.assertIn('("tests.test_neural_cycle_checkpoint_r92", 21)', workflow)
+        self.assertIn('("tests.test_neural_cycle_checkpoint_r92", 23)', workflow)
 
     def test_l12_l14_neural_and_custody_boundaries_are_required_in_cpu_ci(self):
         root = Path(__file__).resolve().parents[1]

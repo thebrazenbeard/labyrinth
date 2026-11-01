@@ -10,7 +10,8 @@ This module cannot qualify Q7/Q8 or authorize graduation/deployment.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from copy import deepcopy
 from hashlib import sha256
 from hmac import compare_digest, new as hmac_new
 import json
@@ -540,6 +541,17 @@ def evaluate_private_q5(*, seeds: tuple[PrivateSeed, ...], exam: SignedBytes,
     chronology. A protected host must attest pretraining custody and true
     inference separately. SQLite must live outside trainer write authority.
     """
+    # Snapshot caller-held source material and externally configured pins at
+    # the examiner boundary. `frozen=True` alone is insufficient:
+    # object.__setattr__ can change a signing-role pin after its distinct-key
+    # check, or a PrivateCase.gold value after the signed bank HMAC check but
+    # before scoring. All subsequent reads use these local snapshots.
+    _require(type(pins) is Q5TrustPins, "exact examiner pins required")
+    pins = replace(pins)
+    _require(type(seeds) is tuple and 8 <= len(seeds) <= 64 and
+             all(type(s) is PrivateSeed for s in seeds),
+             "8..64 exact private seed outcomes required")
+    seeds = deepcopy(seeds)
     prediction_pins, retention_pins = _validate_pins(pins, evaluator_private_key)
     cases = _bank(seeds)
     _require(not {c.case_id for c in cases} & pins.excluded_case_ids and
