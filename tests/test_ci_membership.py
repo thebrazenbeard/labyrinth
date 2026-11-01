@@ -444,6 +444,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "labyrinth/q8_witness_restore_r93.py",
             "labyrinth/q6_stratified_toy_study_r93.py",
             "labyrinth/minotaur_hf_roster_bridge.py",
+            "labyrinth/hf_adaptive_source_v1.py",
             "labyrinth/adaptive_minotaur_r93.py",
             "labyrinth/q8_host_authority_probe.py",
             "labyrinth/graduation_gate.py",
@@ -459,6 +460,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "docs/qualification/Q6_STRATIFIED_TOY_SOURCE_STUDY_R93.md",
             "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md",
             "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md",
+            "docs/qualification/R105_ADAPTIVE_HF_SOURCE_RESEARCH.md",
             "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md",
             "docs/qualification/Q5_PRIVATE_HOLDOUT_EVAL_R92.md",
             "tests/test_private_wheel_cli_checkpoint_r70.py",
@@ -471,6 +473,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "tests/test_q8_witness_restore_r93.py",
             "tests/test_q6_stratified_toy_study_r93.py",
             "tests/test_minotaur_hf_roster_bridge.py",
+            "tests/test_hf_adaptive_source_v1.py",
             "tests/test_adaptive_minotaur_r93.py",
             "tests/test_q8_host_authority_probe.py",
             "tests/test_graduation_gate.py",
@@ -486,9 +489,10 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
                     self.assertIn(f'      - "{path}"', manifest)
         for module, minimum in (
             ("tests.test_qualify_minilm_cpu", 7),
-            ("tests.test_hf_pilot", 39),
+            ("tests.test_hf_pilot", 43),
+            ("tests.test_hf_adaptive_source_v1", 6),
             ("tests.test_minotaur_hf_roster_bridge", 14),
-            ("tests.test_hf_report_audit", 17),
+            ("tests.test_hf_report_audit", 18),
             ("tests.test_external_monotonic_authority_contract", 17),
             ("tests.test_private_wheel_cli_checkpoint_r70", 1),
             ("tests.test_rezon_receipt_binding_r69", 5),
@@ -498,7 +502,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             ("tests.test_q7_temporal_custody_source", 9),
             ("tests.test_q7_witnessed_cas_intake_r93", 12),
             ("tests.test_q8_witness_restore_r93", 23),
-            ("tests.test_q6_stratified_toy_study_r93", 21),
+            ("tests.test_q6_stratified_toy_study_r93", 23),
             ("tests.test_adaptive_minotaur_r93", 9),
             ("tests.test_graduation_gate", 28),
             ("tests.test_objective_challenge_provider_r92", 7),
@@ -779,9 +783,11 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "  workflow_dispatch:\n", 1)[0]
         for path in (
             "labyrinth/hf_pilot.py",
+            "labyrinth/hf_adaptive_source_v1.py",
             "labyrinth/hf_report_audit.py",
             "labyrinth/objective_contract.py",
             "tests/test_hf_pilot.py",
+            "tests/test_hf_adaptive_source_v1.py",
             "tests/test_hf_report_audit.py",
             "tests/test_hf_journey_resume_integration.py",
             "tests/test_hf_scoped_report_audit.py",
@@ -796,6 +802,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "      - name: Minotaur tests with neural dependencies present\n", 1)[1]
         for module in (
             "tests.test_hf_pilot",
+            "tests.test_hf_adaptive_source_v1",
             "tests.test_hf_report_audit",
             "tests.test_hf_journey_resume_integration",
             "tests.test_hf_scoped_report_audit",

@@ -21,6 +21,7 @@ from .hf_pilot import (
 )
 from .runner import _source_state
 from .training_scope import TrainingScopeSpec
+from .hf_adaptive_source_v1 import ADAPTIVE_SCHEMA, reconstruct_adaptive_source
 
 AUDIT_SCHEMA = "labyrinth.hf-pilot-audit.v1"
 ARMS = ("baseline", "sham", "candidate", "corrupted")
@@ -80,10 +81,16 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
             ],
         }
 
-    if not isinstance(report, dict) or report.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
+    if not isinstance(report, dict) or report.get("schema") not in (
+        SCHEMA, LEGACY_SCHEMA, ADAPTIVE_SCHEMA,
+    ):
         fail("invalid HF pilot report schema")
         return result()
-    matched = report["schema"] == SCHEMA
+    adaptive = report["schema"] == ADAPTIVE_SCHEMA
+    matched = report["schema"] in (SCHEMA, ADAPTIVE_SCHEMA)
+    if not adaptive and "adaptive_train_source_v1" in report:
+        fail("adaptive TRAIN source manifest forbidden under historical HF schema")
+        return result()
     source = report.get("source")
     if not isinstance(source, dict) or not _digest(source.get("source_tree_sha256")):
         fail("missing or malformed HF pilot source fingerprint")
@@ -154,7 +161,14 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
         return result()
     journey = report.get("resumed_journey")
     try:
-        if journey is None:
+        if adaptive:
+            if journey is not None:
+                raise ValueError("adaptive source v1 is cycle-zero only, not an HF resume")
+            train, heldout, _ = reconstruct_adaptive_source(
+                PilotConfig(**{**config, "tiers": tuple(tiers)}),
+                report.get("adaptive_train_source_v1"),
+            )
+        elif journey is None:
             # Match the pilot's bounded semantic split regeneration. A fixed
             # eval seed would falsely reject a legitimate rerolled heldout
             # report whenever commutative TRAIN/EVAL expressions collide.
@@ -298,12 +312,14 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
             isinstance(training[arm], dict) and "visited_exposures" in training[arm]
             for arm in arms
         )
+        if adaptive and not has_exposure_receipts:
+            fail("adaptive source requires complete optimizer exposure receipts")
         for arm in arms:
             record = training[arm]
             if not isinstance(record, dict) or record.get("visited_case_ids") != expected_visits:
                 fail(f"{arm}: training visit order mismatch")
                 continue
-            if has_exposure_receipts:
+            if has_exposure_receipts or adaptive:
                 visits = record.get("visited_exposures")
                 if (not isinstance(visits, (list, tuple)) or len(visits) != steps
                         or any(not isinstance(pair, (list, tuple)) or len(pair) != 2

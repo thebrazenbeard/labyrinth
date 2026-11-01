@@ -25,11 +25,14 @@ import random
 import re
 import sys
 import tempfile
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from .evaluation import score_response
 from .maze import Challenge, generate_maze
 from .runner import _source_state, load_json
+
+if TYPE_CHECKING:
+    from .minotaur_hf_roster_bridge import MinotaurHfTrainRoster
 
 
 LEGACY_SCHEMA = "labyrinth.hf-lora-pilot.v2"
@@ -1009,7 +1012,9 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
               predecessor_run_dir: str | Path | None = None, resume_context: Any = None,
               weak_skills: tuple[str, ...] = (),
               allow_unscoped_predecessor: bool = False,
-              unauthenticated_research_resume: bool = False) -> dict[str, Any]:
+              unauthenticated_research_resume: bool = False,
+              adaptive_train_roster: MinotaurHfTrainRoster | None = None,
+              allow_unattested_adaptive_train: bool = False) -> dict[str, Any]:
     """Run fixed-budget LoRA-SFT and controls, save a new adapter and report.
 
     For ordinary runs, baseline and sham share the base checkpoint. With an
@@ -1017,7 +1022,39 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     arms start from identical, verified previous LoRA *tensor values*. No
     optimizer state is retained. Cycle zero can start a new scoped journey.
     A separate process must run `reload_evaluate` to qualify persistence.
+
+    A distinct opt-in, cycle-zero adaptive source mode uses a previously
+    staged Minotaur TRAIN roster with its own versioned report contract.
+    This is operator-trusted source integrity, not independent custody or a
+    neural graduation authorization; v2/v3 and resumed runs are unchanged.
     """
+    if type(allow_unattested_adaptive_train) is not bool:
+        raise ValueError("adaptive research-only opt-in must be a boolean")
+    adaptive_source_requested = adaptive_train_roster is not None or allow_unattested_adaptive_train
+    adaptive_manifest = None
+    adaptive_report_schema = None
+    if adaptive_source_requested:
+        from .minotaur_hf_roster_bridge import MinotaurHfTrainRoster
+        from .training_scope import TrainingScopeSpec
+
+        if type(config) is not PilotConfig:
+            raise TypeError("adaptive TRAIN source requires an exact PilotConfig")
+        if (allow_unattested_adaptive_train is not True
+                or type(adaptive_train_roster) is not MinotaurHfTrainRoster
+                or type(scope) is not TrainingScopeSpec
+                or type(cycle_index) is not int or cycle_index != 0
+                or predecessor_run_dir is not None or resume_context is not None
+                or weak_skills != () or allow_unscoped_predecessor
+                or unauthenticated_research_resume):
+            raise ValueError(
+                "adaptive TRAIN source requires explicit unqualified cycle-zero "
+                "scope and forbids predecessor/resume controls"
+            )
+        TrainingScopeSpec.__post_init__(scope)
+        if (adaptive_train_roster.scope_sha256 != scope.fingerprint
+                or adaptive_train_roster.cycle_index != cycle_index
+                or len(adaptive_train_roster.train_cases) != config.train_count):
+            raise ValueError("adaptive TRAIN roster differs from declared scope or count")
     if type(unauthenticated_research_resume) is not bool:
         raise ValueError("research-only resume flag must be a boolean")
     development_resume_authority = None
@@ -1056,7 +1093,25 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     resume_source = None
     resume_receipt = None
     plan = None
-    if scope is None:
+    if adaptive_source_requested:
+        from .hf_adaptive_source_v1 import (
+            ADAPTIVE_SCHEMA, build_adaptive_manifest, reconstruct_adaptive_source,
+        )
+
+        # The manifest is independently replayed from approved source routes
+        # before any tokenizer/model callback. Never trust a roster's public
+        # ID/hash list as sufficient evidence of its private supervision.
+        adaptive_manifest = build_adaptive_manifest(config, scope, adaptive_train_roster)
+        train, heldout, regenerated_exposures = reconstruct_adaptive_source(
+            config, adaptive_manifest,
+        )
+        if (_training_case_content(train)
+                != _training_case_content(adaptive_train_roster.train_cases)
+                or regenerated_exposures
+                != adaptive_train_roster.ordered_optimizer_exposures):
+            raise ValueError("adaptive TRAIN manifest replay differs from staged supervision")
+        adaptive_report_schema = ADAPTIVE_SCHEMA
+    elif scope is None:
         if (cycle_index is not None or predecessor_run_dir is not None or resume_context is not None
                 or weak_skills or allow_unscoped_predecessor):
             raise ValueError("journey options require an explicit training scope")
@@ -1098,6 +1153,14 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         train, seed=config.seed, steps=config.steps,
     )
     planned_train_content = _training_case_content(train)
+    planned_adaptive_heldout_content = (
+        _training_case_content(heldout) if adaptive_manifest is not None else None
+    )
+
+    def assert_adaptive_diagnostic_unchanged() -> None:
+        if planned_adaptive_heldout_content is not None:
+            _assert_training_case_content(heldout, planned_adaptive_heldout_content)
+
     canonical_train_answers = tuple(case.answer for case in train)
     corrupted_answers = derange_answers(train)
     torch, auto_model, auto_tokenizer, peft_parts, device = _deps(config.device)
@@ -1134,10 +1197,12 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     for case, answer in zip(train, corrupted_answers):
         _encode_pair(tokenizer, case.prompt, answer, config.max_tokens,
                      answer_only=config.answer_only)
+    assert_adaptive_diagnostic_unchanged()
     baseline = _score_model(model if resume_source is not None else base,
                             tokenizer, torch, heldout, device=device,
                             max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
+    assert_adaptive_diagnostic_unchanged()
     _assert_training_case_content(train, planned_train_content)
     if resume_source is None:
         model = get_peft_model(base, lora_config(r=config.lora_rank, lora_alpha=config.lora_alpha,
@@ -1169,9 +1234,11 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "zero-LR placebo",
     )
+    assert_adaptive_diagnostic_unchanged()
     sham = _score_model(model, tokenizer, torch, heldout, device=device,
                         max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
+    assert_adaptive_diagnostic_unchanged()
     _assert_frozen_state(
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "zero-LR placebo evaluation",
@@ -1196,9 +1263,11 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "correct-label training",
     )
+    assert_adaptive_diagnostic_unchanged()
     candidate = _score_model(model, tokenizer, torch, heldout, device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
+    assert_adaptive_diagnostic_unchanged()
     _assert_frozen_state(
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "correct-label evaluation",
@@ -1234,9 +1303,11 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
         model, torch, initial_frozen_digest, initial_buffer_digest,
         "corrupted-label training",
     )
+    assert_adaptive_diagnostic_unchanged()
     corrupted = _score_model(model, tokenizer, torch, heldout, device=device,
                              max_tokens=config.max_tokens, max_new_tokens=config.max_new_tokens,
                             answer_only=config.answer_only)
+    assert_adaptive_diagnostic_unchanged()
     _assert_training_case_content(train, planned_train_content)
     _assert_frozen_state(
         model, torch, initial_frozen_digest, initial_buffer_digest,
@@ -1245,7 +1316,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
     _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
     candidate_adapter_manifest = _adapter_manifest(candidate_dir)
     result: dict[str, Any] = {
-        "schema": SCHEMA,
+        "schema": adaptive_report_schema or SCHEMA,
         "adaptation_kind": "local HF causal-LM PEFT LoRA supervised parameter update",
         "source": _source_state(),
         "training_process_id": os.getpid(),
@@ -1282,6 +1353,12 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
                         "Only the adapter was persisted; base weights remain unchanged.",
                         "Same-process scores do not qualify independent checkpoint reload."],
     }
+    if adaptive_manifest is not None:
+        result["adaptive_train_source_v1"] = adaptive_manifest
+        result["limitations"].extend([
+            "Adaptive Minotaur TRAIN selection and optimizer visits are source-only and operator-trusted.",
+            "The adaptive source manifest is not an evaluator-held examination or physical training witness.",
+        ])
     if plan is not None:
         historical_ids = {case.id for case in train + heldout}
         historical_prompts = {hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
@@ -1391,6 +1468,7 @@ def run_pilot(config: PilotConfig, *, scope: Any = None, cycle_index: int | None
                 "Resumed only adapter tensor values, not AdamW optimizer moments or any subjective experience."
             )
     _assert_training_case_content(train, planned_train_content)
+    assert_adaptive_diagnostic_unchanged()
     _save_new(output_dir / "pilot_report.json", result)
     return result
 
@@ -1438,8 +1516,14 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     root = Path(run_dir).expanduser().resolve(strict=True)
     source = root / "pilot_report.json"
     report = load_json(source)
-    if report.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
+    from .hf_adaptive_source_v1 import ADAPTIVE_SCHEMA, reconstruct_adaptive_source
+
+    report_schema = report.get("schema")
+    if report_schema not in (SCHEMA, LEGACY_SCHEMA, ADAPTIVE_SCHEMA):
         raise ValueError("unknown training pilot report schema")
+    adaptive = report_schema == ADAPTIVE_SCHEMA
+    if not adaptive and "adaptive_train_source_v1" in report:
+        raise ValueError("legacy pilot report cannot claim adaptive TRAIN source")
     source_state = report.get("source")
     if not isinstance(source_state, dict) or source_state.get("source_tree_sha256") != _source_state()["source_tree_sha256"]:
         raise ValueError("source revision changed since training")
@@ -1463,7 +1547,33 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     if actual_adapters != report.get("candidate_adapter_sha256"):
         raise ValueError("candidate adapter changed after training")
     cycle_receipt = report.get("resumed_journey")
-    if cycle_receipt is None:
+    if adaptive:
+        if cycle_receipt is not None:
+            raise ValueError("adaptive TRAIN source cannot claim a resumed journey")
+        train_cases, heldout, expected_exposures = reconstruct_adaptive_source(
+            config, report.get("adaptive_train_source_v1"),
+        )
+        if report.get("training_case_ids") != [case.id for case in train_cases]:
+            raise ValueError("adaptive TRAIN source identities changed since training")
+        training = report.get("training")
+        expected_rows = [list(pair) for pair in expected_exposures]
+        if (type(training) is not dict
+                or set(training) != {"sham", "candidate", "corrupted"}
+                or any(type(training[arm]) is not dict
+                       or training[arm].get("visited_case_ids")
+                       != [case_id for case_id, _ in expected_exposures]
+                       or training[arm].get("visited_exposures") != expected_rows
+                       for arm in ("sham", "candidate", "corrupted"))):
+            raise ValueError("adaptive TRAIN optimizer exposures are missing or inconsistent")
+        # The adaptive report is a distinct, strictly internally audited
+        # source contract. A valid roster alone is insufficient to reload a
+        # candidate when controls, evaluation trials, or source commitments
+        # have been changed. Legacy v2/v3 reload behavior remains untouched.
+        from .hf_report_audit import audit_hf_report
+
+        if audit_hf_report(report)["status"] != "PASS":
+            raise ValueError("adaptive HF report fails strict internal source audit")
+    elif cycle_receipt is None:
         _, heldout = training_cases(config)
     else:
         from .training_scope import TrainingScopeSpec

@@ -2,7 +2,7 @@
 
 import json
 import hashlib
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 import subprocess
 import sys
@@ -54,6 +54,274 @@ class HfPilotContractTests(unittest.TestCase):
 
     def spec(self, **kwargs):
         return PilotConfig(model_path=str(self.model), output_dir=str(self.output), **kwargs)
+
+    def _adaptive_staged_fixture(self):
+        from tests.test_minotaur_hf_roster_bridge import _runner
+        from tests.test_journey_policy_runner import toy_arithmetic_learner
+        from labyrinth.minotaur_hf_roster_bridge import collect_minotaur_hf_roster
+
+        config = self.spec(seed=31, train_count=3, eval_count=3,
+                           steps=5, tiers=(1,))
+        runner = _runner()
+        roster = collect_minotaur_hf_roster(
+            runner, config, toy_arithmetic_learner,
+        )
+        self.assertEqual([dict(case.metadata)["tactic"] for case in roster.train_cases],
+                         ["practice", "practice", "contrast"])
+        return config, runner.state.scope, roster
+
+    def test_adaptive_pilot_requires_explicit_cycle_zero_source_consent_before_deps(self):
+        config, scope, roster = self._adaptive_staged_fixture()
+        invalid = (
+            {"scope": scope, "cycle_index": 0,
+             "adaptive_train_roster": roster},
+            {"scope": scope, "cycle_index": 0,
+             "allow_unattested_adaptive_train": True},
+            {"adaptive_train_roster": roster,
+             "allow_unattested_adaptive_train": True},
+            {"scope": scope, "cycle_index": 1,
+             "adaptive_train_roster": roster,
+             "allow_unattested_adaptive_train": True},
+            {"scope": replace(scope, seed=scope.seed + 1), "cycle_index": 0,
+             "adaptive_train_roster": roster,
+             "allow_unattested_adaptive_train": True},
+            {"scope": scope, "cycle_index": 0,
+             "adaptive_train_roster": replace(
+                 roster, ordered_optimizer_exposures=tuple(reversed(
+                     roster.ordered_optimizer_exposures))),
+             "allow_unattested_adaptive_train": True},
+        )
+        with patch("labyrinth.hf_pilot._deps", side_effect=AssertionError(
+            "heavy model initialization must not begin")):
+            for options in invalid:
+                with self.subTest(options=tuple(options)), self.assertRaises(ValueError):
+                    run_pilot(config, **options)
+        self.assertFalse(self.output.exists())
+
+    def test_adaptive_pilot_uses_staged_source_not_legacy_generator(self):
+        config, scope, roster = self._adaptive_staged_fixture()
+        with (
+            patch("labyrinth.hf_pilot.training_cases", side_effect=AssertionError(
+                "legacy static TRAIN generator was called")),
+            patch("labyrinth.hf_pilot._scoped_training_cases", side_effect=AssertionError(
+                "legacy scoped TRAIN generator was called")),
+            patch("labyrinth.hf_pilot._deps", side_effect=RuntimeError(
+                "reached heavy dependency boundary")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "reached heavy dependency boundary"):
+                run_pilot(
+                    config, scope=scope, cycle_index=0,
+                    adaptive_train_roster=roster,
+                    allow_unattested_adaptive_train=True,
+                )
+        self.assertFalse(self.output.exists())
+
+    def test_adaptive_pilot_rejects_heldout_mutation_before_any_train_arm(self):
+        config, scope, roster = self._adaptive_staged_fixture()
+
+        class Parameter:
+            requires_grad = True
+
+            def detach(self):
+                return self
+
+            def clone(self):
+                return self
+
+        class FakeModel:
+            def named_parameters(self):
+                return [("layer.lora_A", Parameter())]
+
+        fake_torch = SimpleNamespace(
+            get_num_threads=lambda: 4, set_num_threads=lambda _n: None,
+            manual_seed=lambda _n: None,
+            use_deterministic_algorithms=lambda _value: None,
+        )
+
+        def mutate_diagnostic(_model, _tokenizer, _torch, cases, **_kwargs):
+            object.__setattr__(cases[0], "answer", "tampered after evaluation")
+            return {"total": len(cases)}
+
+        with (
+            patch("labyrinth.hf_pilot._deps", return_value=(
+                fake_torch, object(), object(),
+                (lambda **_kw: object(), object(), lambda base, _cfg: base), "cpu",
+            )),
+            patch("labyrinth.hf_pilot._load_base", return_value=(FakeModel(), object())),
+            patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])),
+            patch("labyrinth.hf_pilot._score_model", side_effect=mutate_diagnostic),
+            patch("labyrinth.hf_pilot._device_headroom", return_value=None),
+            patch("labyrinth.hf_pilot._parameter_digest", return_value="a" * 64),
+            patch("labyrinth.hf_pilot._frozen_parameter_digest", return_value="b" * 64),
+            patch("labyrinth.hf_pilot._buffer_digest", return_value="c" * 64),
+            patch("labyrinth.hf_pilot._train_steps", side_effect=AssertionError(
+                "optimizer must not start after diagnostic source mutation")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "case content changed"):
+                run_pilot(
+                    config, scope=scope, cycle_index=0,
+                    adaptive_train_roster=roster,
+                    allow_unattested_adaptive_train=True,
+                )
+        self.assertFalse(self.output.exists())
+
+    def test_adaptive_pilot_three_arms_train_on_staged_source_with_sealed_report(self):
+        from contextlib import nullcontext
+        from labyrinth.evaluation import score_response
+        from labyrinth.hf_adaptive_source_v1 import ADAPTIVE_SCHEMA
+        from labyrinth.hf_report_audit import audit_hf_report
+
+        config, scope, roster = self._adaptive_staged_fixture()
+        initial, trained, corrupted = "a" * 64, "b" * 64, "c" * 64
+
+        class Parameter:
+            requires_grad = True
+
+            def __init__(self, owner, snapshot=None):
+                self.owner = owner
+                self.snapshot = snapshot
+
+            def detach(self):
+                return self
+
+            def clone(self):
+                return Parameter(self.owner, self.owner.value)
+
+            def copy_(self, other):
+                self.owner.value = other.snapshot
+
+        class Model:
+            def __init__(self):
+                self.value = initial
+                self.parameter = Parameter(self)
+
+            def named_parameters(self):
+                return [("layer.lora_A.default.weight", self.parameter)]
+
+            def save_pretrained(self, directory, *, safe_serialization):
+                self.saved = self.value
+                path = Path(directory)
+                path.mkdir()
+                (path / "adapter_model.safetensors").write_bytes(b"fake-adaptive-weights")
+
+        model = Model()
+        torch = SimpleNamespace(
+            get_num_threads=lambda: 4, set_num_threads=lambda _n: None,
+            manual_seed=lambda _seed: None,
+            use_deterministic_algorithms=lambda _value: None,
+            no_grad=lambda: nullcontext(),
+        )
+        visits = []
+
+        def fake_train(current, _tokenizer, _torch, train, labels, pilot,
+                       *, learning_rate=None, expected_visit_exposures=None):
+            self.assertEqual(tuple(train), roster.train_cases)
+            self.assertEqual(tuple(expected_visit_exposures),
+                             roster.ordered_optimizer_exposures)
+            self.assertEqual(current.value, initial)
+            if learning_rate == 0.0:
+                arm = "sham"
+            elif tuple(labels) == tuple(case.answer for case in train):
+                arm = "candidate"
+                current.value = trained
+            else:
+                arm = "corrupted"
+                current.value = corrupted
+            visits.append(arm)
+            return {
+                "steps": pilot.steps, "example_visits": pilot.steps,
+                "visited_case_ids": [case_id for case_id, _ in expected_visit_exposures],
+                "visited_exposures": list(expected_visit_exposures),
+                "input_tokens_seen": 200,
+                "losses": [2.0] * pilot.steps,
+            }
+
+        def fake_score(_model, _tokenizer, _torch, cases, **_kwargs):
+            records = []
+            for case in cases:
+                answer = "ANSWER: 0"
+                scored = score_response(case, answer)
+                records.append({
+                    "id": case.id, "correct": scored.correct,
+                    "score_reason": scored.reason,
+                    "response_preview": answer,
+                    "response_sha256": hashlib.sha256(answer.encode()).hexdigest(),
+                })
+            correct = sum(record["correct"] for record in records)
+            return {
+                "correct": correct, "total": len(records),
+                "accuracy": correct / len(records),
+                "format_valid": len(records), "format_rate": 1.0,
+                "trials": records,
+            }
+
+        with (
+            patch("labyrinth.hf_pilot.training_cases", side_effect=AssertionError(
+                "legacy static TRAIN called")),
+            patch("labyrinth.hf_pilot._scoped_training_cases", side_effect=AssertionError(
+                "legacy scoped TRAIN called")),
+            patch("labyrinth.hf_pilot._deps", return_value=(
+                torch, object(), object(),
+                (lambda **_kw: object(), object(), lambda base, _cfg: base), "cpu",
+            )),
+            patch("labyrinth.hf_pilot._load_base", return_value=(model, object())),
+            patch("labyrinth.hf_pilot._encode_pair", return_value=([1], [1])),
+            patch("labyrinth.hf_pilot._score_model", side_effect=fake_score),
+            patch("labyrinth.hf_pilot._device_headroom", return_value=None),
+            patch("labyrinth.hf_pilot._train_steps", side_effect=fake_train),
+            patch("labyrinth.hf_pilot._parameter_digest", side_effect=lambda obj, _t: obj.value),
+            patch("labyrinth.hf_pilot._lora_value_digest", side_effect=lambda obj, _t: obj.value),
+            patch("labyrinth.hf_pilot._frozen_parameter_digest", return_value="d" * 64),
+            patch("labyrinth.hf_pilot._buffer_digest", return_value="e" * 64),
+            patch("labyrinth.hf_pilot.package_version", return_value="synthetic-test"),
+        ):
+            result = run_pilot(
+                config, scope=scope, cycle_index=0,
+                adaptive_train_roster=roster,
+                allow_unattested_adaptive_train=True,
+            )
+
+        self.assertEqual(visits, ["sham", "candidate", "corrupted"])
+        self.assertEqual(result["schema"], ADAPTIVE_SCHEMA)
+        self.assertEqual(result["training_case_ids"], [c.id for c in roster.train_cases])
+        self.assertEqual(result["training"]["sham"]["visited_exposures"],
+                         list(roster.ordered_optimizer_exposures))
+        self.assertIn("adaptive_train_source_v1", result)
+        self.assertFalse(result.get("resumed_journey"))
+        self.assertEqual(model.saved, trained)
+        saved = json.loads((self.output / "pilot_report.json").read_text(encoding="utf-8"))
+        self.assertEqual(audit_hf_report(saved)["status"], "PASS")
+        # The same adaptive manifest is reconstructed for a separate-process
+        # reload, including the identical heldout source and adapter bytes.
+        # Changed control evidence must fail before a model is imported.
+        reload_path = self.output / "reload-evaluation.json"
+        reloaded_model = Model()
+        reloaded_model.value = trained
+        peft_loader = SimpleNamespace(
+            from_pretrained=lambda _base, _path, **_kwargs: reloaded_model,
+        )
+        with (
+            patch("labyrinth.hf_pilot._deps", return_value=(
+                torch, object(), object(), (object(), peft_loader, object()), "cpu",
+            )),
+            patch("labyrinth.hf_pilot._load_base", return_value=(object(), object())),
+            patch("labyrinth.hf_pilot._lora_value_digest", side_effect=lambda obj, _t: obj.value),
+            patch("labyrinth.hf_pilot._score_model", side_effect=fake_score),
+        ):
+            reloaded = reload_evaluate(self.output, reload_path)
+        self.assertTrue(reloaded["matches_original_candidate_trials"])
+        self.assertEqual(reloaded["reloaded_lora_tensor_value_sha256"], trained)
+        self.assertTrue(reload_path.is_file())
+        saved["control_data"]["sham_updates"] = 1
+        (self.output / "pilot_report.json").write_text(
+            json.dumps(saved), encoding="utf-8",
+        )
+        tampered_reload = self.output / "tampered-reload-evaluation.json"
+        with patch("labyrinth.hf_pilot._deps", side_effect=AssertionError(
+            "tampered adaptive report reached model load")):
+            with self.assertRaisesRegex(ValueError, "strict internal source audit"):
+                reload_evaluate(self.output, tampered_reload)
+        self.assertFalse(tampered_reload.exists())
 
     def _source_visit_fixture(self):
         from labyrinth import hf_pilot

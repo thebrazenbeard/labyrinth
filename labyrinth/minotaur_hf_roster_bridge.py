@@ -27,6 +27,12 @@ class MinotaurHfTrainRoster:
     cycle_index: int
     train_cases: tuple[Challenge, ...] = field(repr=False)
     ordered_optimizer_exposures: tuple[tuple[str, str], ...]
+    # A cycle-zero source replay can independently derive each adaptive room
+    # from prior TRAIN feedback. These detached primitive values carry no
+    # answer key or privileged host approval; older source-only callers can
+    # still construct a roster without them, but adaptive HF admission cannot.
+    initial_checkpoint_sha256: str = ""
+    adaptive_feedback_rows: tuple[tuple[str, str, str, int, str, str], ...] = ()
 
     @property
     def physically_authenticated(self) -> bool:
@@ -178,6 +184,32 @@ def collect_minotaur_hf_roster(
                 != hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()):
             raise ValueError("TRAIN catalog is not approved by the current registry")
 
+    # The adaptive chamber's room_id and case_seed are derived from the
+    # *previous* feedback, not from the static initial maze room IDs. Retain
+    # this minimal public route history so the report auditor can replay the
+    # assignment without trusting arbitrary caller-supplied case seeds.
+    history = runner.state.history
+    observed = runner.observations
+    if len(history) != len(snapshots) or len(observed) != len(snapshots):
+        raise ValueError("adaptive TRAIN source history is incomplete")
+    feedback_rows: list[tuple[str, str, str, int, str, str]] = []
+    for event, case, outcome in zip(history, snapshots, observed, strict=True):
+        assignment, feedback = event.assignment, event.feedback
+        prompt_sha = hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
+        if (feedback.room_id != assignment.room_id
+                or feedback.case_id != case.id
+                or feedback.prompt_sha256 != prompt_sha
+                or feedback.score != int(outcome.correct)
+                or outcome.room_id != assignment.room_id
+                or outcome.case_id != case.id
+                or outcome.prompt_sha256 != prompt_sha):
+            raise ValueError("adaptive TRAIN route history differs from admitted cases")
+        feedback_rows.append((
+            assignment.room_id, feedback.case_id, feedback.prompt_sha256,
+            feedback.score, feedback.checkpoint_before_sha256,
+            feedback.checkpoint_after_sha256,
+        ))
+
     return MinotaurHfTrainRoster(
         scope_sha256=scope.fingerprint,
         cycle_index=runner.state.plan.cycle_index,
@@ -185,4 +217,6 @@ def collect_minotaur_hf_roster(
         ordered_optimizer_exposures=_training_visit_exposures(
             snapshots, seed=config.seed, steps=config.steps,
         ),
+        initial_checkpoint_sha256=runner.state.initial_checkpoint_sha256,
+        adaptive_feedback_rows=tuple(feedback_rows),
     )
