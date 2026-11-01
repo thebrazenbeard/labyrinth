@@ -78,10 +78,13 @@ on:
       - "labyrinth/q7_witnessed_cas_intake_r93.py"
       - "labyrinth/q8_witness_restore_r93.py"
       - "labyrinth/q6_stratified_toy_study_r93.py"
+      - "labyrinth/q6_governed_campaign_contract.py"
       - "labyrinth/adaptive_minotaur_r93.py"
       - "labyrinth/q8_host_authority_probe.py"
       - "labyrinth/graduation_gate.py"
       - "labyrinth/objective_challenge_provider_r92.py"
+      - "labyrinth/approved_train_provider_r90.py"
+      - "labyrinth/objective_training_run.py"
       - "labyrinth/minotaur_counterfactual_corridors_r92.py"
       - "labyrinth/neural_cycle_checkpoint_r92.py"
       - "scripts/experiments/q5_multiseed_campaign.py"
@@ -107,6 +110,8 @@ on:
       - "tests/test_q5_holdout_eval_r92.py"
       - "labyrinth/objective_learning_loop_r92.py"
       - "tests/test_objective_learning_loop_r92.py"
+      - "tests/test_approved_train_provider_r90.py"
+      - "tests/test_objective_training_run.py"
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/rezon_toy_pair_consumer_r76.py"
       - "labyrinth/minotaur_train_roster_manifest_v1.py"
@@ -150,6 +155,8 @@ on:
       - "tests/test_q7_witnessed_cas_intake_r93.py"
       - "tests/test_q8_witness_restore_r93.py"
       - "tests/test_q6_stratified_toy_study_r93.py"
+      - "tests/test_q6_governed_campaign_contract.py"
+      - "tests/test_minotaur_feedback_divergence_r93.py"
       - "tests/test_adaptive_minotaur_r93.py"
       - "tests/test_q8_host_authority_probe.py"
       - "tests/test_graduation_gate.py"
@@ -327,10 +334,13 @@ on:
       - "labyrinth/q7_witnessed_cas_intake_r93.py"
       - "labyrinth/q8_witness_restore_r93.py"
       - "labyrinth/q6_stratified_toy_study_r93.py"
+      - "labyrinth/q6_governed_campaign_contract.py"
       - "labyrinth/adaptive_minotaur_r93.py"
       - "labyrinth/q8_host_authority_probe.py"
       - "labyrinth/graduation_gate.py"
       - "labyrinth/objective_challenge_provider_r92.py"
+      - "labyrinth/approved_train_provider_r90.py"
+      - "labyrinth/objective_training_run.py"
       - "labyrinth/minotaur_counterfactual_corridors_r92.py"
       - "labyrinth/neural_cycle_checkpoint_r92.py"
       - "scripts/experiments/q5_multiseed_campaign.py"
@@ -356,6 +366,8 @@ on:
       - "tests/test_q5_holdout_eval_r92.py"
       - "labyrinth/objective_learning_loop_r92.py"
       - "tests/test_objective_learning_loop_r92.py"
+      - "tests/test_approved_train_provider_r90.py"
+      - "tests/test_objective_training_run.py"
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/rezon_toy_pair_consumer_r76.py"
       - "labyrinth/minotaur_train_roster_manifest_v1.py"
@@ -399,6 +411,8 @@ on:
       - "tests/test_q7_witnessed_cas_intake_r93.py"
       - "tests/test_q8_witness_restore_r93.py"
       - "tests/test_q6_stratified_toy_study_r93.py"
+      - "tests/test_q6_governed_campaign_contract.py"
+      - "tests/test_minotaur_feedback_divergence_r93.py"
       - "tests/test_adaptive_minotaur_r93.py"
       - "tests/test_q8_host_authority_probe.py"
       - "tests/test_graduation_gate.py"
@@ -699,6 +713,19 @@ jobs:
               ("tests.test_q7_witnessed_cas_intake_r93", 12),
               ("tests.test_q8_witness_restore_r93", 23),
               ("tests.test_q6_stratified_toy_study_r93", 21),
+              # Q6 governed campaign manifest and reservation are source-only.
+              # Pinned cryptography is present here; any skipped signature,
+              # mutation, provenance, or lost-ACK test must fail this gate.
+              ("tests.test_q6_governed_campaign_contract", 25),
+              # Weak-learner source novelty and sealed-evidence exhaustion
+              # must remain present; green optional test skips are forbidden.
+              ("tests.test_minotaur_feedback_divergence_r93", 6),
+              # Approved arithmetic/program TRAIN routing and source-local
+              # execution must remain checked, including mutable-record
+              # forgery and deterministic low-specificity novelty repair.
+              # Neither test module grants external authority or graduation.
+              ("tests.test_approved_train_provider_r90", 7),
+              ("tests.test_objective_training_run", 14),
               ("tests.test_adaptive_minotaur_r93", 9),
               ("tests.test_graduation_gate", 28),
               ("tests.test_objective_challenge_provider_r92", 7),
