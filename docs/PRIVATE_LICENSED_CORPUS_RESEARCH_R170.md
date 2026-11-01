@@ -207,3 +207,9 @@ private row origin, row-by-row privacy, trainer exposure history or separately
 authenticated rights/evaluator issuers. Those remain **HOLD**. Source review
 alone cannot issue physical host/NAS permits. This record must be checked in
 an independent pass before treating the research as independently verified.
+
+## R176 additional hostile source-boundary regression (synthetic-only)
+
+Two freshly written tests reproduced acceptance of reserved terminal/NUL bytes and literal model-chat structural delimiters inside otherwise valid Dolly-shaped JSON. They were not yet admitted or launched, but passing such text into a chat-template trainer could confuse delimiter boundaries. R176 now rejects NUL, ESC and DEL scalars before candidate serialization (including the direct prompt fingerprint helper), and quarantines literal Qwen/ChatML and `[INST]` delimiters in any text field as `STRUCTURAL_CHAT_DELIMITER`. This quarantine is intentionally conservative: it may flag benign quoted discussion of a delimiter. It does not detect every prompt injection, model-specific token, privacy defect, or semantic protected-set overlap. Only synthetic fixture text was used; no Dolly rows, protected evaluations, dataset signatures, or host training grants were opened or issued.
+
+Focused regression: baseline R174 importer 18/18 PASS; new R176 tests produced red failures on actual accepted reserved controls and structural tokens; after source fix R176 importer 20/20 PASS. The Lappy Windows full-suite command `py -3.12 -m unittest discover -s tests -q` exited RED: 2,395 run, 7 failures, 62 errors, 120 skips. The visible stack traces included Windows SQLite temporary-file lock failures and missing `setuptools.build_meta` in subprocess builds; this is not a full compatibility PASS and was not resolved in R176. Focused R176 rerun after adding context-field coverage: 20/20 PASS. Independent hostile review and hosted exact-head CI remain separate evidence.

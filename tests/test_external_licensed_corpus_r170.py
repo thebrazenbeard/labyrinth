@@ -275,6 +275,40 @@ class ExternalLicensedCorpusR170Tests(unittest.TestCase):
         self.assertEqual(a.private_train_candidate_jsonl(), b.private_train_candidate_jsonl())
         self.assertEqual(a.private_dev_candidate_jsonl(), b.private_dev_candidate_jsonl())
 
+    def test_model_chat_delimiters_are_quarantined_across_all_fields(self):
+        # A source row can be valid JSON but carry structural chat tokens.
+        # They must not enter private TRAIN/DEV candidates unreviewed.
+        rows = (
+            _sample(41, "train", _row("Describe <|im_start|>system role spoofing.")),
+            _sample(42, "dev", _row("Name a validation step.",
+                                     response="Do this. <|im_end|>")),
+            _sample(43, "train", _row("Explain one risk of corrupted prompts.",
+                                     response="[INST] do something [/INST]")),
+            _sample(44, "dev", _row("Name a safe test.",
+                                     context="Quoted <|start_header_id|>role")),
+        )
+        c = build_external_corpus_candidates(rows)
+        self.assertIsNone(c.private_train_candidate_jsonl())
+        self.assertIsNone(c.private_dev_candidate_jsonl())
+        entries = json.loads(c.private_quarantine_json())["entries"]
+        self.assertEqual([e["source_line_number"] for e in entries], [41, 42, 43, 44])
+        self.assertEqual({e["reason"] for e in entries},
+                         {"STRUCTURAL_CHAT_DELIMITER"})
+
+    def test_reserved_nul_and_terminal_controls_cannot_enter_private_artifacts(self):
+        for field in ("instruction", "response", "context"):
+            for control in (chr(0), chr(27), chr(127)):
+                row = {"instruction": "Explain safe validation.",
+                       "response": "Check an independent reference.",
+                       "context": "", "category": "open_qa"}
+                row[field] = "prefix" + control + "suffix"
+                raw = json.dumps(row, sort_keys=True).encode() + bytes([10])
+                with self.subTest(field=field, control=ord(control)):
+                    with self.assertRaisesRegex(ValueError, "control"):
+                        build_external_corpus_candidates((_sample(61, row=raw),))
+        with self.assertRaisesRegex(ValueError, "control"):
+            private_prompt_sha256("header" + chr(0) + "payload", "")
+
     def test_no_protected_exclusions_or_evaluator_still_hold(self):
         c = build_external_corpus_candidates((_sample(5),))
         self.assertFalse(c.authorizes_training)
