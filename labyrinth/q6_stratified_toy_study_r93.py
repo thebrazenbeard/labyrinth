@@ -25,6 +25,7 @@ from .toy_backend import ToyLinearAdapter
 
 SCHEMA = "labyrinth.q6-stratified-toy-study-r93.v1"
 _EXPOSURE_DOMAIN = b"labyrinth.q6.public-evaluation-exposures.v1\0"
+_TRAIN_EXPOSURE_DOMAIN = b"labyrinth.q6.public-training-exposures.v1\0"
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _MAX_EXPOSURES = 100_000
 _PROMPT = re.compile(
@@ -122,6 +123,14 @@ def q6_exposure_history_sha256(value: set[str] | frozenset[str]) -> str:
     return sha256(_EXPOSURE_DOMAIN + payload).hexdigest()
 
 
+def q6_train_exposure_history_sha256(value: set[str] | frozenset[str]) -> str:
+    """Domain-separated TRAIN history fingerprint, not external custody."""
+    frozen = _freeze_exposures(value)
+    payload = json.dumps(sorted(frozen), ensure_ascii=True,
+                         separators=(",", ":")).encode("ascii")
+    return sha256(_TRAIN_EXPOSURE_DOMAIN + payload).hexdigest()
+
+
 def _seed(seed: int, label: str, profile: str) -> int:
     payload = f"labyrinth.q6.r93\x00{seed}\x00{label}\x00{profile}".encode("ascii")
     return int.from_bytes(sha256(payload).digest()[:8], "big")
@@ -189,6 +198,7 @@ def construct_q6_cohorts(*, seed: int, per_profile: int = 6) -> Q6Cohorts:
 def validate_q6_cohorts(
     cohorts: Q6Cohorts, *, per_profile: int,
     previously_exposed_eval_prompts: set[str] | frozenset[str] = frozenset(),
+    previously_exposed_train_prompts: set[str] | frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     """Reject exact and algebraic leakage across all four partitions.
 
@@ -202,6 +212,7 @@ def validate_q6_cohorts(
     # Ensure an external caller cannot mutate history after the initial check
     # while the cohort validator walks the remaining (potentially large) bank.
     exposure_snapshot = _freeze_exposures(previously_exposed_eval_prompts)
+    train_exposure_snapshot = _freeze_exposures(previously_exposed_train_prompts)
     all_ids: set[str] = set()
     all_prompt_sha256: set[str] = set()
     all_semantics: set[tuple[str, int, int, int]] = set()
@@ -247,6 +258,15 @@ def validate_q6_cohorts(
         if (case.prompt in exposure_snapshot
                 or semantic_case_key(case) in previously_exposed_semantics):
             raise Q6ExposureReuse("evaluation prompt previously exposed; replay refused")
+    # Prior TRAIN questions may deliberately recur in a later TRAIN budget,
+    # but must never be misrepresented as a novel evaluation question.
+    previously_trained_semantics = {
+        _semantic_prompt_key(prompt) for prompt in train_exposure_snapshot
+    }
+    for case in cohorts.heldout + cohorts.transfer:
+        if (case.prompt in train_exposure_snapshot
+                or semantic_case_key(case) in previously_trained_semantics):
+            raise Q6ExposureReuse("evaluation problem previously trained; replay refused")
     return {"total": len(all_ids), "by_group": by_group,
             "all_prompt_sha256": tuple(sorted(all_prompt_sha256))}
 
@@ -267,6 +287,8 @@ def run_q6_toy_study(
     epochs_stage_b: int = 80, learning_rate: float = 0.5,
     previously_exposed_eval_prompts: set[str] | frozenset[str] = frozenset(),
     expected_exposure_history_sha256: str | None = None,
+    previously_exposed_train_prompts: set[str] | frozenset[str] = frozenset(),
+    expected_train_exposure_history_sha256: str | None = None,
 ) -> dict[str, object]:
     """Execute both real optimizer stages and matched wrong/no-update arms.
 
@@ -290,6 +312,14 @@ def run_q6_toy_study(
             raise Q6StudyError("malformed exposure history pin")
         if expected_exposure_history_sha256 != exposure_sha256:
             raise Q6StudyError("exposure history pin mismatch; run refused")
+    train_exposure_snapshot = _freeze_exposures(previously_exposed_train_prompts)
+    train_exposure_sha256 = q6_train_exposure_history_sha256(train_exposure_snapshot)
+    if expected_train_exposure_history_sha256 is not None:
+        if (type(expected_train_exposure_history_sha256) is not str
+                or _HEX64.fullmatch(expected_train_exposure_history_sha256) is None):
+            raise Q6StudyError("malformed train exposure history pin")
+        if expected_train_exposure_history_sha256 != train_exposure_sha256:
+            raise Q6StudyError("train exposure history pin mismatch; run refused")
     cohorts = construct_q6_cohorts(seed=seed, per_profile=per_profile)
     # The caller controls this exposure history, so this remains source-only.
     # Nevertheless it must be checked *inside the executable runner* before
@@ -297,7 +327,12 @@ def run_q6_toy_study(
     verified = validate_q6_cohorts(
         cohorts, per_profile=per_profile,
         previously_exposed_eval_prompts=exposure_snapshot,
+        previously_exposed_train_prompts=train_exposure_snapshot,
     )
+    # Freeze the admitted public source rosters before optimizer callbacks.
+    # This is the planned TRAIN set, not an independent per-step visit ledger.
+    train_prompts = tuple(c.prompt for c in cohorts.train_a + cohorts.train_b)
+    eval_prompts = tuple(c.prompt for c in cohorts.heldout + cohorts.transfer)
     arms = {label: ToyLinearAdapter(seed=seed) for label in
             ("trained", "zero_update", "inverted_labels")}
     scores = {label: {"initial": _snapshot(model, cohorts)}
@@ -354,12 +389,23 @@ def run_q6_toy_study(
         "cohort_counts": {label: len(getattr(cohorts, label)) for label in _SPLITS},
         "profiles": list(_PROFILES),
         "semantic_partition_validated": verified["total"] == 16 * per_profile,
-        "evaluated_prompts": [c.prompt for c in cohorts.heldout + cohorts.transfer],
-        "evaluation_prompt_sha256": [sha256(c.prompt.encode("ascii")).hexdigest()
-                                      for c in cohorts.heldout + cohorts.transfer],
+        "source_exposure_contract": "labyrinth.q6.public-cross-run-exposure.v2",
+        "training_replay_policy": "prior_training_may_recur_in_train_only",
+        "trained_prompts": list(train_prompts),
+        "training_prompt_sha256": [sha256(p.encode("ascii")).hexdigest()
+                                   for p in train_prompts],
+        "evaluated_prompts": list(eval_prompts),
+        "evaluation_prompt_sha256": [sha256(p.encode("ascii")).hexdigest()
+                                      for p in eval_prompts],
         "supplied_exposure_prompt_count": len(exposure_snapshot),
         "supplied_exposure_history_sha256": exposure_sha256,
         "caller_supplied_history_pin_checked": expected_exposure_history_sha256 is not None,
+        "supplied_train_exposure_prompt_count": len(train_exposure_snapshot),
+        "supplied_train_exposure_history_sha256": train_exposure_sha256,
+        "caller_supplied_train_history_pin_checked": (
+            expected_train_exposure_history_sha256 is not None
+        ),
+        "history_custody_verified": False,
         "scores": scores,
         "retention_delta_after_stage_b": (
             scores["trained"]["after_b"]["heldout"]
@@ -389,6 +435,8 @@ def run_q6_toy_study(
             "Retained-score delta covers one immediate later toy training stage, not long-term forgetting.",
             "Caller-supplied previous-exposure claims cannot replace an independent monotonic ledger.",
             "A matching caller-supplied history digest authenticates no owner or previous-run custody.",
+            "Prior TRAIN history is caller supplied; missing history can contaminate later public evaluations.",
+            "The exported TRAIN roster is an admitted source list, not independently observed optimizer visits.",
             "The returned public evaluation prompts can seed a later caller-owned exposure check, not host custody.",
             "No pretrained model, independent Q5/Q6 evaluation, or host-controlled graduation is established.",
         ],

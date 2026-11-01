@@ -286,11 +286,31 @@ def audit_hf_report(report: Any) -> dict[str, Any]:
         else:
             expected_indices = [i % len(train) for i in range(steps)]
         expected_visits = [train[i].id for i in expected_indices]
+        expected_exposures = [
+            (train[i].id, hashlib.sha256(train[i].prompt.encode("utf-8")).hexdigest())
+            for i in expected_indices
+        ]
+        # Existing v2/v3 reports predate this source-only visit receipt. Once
+        # any arm reports it, require *all* arms to carry exactly the same
+        # independently regenerated case/prompt schedule. This checks internal
+        # consistency, not whether an optimizer actually ran on those inputs.
+        has_exposure_receipts = any(
+            isinstance(training[arm], dict) and "visited_exposures" in training[arm]
+            for arm in arms
+        )
         for arm in arms:
             record = training[arm]
             if not isinstance(record, dict) or record.get("visited_case_ids") != expected_visits:
                 fail(f"{arm}: training visit order mismatch")
                 continue
+            if has_exposure_receipts:
+                visits = record.get("visited_exposures")
+                if (not isinstance(visits, (list, tuple)) or len(visits) != steps
+                        or any(not isinstance(pair, (list, tuple)) or len(pair) != 2
+                               or type(pair[0]) is not str or not _digest(pair[1])
+                               or tuple(pair) != expected
+                               for pair, expected in zip(visits, expected_exposures))):
+                    fail(f"{arm}: training visit exposure commitment mismatch")
             if (record.get("steps") != steps or type(record.get("steps")) is not int
                     or record.get("example_visits") != steps or type(record.get("example_visits")) is not int
                     or not _integer(record.get("input_tokens_seen"), 1, 100000)

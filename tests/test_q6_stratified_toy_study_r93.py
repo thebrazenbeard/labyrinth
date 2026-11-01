@@ -2,6 +2,7 @@
 
 from collections import Counter
 from dataclasses import replace
+from hashlib import sha256
 import unittest
 from unittest.mock import patch
 
@@ -164,6 +165,96 @@ class Q6StratifiedToyStudyTests(unittest.TestCase):
             with self.assertRaisesRegex(Q6ExposureReuse, "previously exposed"):
                 run_q6_toy_study(seed=10, per_profile=6,
                                  previously_exposed_eval_prompts=previous)
+
+    def test_prior_train_exposure_blocks_later_public_eval_before_optimizer(self):
+        previous = construct_q6_cohorts(seed=2, per_profile=6)
+        prior_train = {c.prompt for c in previous.train_a + previous.train_b}
+        later = construct_q6_cohorts(seed=7, per_profile=6)
+        prior_keys = {semantic_case_key(c) for c in previous.train_a + previous.train_b}
+        self.assertTrue(prior_keys & {
+            semantic_case_key(c) for c in later.heldout + later.transfer
+        })
+        with patch.object(ToyLinearAdapter, "train",
+                          side_effect=AssertionError("optimizer ran on exposed evaluation")):
+            with self.assertRaisesRegex(Q6ExposureReuse, "previously trained"):
+                run_q6_toy_study(seed=7, per_profile=6,
+                                 previously_exposed_train_prompts=prior_train)
+
+    def test_prior_training_replay_is_allowed_only_inside_current_train(self):
+        current = construct_q6_cohorts(seed=9, per_profile=3)
+        result = validate_q6_cohorts(
+            current, per_profile=3,
+            previously_exposed_train_prompts={current.train_a[0].prompt},
+        )
+        self.assertEqual(result["total"], 48)
+
+    def test_runner_snapshots_train_history_before_mutating_generator(self):
+        later = construct_q6_cohorts(seed=7, per_profile=6)
+        former = construct_q6_cohorts(seed=2, per_profile=6)
+        mutable = {c.prompt for c in former.train_a + former.train_b}
+
+        def adversarial_construct(*, seed, per_profile):
+            mutable.clear()
+            return later
+
+        with patch("labyrinth.q6_stratified_toy_study_r93.construct_q6_cohorts",
+                   side_effect=adversarial_construct):
+            with patch.object(ToyLinearAdapter, "train",
+                              side_effect=AssertionError("optimizer ran after history mutation")):
+                with self.assertRaisesRegex(Q6ExposureReuse, "previously trained"):
+                    run_q6_toy_study(seed=7, per_profile=6,
+                                     previously_exposed_train_prompts=mutable)
+
+    def test_runner_rejects_wrong_train_history_pin_before_generation(self):
+        former = construct_q6_cohorts(seed=2, per_profile=6)
+        history = {former.train_a[0].prompt}
+        # The evaluation-history domain must never authenticate TRAIN history.
+        wrong_domain_digest = q6_exposure_history_sha256(history)
+        with patch("labyrinth.q6_stratified_toy_study_r93.construct_q6_cohorts",
+                   side_effect=AssertionError("generated before TRAIN history pin check")):
+            with self.assertRaisesRegex(Q6StudyError, "train exposure history pin mismatch"):
+                run_q6_toy_study(previously_exposed_train_prompts=history,
+                                 expected_train_exposure_history_sha256=wrong_domain_digest)
+            with self.assertRaisesRegex(Q6StudyError, "malformed train exposure history pin"):
+                run_q6_toy_study(previously_exposed_train_prompts=history,
+                                 expected_train_exposure_history_sha256="not-a-digest")
+            with self.assertRaisesRegex(Q6StudyError, "canonical arithmetic prompt"):
+                run_q6_toy_study(previously_exposed_train_prompts={"not arithmetic"})
+            with self.assertRaisesRegex(Q6StudyError, "explicit exposed prompt set"):
+                run_q6_toy_study(previously_exposed_train_prompts=[next(iter(history))])
+
+    def test_runner_accepts_matching_train_history_pin_without_granting_custody(self):
+        from labyrinth.q6_stratified_toy_study_r93 import q6_train_exposure_history_sha256
+
+        previous = construct_q6_cohorts(seed=3, per_profile=3)
+        history = {previous.train_a[0].prompt}
+        digest = q6_train_exposure_history_sha256(history)
+        report = run_q6_toy_study(
+            seed=4, per_profile=3, epochs_stage_a=2, epochs_stage_b=2,
+            previously_exposed_train_prompts=history,
+            expected_train_exposure_history_sha256=digest,
+        )
+        self.assertEqual(report["supplied_train_exposure_history_sha256"], digest)
+        self.assertEqual(report["supplied_train_exposure_prompt_count"], 1)
+        self.assertTrue(report["caller_supplied_train_history_pin_checked"])
+        self.assertFalse(report["history_custody_verified"])
+
+    def test_runner_exports_complete_public_training_exposure_non_authorizing(self):
+        from labyrinth.q6_stratified_toy_study_r93 import q6_train_exposure_history_sha256
+
+        report = run_q6_toy_study(seed=4, per_profile=3,
+                                  epochs_stage_a=2, epochs_stage_b=2)
+        cohort = construct_q6_cohorts(seed=4, per_profile=3)
+        expected = [c.prompt for c in cohort.train_a + cohort.train_b]
+        self.assertEqual(report["trained_prompts"], expected)
+        self.assertEqual(report["training_prompt_sha256"], [
+            sha256(prompt.encode("ascii")).hexdigest() for prompt in expected
+        ])
+        self.assertNotEqual(q6_train_exposure_history_sha256(set(expected)),
+                            q6_exposure_history_sha256(set(expected)))
+        self.assertEqual(report["supplied_train_exposure_prompt_count"], 0)
+        self.assertFalse(report["history_custody_verified"])
+        self.assertFalse(report["q6_independently_qualified"])
 
     def test_runner_exports_public_eval_prompt_exposure_for_next_seed(self):
         first = run_q6_toy_study(seed=4, per_profile=3)

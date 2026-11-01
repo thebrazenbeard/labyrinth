@@ -32,17 +32,30 @@ assert result["q6_independently_qualified"] is False
   custody. Caller-supplied previously exposed prompts, including their
   commutative semantic aliases, can be refused but
   cannot establish a durable, nonrollback global exposure register.
-- `run_q6_toy_study(previously_exposed_eval_prompts=...)` now checks that
-  caller-owned history against **all four current partitions (TRAIN-A,
-  TRAIN-B, heldout, transfer) before any optimizer call**. Its report exports both
-  `evaluated_prompts` and `evaluation_prompt_sha256` so a caller can reconcile
+- `run_q6_toy_study(previously_exposed_eval_prompts=...)` now checks the
+  caller-owned evaluation history against **all four current partitions
+  (TRAIN-A, TRAIN-B, heldout, transfer) before any optimizer call**. Its report
+  exports both `evaluated_prompts` and `evaluation_prompt_sha256` to reconcile
   exact and algebraically equivalent expressions across studies. The runner
   cannot prove the history is complete; absent/cleared history replays public
-  seeds. In particular, exporting only prior evaluation prompts does not rule
-  out earlier TRAIN cases reappearing in a later heldout/transfer cohort. A
-  multi-run independent holdout requires a complete, independently custodied
-  exposure history across TRAIN and evaluation. This is never a
-  sealed-private-exam authorization service.
+  seeds.
+- The additive `previously_exposed_train_prompts` history closes the inverse
+  cross-run source check: **prior TRAIN semantics must not enter the current
+  heldout/transfer**. The declared policy allows old TRAIN material to recur
+  only in current TRAIN; it does not pretend that repeat practice is unseen
+  evaluation. Both histories are snapshotted before cohort generation and
+  before optimizer writes. The optional
+  `expected_train_exposure_history_sha256` uses a separate training-history
+  domain from the existing evaluation pin, and mismatches fail before cohort
+  generation. Existing evaluation-history arguments and reports remain valid.
+- Each report now exports the complete ordered admitted public TRAIN source
+  list as `trained_prompts` and `training_prompt_sha256`, alongside its existing
+  evaluation prompts/hashes. `source_exposure_contract` identifies the newer
+  source format and `history_custody_verified` is always `false`. The listed
+  TRAIN prompts are **planned/admitted source**, not independently witnessed
+  individual optimizer visits. A multi-run independent holdout still requires
+  a complete authenticated nonrollback exposure register across TRAIN and
+  evaluation. This is never a sealed-private-exam authorization service.
 - R94 source hardening snapshots and validates the supplied public history at
   runner entry, before cohort generation (which may invoke caller-supplied or
   substituted code). Clearing or changing the original set after entry cannot
@@ -63,6 +76,11 @@ assert result["q6_independently_qualified"] is False
   assert result["caller_supplied_history_pin_checked"] is True
   assert result["q6_independently_qualified"] is False
   ```
+
+  For prior TRAIN history, use the parallel
+  `q6_train_exposure_history_sha256(prior_train_prompts)` helper and pass the
+  same set as `previously_exposed_train_prompts`. An evaluation-history hash
+  cannot be reused as the training pin because the domains differ.
 
   The source digest is canonical for a given prompt set and exposed in the
   result with a count for reconciliation. **It is not a signature, externally

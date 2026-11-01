@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 from pathlib import Path
 import re
@@ -56,6 +57,26 @@ def toy_arithmetic_learner(view: object) -> str:
 
 
 class LiveTrainingCorridorTests(unittest.TestCase):
+    def test_operator_pending_train_case_requires_exact_live_public_view(self) -> None:
+        s = scope(scale=2)
+        runner = TrainingCorridorRunner.begin(
+            s, generate_maze_plan(s, 0), checkpoint_sha256=START,
+        )
+        with self.assertRaises(ValueError):
+            runner.operator_pending_train_case(None)
+        view = runner.next_training_prompt()
+        self.assertFalse(hasattr(view, "answer"))
+        with self.assertRaises(ValueError):
+            runner.operator_pending_train_case(replace(view, prompt="substituted"))
+        case = runner.operator_pending_train_case(view)
+        self.assertEqual(case.prompt, view.prompt)
+        self.assertEqual(case.id, view.challenge_id)
+        self.assertEqual(case.split, "train")
+        self.assertTrue(case.answer)
+        runner.submit_training_response("ANSWER: 0")
+        with self.assertRaises(ValueError):
+            runner.operator_pending_train_case(view)
+
     def test_policy_changes_real_prompt_tactic_after_observed_feedback(self) -> None:
         s = scope(scale=3)
         runner = TrainingCorridorRunner.begin(

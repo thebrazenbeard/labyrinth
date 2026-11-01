@@ -304,7 +304,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             ("tests.test_q8_external_acceptance_source_r68", 9),
             ("tests.test_rezon_two_adapter_source_partition_r68", 13),
             ("tests.test_r68_minotaur_policy_concurrency", 1),
-            ("tests.test_journey_policy_runner", 8),
+            ("tests.test_journey_policy_runner", 9),
         )
         for module_name, minimum in minimum_case_counts:
             with self.subTest(module=module_name):
@@ -443,6 +443,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "labyrinth/q7_witnessed_cas_intake_r93.py",
             "labyrinth/q8_witness_restore_r93.py",
             "labyrinth/q6_stratified_toy_study_r93.py",
+            "labyrinth/minotaur_hf_roster_bridge.py",
             "labyrinth/adaptive_minotaur_r93.py",
             "labyrinth/q8_host_authority_probe.py",
             "labyrinth/graduation_gate.py",
@@ -457,6 +458,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "docs/qualification/Q8_HOST_WITNESS_RESTORE_R93.md",
             "docs/qualification/Q6_STRATIFIED_TOY_SOURCE_STUDY_R93.md",
             "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md",
+            "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md",
             "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md",
             "docs/qualification/Q5_PRIVATE_HOLDOUT_EVAL_R92.md",
             "tests/test_private_wheel_cli_checkpoint_r70.py",
@@ -468,6 +470,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             "tests/test_q7_witnessed_cas_intake_r93.py",
             "tests/test_q8_witness_restore_r93.py",
             "tests/test_q6_stratified_toy_study_r93.py",
+            "tests/test_minotaur_hf_roster_bridge.py",
             "tests/test_adaptive_minotaur_r93.py",
             "tests/test_q8_host_authority_probe.py",
             "tests/test_graduation_gate.py",
@@ -483,6 +486,9 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
                     self.assertIn(f'      - "{path}"', manifest)
         for module, minimum in (
             ("tests.test_qualify_minilm_cpu", 7),
+            ("tests.test_hf_pilot", 39),
+            ("tests.test_minotaur_hf_roster_bridge", 14),
+            ("tests.test_hf_report_audit", 17),
             ("tests.test_external_monotonic_authority_contract", 17),
             ("tests.test_private_wheel_cli_checkpoint_r70", 1),
             ("tests.test_rezon_receipt_binding_r69", 5),
@@ -492,7 +498,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             ("tests.test_q7_temporal_custody_source", 9),
             ("tests.test_q7_witnessed_cas_intake_r93", 12),
             ("tests.test_q8_witness_restore_r93", 23),
-            ("tests.test_q6_stratified_toy_study_r93", 15),
+            ("tests.test_q6_stratified_toy_study_r93", 21),
             ("tests.test_adaptive_minotaur_r93", 9),
             ("tests.test_graduation_gate", 28),
             ("tests.test_objective_challenge_provider_r92", 7),

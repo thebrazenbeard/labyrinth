@@ -25,6 +25,7 @@ on:
       - "labyrinth/hf_development_transition.py"
       - "labyrinth/hf_resume_bridge.py"
       - "labyrinth/hf_pilot.py"
+      - "labyrinth/minotaur_hf_roster_bridge.py"
       - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
@@ -87,6 +88,7 @@ on:
       - "docs/qualification/Q8_HOST_WITNESS_RESTORE_R93.md"
       - "docs/qualification/Q6_STRATIFIED_TOY_SOURCE_STUDY_R93.md"
       - "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md"
+      - "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md"
       - "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md"
       - "docs/qualification/MINOTAUR_REGISTRY_TRANSITION_R72.md"
       - "docs/qualification/Q5_EVALUATION_PREREG_R68.md"
@@ -174,6 +176,7 @@ on:
       - "tests/test_hf_resume_bridge.py"
       - "tests/test_hf_regenerative_harness.py"
       - "tests/test_hf_pilot.py"
+      - "tests/test_minotaur_hf_roster_bridge.py"
       - "tests/test_neural_resume_checkpoint.py"
       - "tests/test_hf_event_recovery.py"
       - "tests/test_recovery_composition.py"
@@ -261,6 +264,7 @@ on:
       - "labyrinth/hf_development_transition.py"
       - "labyrinth/hf_resume_bridge.py"
       - "labyrinth/hf_pilot.py"
+      - "labyrinth/minotaur_hf_roster_bridge.py"
       - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
@@ -323,6 +327,7 @@ on:
       - "docs/qualification/Q8_HOST_WITNESS_RESTORE_R93.md"
       - "docs/qualification/Q6_STRATIFIED_TOY_SOURCE_STUDY_R93.md"
       - "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md"
+      - "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md"
       - "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md"
       - "docs/qualification/MINOTAUR_REGISTRY_TRANSITION_R72.md"
       - "docs/qualification/Q5_EVALUATION_PREREG_R68.md"
@@ -410,6 +415,7 @@ on:
       - "tests/test_hf_resume_bridge.py"
       - "tests/test_hf_regenerative_harness.py"
       - "tests/test_hf_pilot.py"
+      - "tests/test_minotaur_hf_roster_bridge.py"
       - "tests/test_neural_resume_checkpoint.py"
       - "tests/test_hf_event_recovery.py"
       - "tests/test_recovery_composition.py"
@@ -566,6 +572,9 @@ jobs:
               ("tests.test_retention_family_registry", 8),
               ("tests.test_retention_entrypoint_guard", 9),
               ("tests.test_qualify_minilm_cpu", 7),
+              ("tests.test_hf_pilot", 39),
+              ("tests.test_minotaur_hf_roster_bridge", 14),
+              ("tests.test_hf_report_audit", 17),
               ("tests.test_qualify_maze_conditioned_minilm_cpu", 12),
               ("tests.test_qualify_neural_journey_e2e_cpu", 13),
               ("tests.test_qualify_taskmaster_counterfactual_cpu", 11),
@@ -629,7 +638,7 @@ jobs:
               ("tests.test_minotaur_measured_toy_bridge_r72", 5),
               # The runner must bind its predecessor to observe()'s atomic
               # policy receipt, not a separate mutable model_hash read.
-              ("tests.test_journey_policy_runner", 8),
+              ("tests.test_journey_policy_runner", 9),
               # R60 installed-wheel import contract: package-private MiniLM
               # implementation, no global scripts namespace, no import side effects.
               ("tests.test_private_wheel_minilm_contract_r60", 1),
@@ -641,7 +650,7 @@ jobs:
               ("tests.test_q7_temporal_custody_source", 9),
               ("tests.test_q7_witnessed_cas_intake_r93", 12),
               ("tests.test_q8_witness_restore_r93", 23),
-              ("tests.test_q6_stratified_toy_study_r93", 15),
+              ("tests.test_q6_stratified_toy_study_r93", 21),
               ("tests.test_adaptive_minotaur_r93", 9),
               ("tests.test_graduation_gate", 28),
               ("tests.test_objective_challenge_provider_r92", 7),

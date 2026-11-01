@@ -10,7 +10,8 @@ import unittest
 
 from labyrinth.evaluation import score_response
 from labyrinth.hf_pilot import (
-    EVAL_SEED_XOR, LEGACY_SCHEMA, PilotConfig, _prompt_commitment,
+    EVAL_SEED_XOR, LEGACY_SCHEMA, SCHEMA, PilotConfig, _prompt_commitment,
+    _training_visit_exposures,
     training_cases,
 )
 from labyrinth.maze import generate_maze
@@ -74,6 +75,76 @@ def pilot_fixture(*, seed=13, count=2):
 
 
 class HfReportAuditTests(unittest.TestCase):
+    def test_report_audit_rejects_forged_optional_visit_exposures(self):
+        report = pilot_fixture()
+        train, _ = training_cases(PilotConfig(
+            model_path="unused", output_dir="unused", seed=13,
+            train_count=2, eval_count=2, tiers=(1,), steps=2,
+        ))
+        # Legacy sequential visits are different from v3's seeded schedule;
+        # use the actual sequential source order for this v2 report.
+        expected = [[case.id, hashlib.sha256(case.prompt.encode()).hexdigest()]
+                    for case in train[:2]]
+        for arm in ("candidate", "corrupted"):
+            report["training"][arm]["visited_exposures"] = [list(row) for row in expected]
+        self.assertEqual(audit_hf_report(report)["status"], "PASS")
+        hostile_rows = (
+            [["foreign-eval-id", "0" * 64] for _ in expected],
+            [expected[1], expected[0]],
+            [expected[0], [expected[1][0], "0" * 64]],
+            expected[:1],
+            ["not-an-exposure"] * 2,
+            {"case": expected[0]},
+        )
+        for hostile in hostile_rows:
+            with self.subTest(hostile=hostile):
+                report["training"]["candidate"]["visited_exposures"] = hostile
+                checked = audit_hf_report(report)
+                self.assertEqual(checked["status"], "FAIL", checked)
+                self.assertTrue(any("exposure" in item for item in checked["failures"]))
+
+    def test_optional_visit_exposures_require_consistent_arm_coverage(self):
+        report = pilot_fixture()
+        train, _ = training_cases(PilotConfig(
+            model_path="unused", output_dir="unused", seed=13,
+            train_count=2, eval_count=2, tiers=(1,), steps=2,
+        ))
+        report["training"]["candidate"]["visited_exposures"] = [
+            [case.id, hashlib.sha256(case.prompt.encode()).hexdigest()]
+            for case in train[:2]
+        ]
+        checked = audit_hf_report(report)
+        self.assertEqual(checked["status"], "FAIL", checked)
+        self.assertTrue(any("exposure" in item for item in checked["failures"]))
+
+    def test_v3_visit_exposures_match_regenerated_seeded_schedule(self):
+        report = pilot_fixture()
+        report["schema"] = SCHEMA
+        report["initial_persistent_buffers_sha256"] = "c" * 64
+        report["config"]["answer_only"] = True
+        report["control_data"].update({
+            "answer_scaffold_supplied": True,
+            "sham_optimizer_steps": 2, "sham_train_case_visits": 2,
+            "sham_evaluation_before_updates": False,
+            "sham_is_compute_matched": True,
+        })
+        report["training"]["sham"] = dict(report["training"]["candidate"])
+        train, _ = training_cases(PilotConfig(
+            model_path="unused", output_dir="unused", seed=13,
+            train_count=2, eval_count=2, tiers=(1,), steps=2,
+        ))
+        planned = list(_training_visit_exposures(train, seed=13, steps=2))
+        for arm in ("sham", "candidate", "corrupted"):
+            report["training"][arm]["visited_case_ids"] = [case_id for case_id, _ in planned]
+            # In-process pilot values contain tuple pairs; serialized reports
+            # contain JSON arrays. Both forms represent the same commitment.
+            report["training"][arm]["visited_exposures"] = list(planned)
+        self.assertEqual(audit_hf_report(report)["status"], "PASS")
+        report["training"]["sham"]["visited_exposures"] = [list(pair) for pair in reversed(planned)]
+        checked = audit_hf_report(report)
+        self.assertEqual(checked["status"], "FAIL", checked)
+        self.assertTrue(any("exposure" in item for item in checked["failures"]))
+
     def test_consistent_full_preview_scores_pass_internal_audit(self):
         result = audit_hf_report(pilot_fixture())
         self.assertEqual(result["status"], "PASS")
