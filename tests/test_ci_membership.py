@@ -38,6 +38,30 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
 
 
 class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_cognitive_sft_tokenization_is_private_and_mandatory_on_pr_and_main(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        events = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for path in (
+            "labyrinth/cognitive_sft_tokenization.py",
+            "tests/test_cognitive_sft_tokenization.py",
+            "docs/qualification/R115_COGNITIVE_SFT_TOKENIZATION_SOURCE.md",
+        ):
+            self.assertTrue((root / path).is_file())
+            for event, manifest in events.items():
+                with self.subTest(path=path, event=event):
+                    self.assertIn(f'      - "{path}"', manifest)
+        self.assertIn('("tests.test_cognitive_sft_tokenization", 9)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        cli_source = (root / "scripts/experiments/cognitive_train_demo.py").read_text()
+        self.assertNotIn("cognitive_sft_tokenization", cli_source)
+        self.assertNotIn("tokenize_cognitive_train_dataset", cli_source)
+
     def test_cognitive_supervised_train_export_is_required_and_private(self):
         # Labeled TRAIN examples contain the synthetic answer key. They are
         # never part of the public CLI's answerless learner interface.
