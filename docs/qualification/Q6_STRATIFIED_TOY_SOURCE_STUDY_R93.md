@@ -38,6 +38,35 @@ assert result["q6_independently_qualified"] is False
   exact and algebraically equivalent expressions across studies. The runner
   cannot prove the history is complete; absent/cleared history replays public
   seeds. This is never a sealed-private-exam authorization service.
+- R94 source hardening snapshots and validates the supplied public history at
+  runner entry, before cohort generation (which may invoke caller-supplied or
+  substituted code). Clearing or changing the original set after entry cannot
+  erase an already exposed arithmetic problem from the study's validation.
+  An optional content pin can be checked before generation:
+
+  ```python
+  from labyrinth.q6_stratified_toy_study_r93 import (
+      q6_exposure_history_sha256, run_q6_toy_study,
+  )
+  public_prior = {"Calculate 12 + 23.\nRespond with exactly one line: ANSWER: <integer>."}
+  owner_supplied_pin = q6_exposure_history_sha256(public_prior)
+  result = run_q6_toy_study(
+      seed=7, per_profile=3,
+      previously_exposed_eval_prompts=public_prior,
+      expected_exposure_history_sha256=owner_supplied_pin,
+  )
+  assert result["caller_supplied_history_pin_checked"] is True
+  assert result["q6_independently_qualified"] is False
+  ```
+
+  The source digest is canonical for a given prompt set and exposed in the
+  result with a count for reconciliation. **It is not a signature, externally
+  pinned monotonic head, proof of completeness, or evidence of physical
+  custody.** Reuse, malformed history, malformed pin, mismatch and bounded
+  history exhaustion fail with explicit `Q6StudyError` variants. An actual
+  independent owner must retain and authenticate the prior register and its
+  head outside this runner. Concurrent mutation during the initial snapshot
+  still requires host-atomic custody; the local snapshot cannot supply it.
 - All arms start from the same `ToyLinearAdapter` seed. The trained arm uses
   true TRAIN targets and real normalized SGD. A zero-update arm makes matched
   case visits without parameter writes. An inverted-label arm also performs

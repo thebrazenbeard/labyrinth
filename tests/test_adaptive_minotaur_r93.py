@@ -165,6 +165,53 @@ class AdaptiveMinotaurR93Tests(unittest.TestCase):
                              x.prepared.challenge.id for x in old.ordered_rooms
                              if x.objective_id == "zzz-audit-r93"))
 
+    def test_admitted_trainee_and_trainer_gold_cannot_change_after_scheduling(self):
+        # A frozen dataclass is not a deep immutable snapshot; Python callers
+        # can mutate nested objects despite a frozen schedule wrapper.
+        for field, replacement in (
+            ("prompt", "Calculate 1 + 2.\nRespond with exactly one line: ANSWER: <integer>."),
+            ("answer", "FORGED GOLD"),
+            ("metadata", (("hostile", "injected"),)),
+            ("id", "train-forged-case"),
+        ):
+            with self.subTest(field=field):
+                schedule = schedule_adaptive_training((
+                    ObjectiveLane(self.audit, self.fresh_audit),
+                    ObjectiveLane(self.program, self.fresh_program),
+                ))
+                first = schedule.ordered_rooms[0]
+                object.__setattr__(first.prepared.challenge, field, replacement)
+                with self.assertRaisesRegex(ValueError, "admitted TRAIN material changed"):
+                    schedule.trainee_sequence()
+                with self.assertRaisesRegex(ValueError, "admitted TRAIN material changed"):
+                    _ = first.trainee_view
+
+    def test_forged_admitted_trainee_snapshot_cannot_override_source(self):
+        schedule = schedule_adaptive_training((
+            ObjectiveLane(self.audit, self.fresh_audit),
+            ObjectiveLane(self.program, self.fresh_program),
+        ))
+        first = schedule.ordered_rooms[0]
+        forged_prompt = "This forged TRAIN prompt was never admitted."
+        assert first.trainee_view.prompt != forged_prompt
+        fields = first.admitted_trainee_fields
+        with self.assertRaises(AttributeError):
+            object.__setattr__(
+                first, "admitted_trainee_fields",
+                fields[:3] + (forged_prompt, sha256(forged_prompt.encode()).hexdigest()),
+            )
+        self.assertEqual(first.trainee_view.prompt, fields[3])
+
+    def test_route_objective_identity_cannot_mutate_after_admission(self):
+        schedule = schedule_adaptive_training((
+            ObjectiveLane(self.audit, self.fresh_audit),
+            ObjectiveLane(self.program, self.fresh_program),
+        ))
+        first = schedule.ordered_rooms[0]
+        with self.assertRaises(AttributeError):
+            object.__setattr__(first, "objective_id", "foreign-objective-no-custody")
+        self.assertIn(schedule.trainee_sequence()[0][0], schedule.objective_order)
+
     def test_forged_unsealed_failure_is_not_accepted_as_development_lineage(self):
         failed = _failed_audit(self.audit)
         stale = replace(failed, sealed_exam_ids=(), exam_event_statuses=())

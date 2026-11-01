@@ -6,8 +6,9 @@ import unittest
 from unittest.mock import patch
 
 from labyrinth.q6_stratified_toy_study_r93 import (
-    Q6StudyError, construct_q6_cohorts, run_q6_toy_study,
-    validate_q6_cohorts, semantic_case_key, _profile,
+    Q6StudyError, Q6ExposureExhaustion, Q6ExposureReuse,
+    construct_q6_cohorts, run_q6_toy_study,
+    validate_q6_cohorts, semantic_case_key, q6_exposure_history_sha256, _profile,
 )
 from labyrinth.toy_backend import ToyLinearAdapter
 
@@ -146,6 +147,66 @@ class Q6StratifiedToyStudyTests(unittest.TestCase):
         with self.assertRaisesRegex(Q6StudyError, "previously exposed"):
             run_q6_toy_study(seed=4, per_profile=3,
                              previously_exposed_eval_prompts=set(exposures))
+
+    def test_runner_snapshots_history_before_caller_mutates_during_generation(self):
+        cohorts = construct_q6_cohorts(seed=7, per_profile=3)
+        mutable_history = {cohorts.heldout[0].prompt}
+
+        def adversarial_construct(*, seed, per_profile):
+            mutable_history.clear()
+            return cohorts
+
+        with patch("labyrinth.q6_stratified_toy_study_r93.construct_q6_cohorts",
+                   side_effect=adversarial_construct):
+            with patch.object(ToyLinearAdapter, "train",
+                              side_effect=AssertionError("optimizer ran after replay")):
+                with self.assertRaisesRegex(Q6StudyError, "previously exposed"):
+                    run_q6_toy_study(seed=7, per_profile=3,
+                                     previously_exposed_eval_prompts=mutable_history)
+
+    def test_runner_rejects_malformed_history_before_cohort_generation(self):
+        with patch("labyrinth.q6_stratified_toy_study_r93.construct_q6_cohorts",
+                   side_effect=AssertionError("cohort generated before history validation")):
+            with self.assertRaisesRegex(Q6StudyError, "canonical arithmetic prompt"):
+                run_q6_toy_study(previously_exposed_eval_prompts={"invalid"})
+
+    def test_runner_rejects_external_history_pin_mismatch_before_generation(self):
+        valid = construct_q6_cohorts(seed=3, per_profile=3).heldout[0].prompt
+        expected = q6_exposure_history_sha256({valid})
+        changed = construct_q6_cohorts(seed=4, per_profile=3).heldout[0].prompt
+        self.assertNotEqual(expected, q6_exposure_history_sha256({changed}))
+        with patch("labyrinth.q6_stratified_toy_study_r93.construct_q6_cohorts",
+                   side_effect=AssertionError("cohort generated before pin check")):
+            with self.assertRaisesRegex(Q6StudyError, "exposure history pin mismatch"):
+                run_q6_toy_study(previously_exposed_eval_prompts={changed},
+                                 expected_exposure_history_sha256=expected)
+
+    def test_typed_reuse_and_bounded_history_exhaustion(self):
+        prior = construct_q6_cohorts(seed=7, per_profile=3).heldout[0].prompt
+        with self.assertRaises(Q6ExposureReuse):
+            run_q6_toy_study(seed=7, per_profile=3,
+                             previously_exposed_eval_prompts={prior})
+        # The public arithmetic grammar has enough valid distinct examples to
+        # hit the bounded history limit without mocks or fabricated authority.
+        prompts = {
+            f"Calculate {a} + {b}.\nRespond with exactly one line: ANSWER: <integer>."
+            for a in range(1, 502) for b in range(1, 201)
+        }
+        self.assertGreater(len(prompts), 100_000)
+        with self.assertRaisesRegex(Q6ExposureExhaustion, "history exhausted"):
+            q6_exposure_history_sha256(prompts)
+
+    def test_runner_reports_caller_pinned_source_digest_without_authority(self):
+        history = {construct_q6_cohorts(seed=3, per_profile=3).heldout[0].prompt}
+        digest = q6_exposure_history_sha256(history)
+        report = run_q6_toy_study(seed=4, per_profile=3, epochs_stage_a=2,
+                                  epochs_stage_b=2,
+                                  previously_exposed_eval_prompts=history,
+                                  expected_exposure_history_sha256=digest)
+        self.assertEqual(report["supplied_exposure_history_sha256"], digest)
+        self.assertEqual(report["supplied_exposure_prompt_count"], 1)
+        self.assertTrue(report["caller_supplied_history_pin_checked"])
+        self.assertFalse(report["q6_independently_qualified"])
 
 
 if __name__ == "__main__":

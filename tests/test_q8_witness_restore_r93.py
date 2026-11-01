@@ -20,6 +20,7 @@ from labyrinth.external_monotonic_authority_contract import ExternalAuthorityHea
 from labyrinth.q8_witness_restore_r93 import (
     Q8PlasticChange, Q8WitnessPins, Q8WitnessRecord, Q8SourceRejection,
     Q8OutcomeUnknown, Q8SourceCASObservation, probe_q8_source_cas,
+    reconcile_q8_source_outcome,
 )
 
 
@@ -131,6 +132,109 @@ class Q8ExternalWitnessSourceTests(TestCase):
             service_public_key=_pub(self.service), witness_public_key=_pub(self.witness),
             minimum_witness_counter=record.witness_counter,
             minimum_witness_digest=record.digest())
+
+    def _service_head(self, record):
+        return ExternalAuthorityHead("service01", record.run_id, record.epoch,
+                                     record.fence, record.commit_index, record.head_sha256)
+
+    def _reconcile(self, before, after, *, port=None, change=None,
+                   externally_pinned_after_digest=None, externally_pinned_service=None):
+        return reconcile_q8_source_outcome(
+            port=port or self.port, pins=self.pins,
+            change=change or self.change, precommit_record=before,
+            externally_pinned_after_digest=(externally_pinned_after_digest
+                if externally_pinned_after_digest is not None else after.digest()),
+            externally_pinned_service=(externally_pinned_service
+                if externally_pinned_service is not None else self._service_head(after)))
+
+    def test_lost_ack_can_be_reconciled_without_any_second_cas(self):
+        before = self.port.read_witness_record("run01")
+        self.port.crash_after_commit = True
+        with self.assertRaises(Q8OutcomeUnknown):
+            probe_q8_source_cas(port=self.port, pins=self.pins, change=self.change)
+        after = self.port.read_witness_record("run01")
+        observation = self._reconcile(before, after)
+        self.assertEqual(observation.service_commit_index, before.commit_index + 1)
+        self.assertEqual(observation.witness_record_sha256, after.digest())
+        self.assertFalse(observation.physical_q8_verified)
+        self.assertFalse(observation.graduation_authorized)
+        self.assertEqual(self.port.invocations, 1)
+        # Repeated read-only reconciliation must never re-issue an operation.
+        self.assertEqual(self._reconcile(before, after), observation)
+        self.assertEqual(self.port.invocations, 1)
+        # Reusing the original pre-attempt high-watermark is stale; the
+        # first event must never be re-issued by a reconciliation helper.
+        with self.assertRaisesRegex(Q8SourceRejection, "rollback"):
+            probe_q8_source_cas(port=self.port, pins=self.pins, change=self.change)
+        self.assertEqual(self.port.invocations, 1)
+
+    def test_reconciliation_rejects_stale_signed_predecessor_as_successor(self):
+        before = self.port.read_witness_record("run01")
+        with self.assertRaisesRegex(Q8SourceRejection, "does not advance"):
+            self._reconcile(before, before)
+        self.assertEqual(self.port.invocations, 0)
+
+    def test_reconciliation_keeps_unknown_on_stale_readback(self):
+        before = self.port.read_witness_record("run01")
+        after = self.port.compare_and_swap_once(self.change, before)
+        class StaleWitness:
+            def read_witness_record(inner, run_id):
+                return before
+            def read_service_head(inner, run_id):
+                return self.port.read_service_head(run_id)
+            def compare_and_swap_once(inner, *args):
+                self.fail("reconciliation must never issue CAS")
+        with self.assertRaisesRegex(Q8OutcomeUnknown, "unknown"):
+            self._reconcile(before, after, port=StaleWitness())
+        self.assertEqual(self.port.invocations, 1)
+
+    def test_reconciliation_refuses_signed_foreign_change_even_when_pinned(self):
+        before = self.port.read_witness_record("run01")
+        foreign = replace(self.change, successor_sha256="1" * 64)
+        self.port.compare_and_swap_once(foreign, before)
+        after = self.port.read_witness_record("run01")
+        with self.assertRaisesRegex(Q8OutcomeUnknown, "reconcile"):
+            self._reconcile(before, after)
+        self.assertEqual(self.port.invocations, 1)
+
+    def test_reconciliation_requires_out_of_band_successor_pin(self):
+        before = self.port.read_witness_record("run01")
+        after = self.port.compare_and_swap_once(self.change, before)
+        with self.assertRaisesRegex(Q8OutcomeUnknown, "reconcile"):
+            self._reconcile(before, after, externally_pinned_after_digest="f" * 64)
+        self.assertEqual(self.port.invocations, 1)
+
+    def test_reconciliation_rejects_mismatched_service_readback(self):
+        before = self.port.read_witness_record("run01")
+        after = self.port.compare_and_swap_once(self.change, before)
+        class StaleService:
+            def read_witness_record(inner, run_id):
+                return self.port.read_witness_record(run_id)
+            def read_service_head(inner, run_id):
+                return self._service_head(before)
+            def compare_and_swap_once(inner, *args):
+                self.fail("reconciliation must never issue CAS")
+        with self.assertRaisesRegex(Q8OutcomeUnknown, "reconcile"):
+            self._reconcile(before, after, port=StaleService())
+        self.assertEqual(self.port.invocations, 1)
+
+    def test_reconciliation_copies_external_pins_before_port_can_mutate_them(self):
+        before = self.port.read_witness_record("run01")
+        after = self.port.compare_and_swap_once(self.change, before)
+        external_service = self._service_head(after)
+        class MutatingRead:
+            def read_witness_record(inner, run_id):
+                object.__setattr__(external_service, "commit_index", before.commit_index)
+                object.__setattr__(self.pins, "minimum_witness_counter", 1)
+                return self.port.read_witness_record(run_id)
+            def read_service_head(inner, run_id):
+                return self.port.read_service_head(run_id)
+            def compare_and_swap_once(inner, *args):
+                self.fail("reconciliation must never issue CAS")
+        observation = self._reconcile(before, after, port=MutatingRead(),
+                                      externally_pinned_service=external_service)
+        self.assertEqual(observation.service_commit_index, 11)
+        self.assertEqual(self.port.invocations, 1)
 
     def test_real_toy_sqlite_cas_and_two_signatures_are_source_only(self):
         result = probe_q8_source_cas(port=self.port, pins=self.pins, change=self.change)

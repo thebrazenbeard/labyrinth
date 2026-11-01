@@ -44,9 +44,32 @@ relax the retained signed postcommit comparisons.
    may have committed, so an agent must reconcile through the actual host. No
    blind retry or learner-side replay is authorized.
 
+## R94 read-only lost-ACK reconciliation
+
+`reconcile_q8_source_outcome` is a **separate, read-only** source contract for
+an original CAS attempt already classified UNKNOWN. It never calls
+`compare_and_swap_once`, even when the caller, signer or readback disagrees.
+It requires: (a) the signed, externally pinned predecessor captured *before*
+the attempt; (b) the exact original typed model-component change; (c) a new
+successor witness digest and service high-watermark independently pinned by
+the actual host/witness owner *outside the trainer rollback domain*. The
+client independently re-reads service and witness source records, checks both
+signatures, +1 index/counter/journal generation, predecessor digest, event
+and exact state-change digest, and compares against both external successor
+pins. The supplied values are snapshotted before invoking any untrusted port.
+
+The returned observation is still
+`SOURCE_ONLY_HOST_CAS_CONTRACT_NOT_ATTESTED`, never Q8 physical PASS or
+permission to retry, merge, graduate or deploy. A snapshot fabricated by the
+same test owner, a copied ledger, a forged clock, or two co-controlled
+signers does not count as independent custody. Missing pins, stale/forked
+readback, conflicting signed events or unavailable host readers must remain
+HOLD/UNKNOWN. The physical operator must separately authorize and prove
+crash/restart readback and protected antirollback before any promotion.
+
 ## Reproduced local counterexamples
 
-The 16 tests in `tests/test_q8_witness_restore_r93.py` use test-generated
+The R93/R94 tests in `tests/test_q8_witness_restore_r93.py` use test-generated
 Ed25519 keys and a **toy SQLite database in the test workspace**. They prove
 the *client source behavior* below, not host isolation:
 
@@ -63,6 +86,11 @@ the *client source behavior* below, not host isolation:
   a one-step CAS. Both attacks were reproduced RED, then rejected GREEN.
 - Wrong state families, nonreversible updates, and no-op successor hashes are
   rejected before the CAS invocation.
+- Lost ACK followed by independently specified exact-source successor
+  reconciliation performs **zero additional CAS calls**, including a repeated
+  reconciliation attempt. Stale signed predecessor, mismatched high-watermark,
+  signed foreign change, stale readback and mutable external pin attacks fail
+  closed without authorization. The test pins are NOT actually independent.
 
 > **Critical hostile limitation:** If the same operator can roll back both the
 > service database and the purportedly external witness/pin, this source

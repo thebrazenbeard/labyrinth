@@ -26,6 +26,31 @@ both current batches and all lanes' historical TRAIN/exam commitments. The
 returned `PreparedTrainingRoom` has trainer-only gold; `trainee_sequence()`
 provides prompt-only inference views.
 
+At admission, each scheduled room now retains a source-only SHA-256 digest of
+the complete trainer-side generated material, including the prompt, gold,
+case identity, tier and metadata, **plus immutable primitive trainee-view
+fields**. Both `ScheduledTrainRoom.trainee_view` and
+`AdaptiveTrainSchedule.trainee_sequence()` fail closed if the nested
+`PreparedTrainingRoom.challenge` is mutated after scheduling (even though its
+dataclass is frozen). A reproduced attack replaced an admitted program prompt
+with unrelated TRAIN text and previously caused the scheduler to emit the
+altered view silently. The regression also checks gold/metadata/case-ID
+substitution. Returned learner prompts are built from the admitted primitive
+snapshot, avoiding a second read of mutable challenge text after its digest
+check. The digest only detects in-process inconsistency with the
+source-owned admitted record; it is not a signature, independent admission
+register, or trusted host custody.
+
+Independent hostile review exposed a second mutation family: changing the
+admitted learner-view tuple could forge prompts without touching the trainer
+digest, and changing the room's objective ID could misroute a learner prompt.
+The scheduled room is now a tuple-backed record, not a frozen dataclass;
+`object.__setattr__` cannot rewrite its route fields or admitted view tuple.
+Learner-view access additionally checks admitted primitive fields against
+the current prepared source view. These are bounded Python-level integrity
+checks, not protection against an attacker fabricating an entire new record,
+controlling both source and records, or bypassing the caller's routing API.
+
 The program/audit pair demonstrates actual multi-objective routing. A measured
 public development failure on the audit lane changes the next routing order,
 cycle, room identities and audit remediation instructions, while preserving
@@ -49,6 +74,10 @@ to infer that success on arithmetic makes the audit/program model improve.
    exact single-line response-format rejection.
 6. Physical *toy* parameter change vs zero-update sham and reload through the
    independently approved arithmetic objective loop.
+7. Post-admission nested prompt, gold, metadata and case-ID mutation is
+   rejected before creating a learner-facing prompt sequence.
+8. Hostile in-place replacement of admitted learner-view fields or the
+   objective-route identity is rejected by the tuple-backed record.
 
 Every finding is local/source or toy CPU evidence. Validation of a
 self-consistent journey cannot establish that an independent evaluator really

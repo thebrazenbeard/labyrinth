@@ -298,3 +298,85 @@ def probe_q8_source_cas(*, port: Q8CASPort, pins: Q8WitnessPins,
         return Q8SourceCASObservation(after.digest(), after.commit_index)
     except Exception as exc:
         raise Q8OutcomeUnknown("Q8 CAS may have committed; reconcile externally") from exc
+
+
+def reconcile_q8_source_outcome(
+    *, port: Q8CASPort, pins: Q8WitnessPins, change: Q8PlasticChange,
+    precommit_record: Q8WitnessRecord,
+    externally_pinned_after_digest: str,
+    externally_pinned_service: ExternalAuthorityHead,
+) -> Q8SourceCASObservation:
+    """Read-only source reconciliation after an uncertain one-shot CAS.
+
+    The expected successor witness digest *and* service high-watermark must
+    originate outside the learner's rollback domain. Caller-supplied values
+    are not evidence that this independence exists. The supplied predecessor
+    is the exact signed record retained **before** the original CAS attempt.
+
+    Unlike :func:`probe_q8_source_cas`, this function NEVER calls CAS and
+    NEVER clears permission to retry an uncertain write. A successful source
+    observation cannot prove host ownership, independent high-watermark
+    custody, physical Q8, or graduation.
+    """
+    if (type(pins) is not Q8WitnessPins
+            or type(change) is not Q8PlasticChange
+            or type(precommit_record) is not Q8WitnessRecord
+            or type(externally_pinned_service) is not ExternalAuthorityHead):
+        raise Q8SourceRejection("typed reconciliation inputs required")
+    # Frozen dataclass instances can be changed with object.__setattr__.
+    # Retain private copies before calling any untrusted reader.
+    pins = replace(pins)
+    change = replace(change)
+    precommit_record = replace(precommit_record)
+    expected_service = replace(externally_pinned_service)
+    expected_digest = _hex(externally_pinned_after_digest,
+                           "externally pinned successor witness")
+    pins.validate()
+    change.validate()
+    expected_service.validate()
+    if change.run_id != pins.run_id or precommit_record.run_id != pins.run_id:
+        raise Q8SourceRejection("reconciliation run pin mismatch")
+    before = _check_record(precommit_record, pins)
+    before_digest = before.digest()
+    if (before.witness_counter != pins.minimum_witness_counter
+            or before_digest != pins.minimum_witness_digest):
+        raise Q8SourceRejection("reconciliation predecessor not independently pinned")
+    if (expected_service.provider_id != pins.provider_id
+            or expected_service.run_id != pins.run_id
+            or expected_service.epoch != before.epoch
+            or expected_service.fence != before.fence
+            or expected_service.commit_index != before.commit_index + 1
+            or expected_service.head_sha256 == before.head_sha256
+            or expected_digest == before_digest):
+        raise Q8SourceRejection("externally pinned successor does not advance predecessor")
+    intended_digest = change.digest()
+    # Read-only, with no compare_and_swap_once call even on mismatch. Once a
+    # CAS outcome is unknown, stale and conflicting histories remain UNKNOWN.
+    try:
+        observed = _check_record(port.read_witness_record(pins.run_id), pins)
+        service = port.read_service_head(pins.run_id)
+        if type(service) is not ExternalAuthorityHead:
+            raise Q8SourceRejection("invalid reconciled service head")
+        service = replace(service)
+        service.validate()
+        if (observed.digest() != expected_digest
+                or service != expected_service
+                or observed.host_id != pins.host_id
+                or observed.run_id != service.run_id
+                or observed.epoch != service.epoch
+                or observed.fence != service.fence
+                or observed.commit_index != service.commit_index
+                or observed.head_sha256 != service.head_sha256
+                or observed.witness_counter != before.witness_counter + 1
+                or observed.commit_index != before.commit_index + 1
+                or observed.journal_generation != before.journal_generation + 1
+                or observed.previous_witness_sha256 != before_digest
+                or observed.journal_sha256 == before.journal_sha256
+                or observed.event_id != change.event_id
+                or observed.state_change_sha256 != intended_digest):
+            raise Q8SourceRejection("reconciliation successor/readback mismatch")
+        return Q8SourceCASObservation(observed.digest(), observed.commit_index)
+    except Exception as exc:
+        raise Q8OutcomeUnknown(
+            "Q8 outcome remains unknown; reconcile through independent host owner"
+        ) from exc

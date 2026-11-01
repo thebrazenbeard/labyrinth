@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from hashlib import sha256
+import json
 import math
 from pathlib import Path
 import random
@@ -23,6 +24,9 @@ from .toy_backend import ToyLinearAdapter
 
 
 SCHEMA = "labyrinth.q6-stratified-toy-study-r93.v1"
+_EXPOSURE_DOMAIN = b"labyrinth.q6.public-evaluation-exposures.v1\0"
+_HEX64 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+_MAX_EXPOSURES = 100_000
 _PROMPT = re.compile(
     r"Calculate ([0-9]{1,3}) ([+-]) ([0-9]{1,3})\.\n"
     r"Respond with exactly one line: ANSWER: <integer>\.", re.ASCII,
@@ -34,6 +38,14 @@ _SPLITS = {"train_a": "train", "train_b": "train",
 
 class Q6StudyError(ValueError):
     """Invalid source-only study declarations, case partition or comparison."""
+
+
+class Q6ExposureReuse(Q6StudyError):
+    """An evaluation problem is semantically present in prior public history."""
+
+
+class Q6ExposureExhaustion(Q6StudyError):
+    """A bounded source cohort/history could not be safely admitted."""
 
 
 @dataclass(frozen=True)
@@ -81,6 +93,35 @@ def _profile(prompt: str) -> str:
     return "subtract_borrow" if a % 10 < b % 10 else "subtract_no_borrow"
 
 
+def _freeze_exposures(value: set[str] | frozenset[str]) -> frozenset[str]:
+    """Snapshot a caller's mutable public history before other code executes.
+
+    This guards TOCTOU inside one process, not completeness, authenticity,
+    concurrent host-atomic reads, or rollback resistance of an outside ledger.
+    """
+    if type(value) not in (set, frozenset):
+        raise Q6StudyError("explicit exposed prompt set required")
+    if len(value) > _MAX_EXPOSURES:
+        raise Q6ExposureExhaustion("bounded exposure history exhausted")
+    try:
+        frozen = frozenset(value)
+    except RuntimeError as exc:
+        raise Q6StudyError("exposure history changed during snapshot") from exc
+    if any(type(p) is not str for p in frozen):
+        raise Q6StudyError("explicit exposed prompt set required")
+    for prompt in frozen:
+        _parse(prompt)
+    return frozen
+
+
+def q6_exposure_history_sha256(value: set[str] | frozenset[str]) -> str:
+    """Canonical content fingerprint; NEVER a signature or owner attestation."""
+    frozen = _freeze_exposures(value)
+    payload = json.dumps(sorted(frozen), ensure_ascii=True,
+                         separators=(",", ":")).encode("ascii")
+    return sha256(_EXPOSURE_DOMAIN + payload).hexdigest()
+
+
 def _seed(seed: int, label: str, profile: str) -> int:
     payload = f"labyrinth.q6.r93\x00{seed}\x00{label}\x00{profile}".encode("ascii")
     return int.from_bytes(sha256(payload).digest()[:8], "big")
@@ -117,7 +158,7 @@ def _source_cases(
                 ))
                 break
             else:
-                raise Q6StudyError("bounded cohort generation exhausted")
+                raise Q6ExposureExhaustion("bounded cohort generation exhausted")
     return tuple(result)
 
 
@@ -158,9 +199,9 @@ def validate_q6_cohorts(
         raise Q6StudyError("exact cohort structure required")
     if type(per_profile) is not int or not 2 <= per_profile <= 24:
         raise Q6StudyError("invalid declared profile quota")
-    if (type(previously_exposed_eval_prompts) not in (set, frozenset)
-            or any(type(p) is not str for p in previously_exposed_eval_prompts)):
-        raise Q6StudyError("explicit exposed prompt set required")
+    # Ensure an external caller cannot mutate history after the initial check
+    # while the cohort validator walks the remaining (potentially large) bank.
+    exposure_snapshot = _freeze_exposures(previously_exposed_eval_prompts)
     all_ids: set[str] = set()
     all_prompt_sha256: set[str] = set()
     all_semantics: set[tuple[str, int, int, int]] = set()
@@ -197,12 +238,12 @@ def validate_q6_cohorts(
             raise Q6StudyError("case strata are not balanced")
         by_group[label] = dict(counts)
     previously_exposed_semantics = {
-        _semantic_prompt_key(prompt) for prompt in previously_exposed_eval_prompts
+        _semantic_prompt_key(prompt) for prompt in exposure_snapshot
     }
     for case in cohorts.heldout + cohorts.transfer:
-        if (case.prompt in previously_exposed_eval_prompts
+        if (case.prompt in exposure_snapshot
                 or semantic_case_key(case) in previously_exposed_semantics):
-            raise Q6StudyError("evaluation prompt previously exposed; replay refused")
+            raise Q6ExposureReuse("evaluation prompt previously exposed; replay refused")
     return {"total": len(all_ids), "by_group": by_group,
             "all_prompt_sha256": tuple(sorted(all_prompt_sha256))}
 
@@ -222,6 +263,7 @@ def run_q6_toy_study(
     *, seed: int = 7, per_profile: int = 6, epochs_stage_a: int = 80,
     epochs_stage_b: int = 80, learning_rate: float = 0.5,
     previously_exposed_eval_prompts: set[str] | frozenset[str] = frozenset(),
+    expected_exposure_history_sha256: str | None = None,
 ) -> dict[str, object]:
     """Execute both real optimizer stages and matched wrong/no-update arms.
 
@@ -234,13 +276,24 @@ def run_q6_toy_study(
             raise Q6StudyError(f"{name} must be 1..1000")
     if type(learning_rate) not in (int, float) or not math.isfinite(learning_rate) or not 0 < learning_rate <= 1:
         raise Q6StudyError("learning_rate must be finite in (0,1]")
+    # Validate and snapshot at entry, ahead of generation and optimizer use.
+    # A caller-supplied pin binds source bytes only; it does not prove that
+    # the caller owns a monotonic independent exposure register.
+    exposure_snapshot = _freeze_exposures(previously_exposed_eval_prompts)
+    exposure_sha256 = q6_exposure_history_sha256(exposure_snapshot)
+    if expected_exposure_history_sha256 is not None:
+        if (type(expected_exposure_history_sha256) is not str
+                or _HEX64.fullmatch(expected_exposure_history_sha256) is None):
+            raise Q6StudyError("malformed exposure history pin")
+        if expected_exposure_history_sha256 != exposure_sha256:
+            raise Q6StudyError("exposure history pin mismatch; run refused")
     cohorts = construct_q6_cohorts(seed=seed, per_profile=per_profile)
     # The caller controls this exposure history, so this remains source-only.
     # Nevertheless it must be checked *inside the executable runner* before
     # any optimizer writes, not merely by an optional standalone validator.
     verified = validate_q6_cohorts(
         cohorts, per_profile=per_profile,
-        previously_exposed_eval_prompts=previously_exposed_eval_prompts,
+        previously_exposed_eval_prompts=exposure_snapshot,
     )
     arms = {label: ToyLinearAdapter(seed=seed) for label in
             ("trained", "zero_update", "inverted_labels")}
@@ -301,6 +354,9 @@ def run_q6_toy_study(
         "evaluated_prompts": [c.prompt for c in cohorts.heldout + cohorts.transfer],
         "evaluation_prompt_sha256": [sha256(c.prompt.encode("ascii")).hexdigest()
                                       for c in cohorts.heldout + cohorts.transfer],
+        "supplied_exposure_prompt_count": len(exposure_snapshot),
+        "supplied_exposure_history_sha256": exposure_sha256,
+        "caller_supplied_history_pin_checked": expected_exposure_history_sha256 is not None,
         "scores": scores,
         "retention_delta_after_stage_b": (
             scores["trained"]["after_b"]["heldout"]
@@ -329,6 +385,7 @@ def run_q6_toy_study(
             "The heldout and transfer generators are public deterministic fixtures, not sealed exams.",
             "Retained-score delta covers one immediate later toy training stage, not long-term forgetting.",
             "Caller-supplied previous-exposure claims cannot replace an independent monotonic ledger.",
+            "A matching caller-supplied history digest authenticates no owner or previous-run custody.",
             "The returned public evaluation prompts can seed a later caller-owned exposure check, not host custody.",
             "No pretrained model, independent Q5/Q6 evaluation, or host-controlled graduation is established.",
         ],

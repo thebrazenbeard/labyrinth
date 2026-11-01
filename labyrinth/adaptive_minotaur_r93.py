@@ -16,10 +16,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+import json
 from typing import NamedTuple
 
 from .journey import JourneyState, TRAINING, _snapshot_journey_claims
-from .journey_challenges import PreparedTrainingRoom, prepare_training_rooms
+from .journey_challenges import PreparedTrainingRoom, TraineeRoomView, prepare_training_rooms
+from .maze import Challenge
 from .objective_challenge_provider_r92 import (
     _approved_scope as _approved_audit,
     prepare_objective_audit_room,
@@ -36,20 +38,61 @@ class ObjectiveLane:
     journey: JourneyState
 
 
-@dataclass(frozen=True)
-class ScheduledTrainRoom:
-    """Operator-side record; `prepared` contains TRAIN gold, not learner API."""
+class ScheduledTrainRoom(NamedTuple):
+    """Tuple-backed trainer record; route fields cannot be mutated in-place.
+
+    `prepared` contains TRAIN gold and must not be sent to the learner. This
+    is in-process immutability, not host-owned provenance or authority.
+    """
 
     objective_id: str
     contract_sha256: str
     cycle_index: int
     failed_development_predecessor: bool
     prepared: PreparedTrainingRoom
+    admitted_material_sha256: str
+    admitted_trainee_fields: tuple[str, str, str, str, str]
 
     @property
     def trainee_view(self):
         """Only this view may be sent to a model for inference."""
-        return self.prepared.trainee_view
+        if _training_material_digest(self.prepared) != self.admitted_material_sha256:
+            raise ValueError("admitted TRAIN material changed after scheduling")
+        actual = self.prepared.trainee_view
+        if (actual.room_id, actual.skill, actual.challenge_id, actual.prompt,
+                actual.prompt_sha256) != self.admitted_trainee_fields:
+            raise ValueError("admitted TRAIN material changed after scheduling")
+        # Even if another thread changes a nested Challenge just after the
+        # digest check, the learner only sees the original admitted strings.
+        return TraineeRoomView(*self.admitted_trainee_fields)
+
+
+def _training_material_digest(prepared: PreparedTrainingRoom) -> str:
+    """Snapshot the complete trainer-only room, including gold, at admission.
+
+    This detects post-schedule in-process mutation of a frozen-but-nested
+    source object. The digest is not a signature or external custody proof.
+    """
+    if type(prepared) is not PreparedTrainingRoom:
+        raise ValueError("exact prepared TRAIN room required")
+    challenge = prepared.challenge
+    if type(challenge) is not Challenge or type(challenge.metadata) is not tuple:
+        raise ValueError("exact TRAIN challenge and metadata required")
+    if any(type(pair) is not tuple or len(pair) != 2
+           or any(type(item) is not str for item in pair)
+           for pair in challenge.metadata):
+        raise ValueError("nonprimitive TRAIN challenge metadata")
+    payload = {
+        "room_id": prepared.room_id,
+        "skill": prepared.skill,
+        "challenge": {
+            "id": challenge.id, "kind": challenge.kind, "tier": challenge.tier,
+            "split": challenge.split, "prompt": challenge.prompt,
+            "answer": challenge.answer, "metadata": challenge.metadata,
+        },
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                            ensure_ascii=True, allow_nan=False).encode("ascii")).hexdigest()
 
 
 class AdaptiveTrainSchedule(NamedTuple):
@@ -170,12 +213,20 @@ def schedule_adaptive_training(
     for offset in range(max(len(row[4]) for row in batches)):
         for objective_id, contract_hash, cycle, failed, prepared in batches:
             if offset < len(prepared):
+                current = prepared[offset]
+                material_digest = _training_material_digest(current)
+                view = current.trainee_view
+                if _training_material_digest(current) != material_digest:
+                    raise ValueError("TRAIN material changed during admission")
                 ordered.append(ScheduledTrainRoom(
                     objective_id=objective_id,
                     contract_sha256=contract_hash,
                     cycle_index=cycle,
                     failed_development_predecessor=failed,
-                    prepared=prepared[offset],
+                    prepared=current,
+                    admitted_material_sha256=material_digest,
+                    admitted_trainee_fields=(view.room_id, view.skill, view.challenge_id,
+                                            view.prompt, view.prompt_sha256),
                 ))
     return AdaptiveTrainSchedule(
         ordered_rooms=tuple(ordered),
