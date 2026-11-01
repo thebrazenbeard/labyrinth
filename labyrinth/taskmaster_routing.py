@@ -61,12 +61,26 @@ class RoutedTrainingRoom:
         )
 
 
-def _arithmetic_challenge(room: MazeRoom, scope: TrainingScopeSpec, choice: RoomPlan) -> Challenge:
-    """Source-controlled arithmetic gold, never fabricated by taskmaster."""
+def _arithmetic_challenge(
+    room: MazeRoom, scope: TrainingScopeSpec, choice: RoomPlan, *,
+    redraw_attempt: int = 0,
+) -> Challenge:
+    """Source-controlled arithmetic gold, never fabricated by taskmaster.
+
+    An operator-run corridor may deterministically redraw an already exposed
+    arithmetic problem.  Attempt zero deliberately preserves the original
+    source v1 identity; later attempts have domain-separated digest inputs so
+    an accepted redraw cannot masquerade as the initial generated case.
+    Redraws do not relax any TRAIN/exam admission check.
+    """
+    if (type(redraw_attempt) is not int or not 0 <= redraw_attempt <= 512):
+        raise ValueError("bounded nonnegative arithmetic redraw attempt required")
+    redraw_suffix = ("" if redraw_attempt == 0 else
+                     "\x1fdeterministic-redraw-v1\x1f" + str(redraw_attempt))
     digest = hashlib.sha256(
         ("taskmaster-route-v1\x1f" + scope.fingerprint + "\x1f" + room.room_id
          + "\x1f" + str(room.case_seed) + "\x1f" + str(choice.difficulty)
-         + "\x1f" + choice.tactic).encode("utf-8")
+         + "\x1f" + choice.tactic + redraw_suffix).encode("utf-8")
     ).digest()
     rng = random.Random(int.from_bytes(digest, "big"))
     low, high = _ARITHMETIC_BOUNDS[choice.difficulty]

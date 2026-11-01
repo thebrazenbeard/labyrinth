@@ -39,6 +39,7 @@ from .training_scope import TrainingScopeSpec
 
 
 _ANSWER = re.compile(r"ANSWER: ([+-]?\d+)\Z", re.ASCII)
+_MAX_DETERMINISTIC_REDRAWS = 512
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ class TrainingCorridorRunner:
         policy: MinotaurTrainingPolicy | None = None,
         admissions: tuple[TrainCaseApproval, ...] = (),
         journey_provenance: JourneyState | None = None,
+        semantic_history: tuple[tuple[str, int, int], ...] = (),
     ) -> None:
         # The supplied state is revalidated by these public interfaces, not
         # trusted solely because it is a frozen dataclass.
@@ -93,9 +95,23 @@ class TrainingCorridorRunner:
             _ = policy.model_hash
         elif admissions:
             raise ValueError("TRAIN approvals without an existing policy")
+        # A regenerated operator runner must carry the full semantic history
+        # along with its case/prompt admission history. The predecessor's
+        # record is *source-level*; it is not a substitute for externally
+        # authenticated Q6 prior-exposure custody.
+        if (type(semantic_history) is not tuple
+                or len(semantic_history) != len(admissions)
+                or any(type(key) is not tuple or len(key) != 3
+                       or key[0] not in ("+", "-")
+                       or type(key[1]) is not int or type(key[2]) is not int
+                       or not 1 <= key[1] <= 99999 or not 1 <= key[2] <= 99999
+                       for key in semantic_history)
+                or len(set(semantic_history)) != len(semantic_history)):
+            raise ValueError("exact nonduplicated TRAIN semantic history required")
         self.state = state
         self._policy = policy
         self._admissions = admissions
+        self._semantic_history = semantic_history
         self._in_flight: RoutedTrainingRoom | None = None
         self._observations: list[ObservedTrainingChamber] = []
         self._registry_transitions: list[TrainRegistryAdmissionReceipt] = []
@@ -208,23 +224,51 @@ class TrainingCorridorRunner:
                 assigned.room_id, resolved, proposed.tactic,
                 "policy_plus_adaptive_train", None,
             )
-        challenge = _arithmetic_challenge(assigned.room, self.state.scope, selection)
-        routed = RoutedTrainingRoom(assigned.room_id, assigned.skill, selection, challenge)
-        view = routed.trainee_view
-        admission = TrainCaseApproval(
-            room_id=assigned.room_id,
-            case_id=challenge.id,
-            skill=assigned.skill,
-            tactic=selection.tactic,
-            difficulty=selection.difficulty,
-            prompt_sha256=view.prompt_sha256,
-        )
-        if (admission.case_id in self.state.forbidden_case_ids
-                or admission.prompt_sha256 in self.state.forbidden_prompt_sha256
-                or any(admission.case_id == previous.case_id
-                       or admission.prompt_sha256 == previous.prompt_sha256
-                       for previous in self._admissions)):
-            raise ValueError("TRAIN provider generated reused/sealed evidence")
+        # The difficulty-one practice grammar has a finite operand space.
+        # Following repeated incorrect responses it is entirely possible for
+        # distinct room seeds to generate the same exercise. Rejecting just
+        # the first case would dead-end a *valid* weak-learner corridor;
+        # accepting it would launder duplicate TRAIN evidence. Redraw from a
+        # bounded, deterministic, domain-separated sequence until both exact
+        # and semantic identities are fresh. This is not a source of new
+        # authority, nor can it override sealed exam case/prompt commitments.
+        # Use the staging bridge's exact arithmetic grammar/normalizer so
+        # case admission and later HF catalog replay use identical semantics.
+        from .minotaur_hf_roster_bridge import _source_arithmetic
+
+        known_ids = {previous.case_id for previous in self._admissions}
+        known_prompts = {previous.prompt_sha256 for previous in self._admissions}
+        seen_semantics = set(self._semantic_history)
+        for redraw in range(_MAX_DETERMINISTIC_REDRAWS + 1):
+            challenge = _arithmetic_challenge(
+                assigned.room, self.state.scope, selection,
+                redraw_attempt=redraw,
+            )
+            computed_answer, semantic_key = _source_arithmetic(challenge)
+            if computed_answer != challenge.answer:
+                raise ValueError("source arithmetic TRAIN gold diverged from staging oracle")
+            routed = RoutedTrainingRoom(assigned.room_id, assigned.skill, selection, challenge)
+            view = routed.trainee_view
+            admission = TrainCaseApproval(
+                room_id=assigned.room_id,
+                case_id=challenge.id,
+                skill=assigned.skill,
+                tactic=selection.tactic,
+                difficulty=selection.difficulty,
+                prompt_sha256=view.prompt_sha256,
+            )
+            if (admission.case_id in self.state.forbidden_case_ids
+                    or admission.prompt_sha256 in self.state.forbidden_prompt_sha256
+                    or admission.case_id in known_ids
+                    or admission.prompt_sha256 in known_prompts
+                    or semantic_key in seen_semantics):
+                continue
+            break
+        else:
+            raise ValueError(
+                "TRAIN provider exhausted bounded fresh case candidates "
+                "(reused/sealed evidence)"
+            )
 
         if self._policy is None:
             policy = MinotaurTrainingPolicy(
@@ -240,6 +284,7 @@ class TrainingCorridorRunner:
             self._registry_transitions.append(transition)
         self._policy = policy
         self._admissions += (admission,)
+        self._semantic_history += (semantic_key,)
         self._in_flight = routed
         self.state = assigned_state
         return view
@@ -369,4 +414,5 @@ class TrainingCorridorRunner:
         return TrainingCorridorRunner(
             next_state, policy=self._policy, admissions=self._admissions,
             journey_provenance=journey,
+            semantic_history=self._semantic_history,
         )
