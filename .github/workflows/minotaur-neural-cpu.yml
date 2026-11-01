@@ -31,6 +31,7 @@ on:
       - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
+      - "labyrinth/approved_cognitive_empathy_train_r90.py"
       - "labyrinth/hf_development_event_journal.py"
       - "labyrinth/recovery_composition.py"
       - "labyrinth/frozen_base_binding.py"
@@ -190,6 +191,7 @@ on:
       - "tests/test_hf_scoped_report_audit.py"
       - "tests/test_hf_program_scope.py"
       - "tests/test_objective_contract.py"
+      - "tests/test_approved_cognitive_empathy_train_r90.py"
       - "tests/test_reserved_structural_transfer.py"
       - "tests/minotaur_required_tests.txt"
       - "tests/test_ci_membership.py"
@@ -227,6 +229,7 @@ on:
       - "labyrinth/neural_resume_checkpoint.py"
       - "labyrinth/hf_report_audit.py"
       - "labyrinth/objective_contract.py"
+      - "labyrinth/approved_cognitive_empathy_train_r90.py"
       - "labyrinth/hf_development_event_journal.py"
       - "labyrinth/recovery_composition.py"
       - "labyrinth/frozen_base_binding.py"
@@ -386,6 +389,7 @@ on:
       - "tests/test_hf_scoped_report_audit.py"
       - "tests/test_hf_program_scope.py"
       - "tests/test_objective_contract.py"
+      - "tests/test_approved_cognitive_empathy_train_r90.py"
       - "tests/test_reserved_structural_transfer.py"
       - "tests/minotaur_required_tests.txt"
       - "tests/test_ci_membership.py"
@@ -482,6 +486,10 @@ jobs:
           # pinned dependency-present runner. It is NOT a physical pretrained
           # training run or an independent private final examination.
           new_required = (
+              # R90 source-only cognitive perspective TRAIN: deterministic
+              # binary rubric and semantic overlap controls, NOT human
+              # empathy mastery or model training/graduation evidence.
+              ("tests.test_approved_cognitive_empathy_train_r90", 28),
               ("tests.test_monotonic_anchor_protocol", 10),
               ("tests.test_retention_family_registry", 8),
               ("tests.test_retention_entrypoint_guard", 9),
