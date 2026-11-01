@@ -669,6 +669,44 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('or result.skipped', workflow)
         self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
 
+    def test_q6_per_slot_cas_reference_is_mandatory_no_skip_and_not_host_authority(self):
+        # Q6 per-exposure CAS is only a process-local arithmetic/program
+        # reference.  Its test gate may not be mistaken for a cognitive runtime
+        # host-authority, independent Q6 custody, or graduation certificate.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        trigger_paths = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for path in (
+            "labyrinth/q6_slot_cas_reference.py",
+            "tests/test_q6_slot_cas_reference.py",
+            "docs/qualification/Q6_PER_EXPOSURE_CAS_REFERENCE_R102.md",
+        ):
+            self.assertTrue((root / path).is_file())
+            for event, manifest in trigger_paths.items():
+                with self.subTest(event=event, path=path):
+                    self.assertIn(f'      - "{path}"', manifest)
+        self.assertIn('("tests.test_q6_slot_cas_reference", 45)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+        for module, minimum in (
+            ("tests.test_q6_governed_campaign_contract", 25),
+            ("tests.test_minotaur_feedback_divergence_r93", 6),
+            ("tests.test_approved_train_provider_r90", 7),
+            ("tests.test_objective_training_run", 14),
+            ("tests.test_cognitive_objective_training_run", 7),
+            ("tests.test_approved_cognitive_empathy_train_r90", 34),
+        ):
+            self.assertIn(f'("{module}", {minimum})', workflow)
+        doc = (root / "docs/qualification/Q6_PER_EXPOSURE_CAS_REFERENCE_R102.md").read_text()
+        self.assertIn("**not** backed by `Q6SlotCasReference`", doc)
+        self.assertIn("does **not** provide rollback-proof host custody", doc)
+        self.assertIn("graduation permission", doc)
+
     def test_minotaur_feedback_novelty_regression_is_mandatory_and_no_skip(self):
         # An independently reproduced weak-learner case-collision defect
         # must remain a pinned no-skip source gate on PRs and main.  This is
