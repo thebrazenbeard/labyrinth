@@ -246,3 +246,45 @@ class CognitiveSftTokenizationTests(TestCase):
                 contract, journey, dataset,
                 tokenizer=CollapsedChoicesTokenizer(), max_tokens=4096,
             )
+
+    def test_context_sensitive_merge_across_answer_boundary_is_rejected(self):
+        contract, journey, dataset = self._approved(1160)
+
+        class ContextMergingTokenizer(CharTokenizer):
+            def __call__(self, content, *, add_special_tokens):
+                encoded = super().__call__(content, add_special_tokens=add_special_tokens)
+                # A tokenizer may merge the trailing space and choice with
+                # preceding context. Standalone choice IDs remain distinct.
+                if add_special_tokens and "\nAnswer: " in content:
+                    encoded["input_ids"] = (
+                        encoded["input_ids"][:-2]
+                        + [700_000 + ord(content[-1])]
+                    )
+                return encoded
+
+        with self.assertRaisesRegex(ValueError, "full-context tokenization"):
+            tokenize_cognitive_train_dataset(
+                contract, journey, dataset,
+                tokenizer=ContextMergingTokenizer(), max_tokens=4096,
+            )
+
+    def test_distinct_train_prompts_cannot_collapse_to_bos_only_prefix(self):
+        contract, journey, dataset = self._approved(1161)
+
+        class LossyPrefixTokenizer(CharTokenizer):
+            def __call__(self, content, *, add_special_tokens):
+                if not add_special_tokens and content in (" A", " B", " C"):
+                    return {"input_ids": [500 + ord(content[-1])]}
+                if add_special_tokens and content.endswith("\nAnswer:"):
+                    return {"input_ids": [101]}
+                if add_special_tokens and "\nAnswer: " in content:
+                    return {"input_ids": [101, 500 + ord(content[-1])]}
+                return super().__call__(content, add_special_tokens=add_special_tokens)
+
+        # Full-context parity still holds for every answer; nevertheless every
+        # distinct canonical prompt is reduced to the same noninformative BOS.
+        with self.assertRaisesRegex(ValueError, "distinct TRAIN prompts share prefix IDs"):
+            tokenize_cognitive_train_dataset(
+                contract, journey, dataset,
+                tokenizer=LossyPrefixTokenizer(), max_tokens=4096,
+            )
