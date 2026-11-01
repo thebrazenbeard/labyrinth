@@ -178,6 +178,7 @@ on:
       - "tests/test_q6_stratified_toy_study_r93.py"
       - "tests/test_q6_governed_campaign_contract.py"
       - "tests/test_q6_slot_cas_reference.py"
+      - "tests/test_q6_durable_slot_authority_r120.py"
       - "tests/test_minotaur_feedback_divergence_r93.py"
       - "tests/test_adaptive_minotaur_r93.py"
       - "tests/test_q8_host_authority_probe.py"
@@ -460,6 +461,7 @@ on:
       - "tests/test_q6_stratified_toy_study_r93.py"
       - "tests/test_q6_governed_campaign_contract.py"
       - "tests/test_q6_slot_cas_reference.py"
+      - "tests/test_q6_durable_slot_authority_r120.py"
       - "tests/test_minotaur_feedback_divergence_r93.py"
       - "tests/test_adaptive_minotaur_r93.py"
       - "tests/test_q8_host_authority_probe.py"
@@ -779,6 +781,10 @@ jobs:
               # reference; require all 45 adversarial source tests without
               # skips, but it grants NO host-owned authority or graduation.
               ("tests.test_q6_slot_cas_reference", 45),
+              # WAL/FULL per-slot signed operator-side prototype is durable,
+              # but these same-host tests DO NOT establish host independence,
+              # evaluator prompt custody or external antirollback.
+              ("tests.test_q6_durable_slot_authority_r120", 20),
               # Weak-learner source novelty and sealed-evidence exhaustion
               # must remain present; green optional test skips are forbidden.
               ("tests.test_minotaur_feedback_divergence_r93", 6),
