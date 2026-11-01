@@ -135,6 +135,9 @@ def arithmetic_semantic_atoms(case: Challenge) -> frozenset[tuple[str, int, int]
                 expected = 2 * right
                 atoms = frozenset({
                     _arith_atom("+", left, right), _arith_atom("-", left, right),
+                    # (a+b) - (a-b) is b+b. Public heldout b+b is the
+                    # same arithmetic computation despite a different prompt.
+                    _arith_atom("+", right, right),
                 })
     if case.answer != str(expected):
         raise ValueError("adaptive arithmetic gold differs from its canonical prompt")

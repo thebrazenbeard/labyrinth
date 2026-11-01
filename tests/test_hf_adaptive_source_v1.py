@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+import re
 import unittest
+from unittest.mock import patch
+
+import labyrinth.hf_adaptive_source_v1 as adaptive_source
 
 from labyrinth.hf_adaptive_source_v1 import (
     ADAPTIVE_SCHEMA, build_adaptive_manifest, reconstruct_adaptive_source,
@@ -26,6 +30,64 @@ class AdaptiveSourceManifestTests(unittest.TestCase):
         self.roster = collect_minotaur_hf_roster(
             _runner(), self.config, toy_arithmetic_learner,
         )
+
+    def test_contrast_result_reuses_the_doubled_second_operand_semantics(self) -> None:
+        room_id = "1" * 32
+        contrast = _arithmetic_challenge(
+            MazeRoom(room_id, "arithmetic", 7), self.scope,
+            RoomPlan(room_id, 1, "contrast", "policy_plus_adaptive_train", None),
+        )
+        match = re.search(r"Expression A is (\d+) \+ (\d+)\.", contrast.prompt)
+        self.assertIsNotNone(match)
+        second = int(match.group(2))
+        atoms = arithmetic_semantic_atoms(contrast)
+        # (a+b) - (a-b) is exactly b+b, independent of a.
+        self.assertIn(("+", second, second), atoms)
+        equivalent = Challenge(
+            id="eval-equivalent", kind="arithmetic", tier=1, split="eval",
+            prompt=f"Calculate {second} + {second}.\n"
+                   "Respond with exactly one line: ANSWER: <integer>.",
+            answer=str(2 * second),
+        )
+        self.assertTrue(atoms & arithmetic_semantic_atoms(equivalent))
+        # Equal numerical answers alone are not sufficient for semantic reuse.
+        alternative = replace(
+            equivalent, id="eval-different",
+            prompt=f"Calculate {second - 1} + {second + 1}.\n"
+                   "Respond with exactly one line: ANSWER: <integer>.",
+        )
+        self.assertFalse(atoms & arithmetic_semantic_atoms(alternative))
+
+    def test_diagnostic_rerolls_contrast_equivalent_b_plus_b(self) -> None:
+        room_id = "2" * 32
+        contrast = _arithmetic_challenge(
+            MazeRoom(room_id, "arithmetic", 11), self.scope,
+            RoomPlan(room_id, 1, "contrast", "policy_plus_adaptive_train", None),
+        )
+        match = re.search(r"Expression A is (\d+) \+ (\d+)\.", contrast.prompt)
+        self.assertIsNotNone(match)
+        second = int(match.group(2))
+        def eval_case(case_id: str, left: int, right: int) -> Challenge:
+            return Challenge(
+                id=case_id, kind="arithmetic", tier=1, split="eval",
+                prompt=f"Calculate {left} + {right}.\n"
+                       "Respond with exactly one line: ANSWER: <integer>.",
+                answer=str(left + right),
+            )
+        collision = eval_case("eval-collision", second, second)
+        same_answer_different_expression = eval_case(
+            "eval-different", second - 1, second + 1,
+        )
+        other = eval_case("eval-other", 40, 41)
+        with patch.object(adaptive_source, "generate_maze", side_effect=[
+            [collision, other], [same_answer_different_expression, other],
+        ]) as generator:
+            admitted = adaptive_source._public_diagnostic(
+                replace(self.config, eval_count=2), self.scope,
+                "a" * 64, [contrast],
+            )
+        self.assertEqual(generator.call_count, 2)
+        self.assertEqual([case.id for case in admitted], ["eval-different", "eval-other"])
 
     def test_three_tactics_replay_gold_without_publishing_any_gold(self) -> None:
         self.assertEqual(ADAPTIVE_SCHEMA, "labyrinth.hf-lora-adaptive-source.v1")

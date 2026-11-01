@@ -490,7 +490,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         for module, minimum in (
             ("tests.test_qualify_minilm_cpu", 7),
             ("tests.test_hf_pilot", 43),
-            ("tests.test_hf_adaptive_source_v1", 6),
+            ("tests.test_hf_adaptive_source_v1", 8),
             ("tests.test_minotaur_hf_roster_bridge", 14),
             ("tests.test_hf_report_audit", 18),
             ("tests.test_external_monotonic_authority_contract", 17),
