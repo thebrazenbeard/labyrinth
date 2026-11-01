@@ -267,3 +267,24 @@ class CognitiveSftTokenizationTests(TestCase):
                 contract, journey, dataset,
                 tokenizer=ContextMergingTokenizer(), max_tokens=4096,
             )
+
+    def test_distinct_train_prompts_cannot_collapse_to_bos_only_prefix(self):
+        contract, journey, dataset = self._approved(1161)
+
+        class LossyPrefixTokenizer(CharTokenizer):
+            def __call__(self, content, *, add_special_tokens):
+                if not add_special_tokens and content in (" A", " B", " C"):
+                    return {"input_ids": [500 + ord(content[-1])]}
+                if add_special_tokens and content.endswith("\nAnswer:"):
+                    return {"input_ids": [101]}
+                if add_special_tokens and "\nAnswer: " in content:
+                    return {"input_ids": [101, 500 + ord(content[-1])]}
+                return super().__call__(content, add_special_tokens=add_special_tokens)
+
+        # Full-context parity still holds for every answer; nevertheless every
+        # distinct canonical prompt is reduced to the same noninformative BOS.
+        with self.assertRaisesRegex(ValueError, "distinct TRAIN prompts share prefix IDs"):
+            tokenize_cognitive_train_dataset(
+                contract, journey, dataset,
+                tokenizer=LossyPrefixTokenizer(), max_tokens=4096,
+            )

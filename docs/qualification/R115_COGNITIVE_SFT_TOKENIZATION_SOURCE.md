@@ -43,6 +43,13 @@ bounded local parity check on the injected tokenizer, **not** evidence of
 real Qwen3.5 tokenizer/chat-template compatibility or identity across
 separate processes.
 
+The batch also rejects an injected tokenizer that collapses **different
+canonical TRAIN prompts** to identical prefix ID tuples. A lossy tokenizer
+could otherwise retain distinct A/B/C completions and pass whole-context
+parity while removing every bit of question information. This comparison is
+batch-local and cannot prove that token IDs decode to the original text or
+that a separately loaded Qwen tokenizer has the same vocabulary and template.
+
 Before touching a tokenizer, the adapter regenerates the canonical R111
 approved TRAIN export from the supplied objective/journey and requires exact
 byte/metadata agreement with the caller-provided `CognitiveTrainDataset`.
@@ -76,8 +83,8 @@ mutable caller input.
   Vera GGUF have **not** been tested. Physical launch authority is held.
 - All work is local/source-only and respects the hard **$0** cost limit.
 
-Run `python -m unittest -v tests.test_cognitive_sft_tokenization` for ten
+Run `python -m unittest -v tests.test_cognitive_sft_tokenization` for eleven
 source-bound, masking, provenance, malformed-tokenizer, replay/overflow,
-early-EOS, choice-alias, contextual-boundary-merge, and caller-mutation tests.
-The neural CPU GitHub workflow currently pins the preceding nine-test floor;
-its gate must be raised to ten when this successor is integrated.
+early-EOS, choice-alias, contextual-boundary-merge, lossy-prefix collision,
+and caller-mutation tests. The pinned neural CPU GitHub workflow requires all
+eleven without skips on PR and main changes to this surface.

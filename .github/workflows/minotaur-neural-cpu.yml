@@ -802,7 +802,7 @@ jobs:
               # Synthetic cognitive SFT tokenization revalidates the canonical
               # TRAIN-only dataset, masks the entire prompt/instruction with
               # -100, and supervises only choice+EOS. No neural updates.
-              ("tests.test_cognitive_sft_tokenization", 10),
+              ("tests.test_cognitive_sft_tokenization", 11),
               # A bounded, synthetic 30-scenario perspective TRAIN corpus;
               # enforce all lexical-shortcut, replay, and source-binding tests.
               # Scores never claim independent empathy mastery or host custody.

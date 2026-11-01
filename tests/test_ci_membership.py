@@ -56,7 +56,7 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
             for event, manifest in events.items():
                 with self.subTest(path=path, event=event):
                     self.assertIn(f'      - "{path}"', manifest)
-        self.assertIn('("tests.test_cognitive_sft_tokenization", 10)', workflow)
+        self.assertIn('("tests.test_cognitive_sft_tokenization", 11)', workflow)
         self.assertIn('or result.skipped', workflow)
         cli_source = (root / "scripts/experiments/cognitive_train_demo.py").read_text()
         self.assertNotIn("cognitive_sft_tokenization", cli_source)

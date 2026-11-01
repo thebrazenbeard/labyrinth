@@ -121,6 +121,7 @@ def tokenize_cognitive_train_dataset(
     examples: list[CognitiveSftExample] = []
     ids: set[str] = set()
     semantics: set[str] = set()
+    observed_prefixes: dict[tuple[int, ...], str] = {}
     for line in canonical.jsonl_bytes.splitlines():
         row = json.loads(line)
         if (row["schema"] != SCHEMA_ID or row["split"] != "train"
@@ -137,6 +138,9 @@ def tokenize_cognitive_train_dataset(
                             add_special_tokens=True)
         if eos_id in prefix:
             raise ValueError("tokenizer inserted EOS before the supervised choice")
+        prior_prompt = observed_prefixes.setdefault(prefix, row["prompt"])
+        if prior_prompt != row["prompt"]:
+            raise ValueError("distinct TRAIN prompts share prefix IDs")
         completion = choices[row["target_choice"]]
         # Subword tokenization is context sensitive. Independently encoding
         # the masked prefix and target may not equal tokenizing their actual
