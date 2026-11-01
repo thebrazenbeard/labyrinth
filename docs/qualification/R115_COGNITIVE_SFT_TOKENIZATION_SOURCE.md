@@ -33,9 +33,22 @@ nonnegative primitive integers. An approved row yields:
 The adapter rejects tokenizers that place EOS inside the masked prompt,
 prematurely terminate the choice, or map distinct `A`/`B`/`C` choices to the
 same completion IDs. The three choices are tokenized once and pinned for the
-batch. This is local token consistency, not a guarantee that a future model
-has learned the choices or that its tokenizer behaves identically across
+batch. It also independently encodes each complete prompt, newline `Answer:`
+instruction, and private choice as one string with special tokens enabled, and
+requires those IDs to be *exactly* the separately assembled prefix and choice
+IDs before appending the one explicit EOS. Contextual subword merges across the
+answer boundary, automatic extra special tokens, or state-dependent token IDs
+fail closed instead of silently training an impossible sequence. This is a
+bounded local parity check on the injected tokenizer, **not** evidence of
+real Qwen3.5 tokenizer/chat-template compatibility or identity across
 separate processes.
+
+The batch also rejects an injected tokenizer that collapses **different
+canonical TRAIN prompts** to identical prefix ID tuples. A lossy tokenizer
+could otherwise retain distinct A/B/C completions and pass whole-context
+parity while removing every bit of question information. This comparison is
+batch-local and cannot prove that token IDs decode to the original text or
+that a separately loaded Qwen tokenizer has the same vocabulary and template.
 
 Before touching a tokenizer, the adapter regenerates the canonical R111
 approved TRAIN export from the supplied objective/journey and requires exact
@@ -70,7 +83,8 @@ mutable caller input.
   Vera GGUF have **not** been tested. Physical launch authority is held.
 - All work is local/source-only and respects the hard **$0** cost limit.
 
-Run `python -m unittest -v tests.test_cognitive_sft_tokenization` for nine
+Run `python -m unittest -v tests.test_cognitive_sft_tokenization` for eleven
 source-bound, masking, provenance, malformed-tokenizer, replay/overflow,
-early-EOS, choice-alias, and caller-mutation tests. The neural CPU GitHub workflow requires all nine
-without skips on both pull requests and `main` changes to this surface.
+early-EOS, choice-alias, contextual-boundary-merge, lossy-prefix collision,
+and caller-mutation tests. The pinned neural CPU GitHub workflow requires all
+eleven without skips on PR and main changes to this surface.

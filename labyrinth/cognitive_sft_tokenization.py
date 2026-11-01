@@ -121,6 +121,7 @@ def tokenize_cognitive_train_dataset(
     examples: list[CognitiveSftExample] = []
     ids: set[str] = set()
     semantics: set[str] = set()
+    observed_prefixes: dict[tuple[int, ...], str] = {}
     for line in canonical.jsonl_bytes.splitlines():
         row = json.loads(line)
         if (row["schema"] != SCHEMA_ID or row["split"] != "train"
@@ -132,11 +133,25 @@ def tokenize_cognitive_train_dataset(
         semantics.add(row["semantic_sha256"])
         # Keep the answer instruction on the masked side of the supervision
         # boundary; only the choice and EOS train the next-token objective.
-        prefix = _token_ids(tokenizer, row["prompt"] + "\nAnswer:",
+        prompt_and_instruction = row["prompt"] + "\nAnswer:"
+        prefix = _token_ids(tokenizer, prompt_and_instruction,
                             add_special_tokens=True)
         if eos_id in prefix:
             raise ValueError("tokenizer inserted EOS before the supervised choice")
+        prior_prompt = observed_prefixes.setdefault(prefix, row["prompt"])
+        if prior_prompt != row["prompt"]:
+            raise ValueError("distinct TRAIN prompts share prefix IDs")
         completion = choices[row["target_choice"]]
+        # Subword tokenization is context sensitive. Independently encoding
+        # the masked prefix and target may not equal tokenizing their actual
+        # concatenated text (even when A/B/C choices are unique). Never pass
+        # such a synthetic sequence off as model-valid next-token labels.
+        contextual = _token_ids(
+            tokenizer, prompt_and_instruction + " " + row["target_choice"],
+            add_special_tokens=True,
+        )
+        if contextual != prefix + completion:
+            raise ValueError("full-context tokenization disagrees at answer boundary")
         sequence = prefix + completion + (eos_id,)
         if len(sequence) > max_tokens:
             raise ValueError("cognitive TRAIN example exceeds fixed token budget")
