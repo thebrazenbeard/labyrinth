@@ -244,13 +244,17 @@ def _quarantine_reason(row: dict) -> str | None:
     # Conservative, intentionally imperfect screening: review is mandatory
     # even if no pattern matches. Sources include Wikipedia reference text.
     all_text = "\n".join(row[field] for field in ("instruction", "context", "response"))
-    if _STRUCTURAL_CHAT_DELIMITER.search(all_text):
+    # Fingerprints use NFKC, so quarantine cannot inspect only raw glyphs:
+    # fullwidth compatibility spellings otherwise evade PII/framing patterns.
+    screened = (all_text, unicodedata.normalize("NFKC", all_text))
+    if any(_STRUCTURAL_CHAT_DELIMITER.search(text) for text in screened):
         return "STRUCTURAL_CHAT_DELIMITER"
     if row["context"].strip():
         return "THIRD_PARTY_CONTEXT"
-    if _CREDENTIAL.search(all_text):
+    if any(_CREDENTIAL.search(text) for text in screened):
         return "POSSIBLE_CREDENTIAL"
-    if _EMAIL_OR_LINK.search(all_text) or _PHONE_LIKE.search(all_text):
+    if any(_EMAIL_OR_LINK.search(text) or _PHONE_LIKE.search(text)
+           for text in screened):
         return "POTENTIAL_PII_OR_LINK"
     return None
 

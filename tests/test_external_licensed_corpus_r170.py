@@ -295,6 +295,50 @@ class ExternalLicensedCorpusR170Tests(unittest.TestCase):
         self.assertEqual({e["reason"] for e in entries},
                          {"STRUCTURAL_CHAT_DELIMITER"})
 
+    def test_nfkc_compatibility_spelling_cannot_bypass_private_quarantine(self):
+        # Fullwidth ASCII glyphs collapse under NFKC, the same normalization
+        # already used for candidate fingerprints and cross-split comparison.
+        def fullwidth(text):
+            return "".join(chr(ord(c) + 65248) if 33 <= ord(c) <= 126 else c
+                           for c in text)
+
+        cases = (
+            ("Describe " + fullwidth("<|im_start|>") + "role text.",
+             "STRUCTURAL_CHAT_DELIMITER"),
+            ("Quote " + fullwidth("[INST]") + " in this instruction.",
+             "STRUCTURAL_CHAT_DELIMITER"),
+            ("Email " + fullwidth("person@example.org") + " for access.",
+             "POTENTIAL_PII_OR_LINK"),
+            ("Set " + fullwidth("api_key:") + " to the sample value.",
+             "POSSIBLE_CREDENTIAL"),
+        )
+        for index, (instruction, reason) in enumerate(cases, start=80):
+            with self.subTest(reason=reason):
+                candidate = build_external_corpus_candidates((
+                    _sample(index, row=_row(instruction)),))
+                self.assertIsNone(candidate.private_train_candidate_jsonl())
+                self.assertEqual(
+                    json.loads(candidate.private_quarantine_json())["entries"][0]["reason"],
+                    reason,
+                )
+        for number, row in (
+            (91, _row("Name a verification step.",
+                      response="Review " + fullwidth("<|im_end|>") + " tokens.")),
+            (92, _row("Explain source citations.",
+                      context=fullwidth("[INST]") + " from a quoted source.")),
+        ):
+            with self.subTest(field="response_or_context", number=number):
+                candidate = build_external_corpus_candidates((
+                    _sample(number, row=row),))
+                self.assertIsNone(candidate.private_train_candidate_jsonl())
+                self.assertEqual(
+                    json.loads(candidate.private_quarantine_json())["entries"][0]["reason"],
+                    "STRUCTURAL_CHAT_DELIMITER",
+                )
+        benign = build_external_corpus_candidates((_sample(
+            90, row=_row("Explain " + fullwidth("2+2") + " without special tokens.")),))
+        self.assertEqual(len(benign.private_train_candidate_jsonl().splitlines()), 1)
+
     def test_reserved_nul_and_terminal_controls_cannot_enter_private_artifacts(self):
         for field in ("instruction", "response", "context"):
             for control in (chr(0), chr(27), chr(127)):
