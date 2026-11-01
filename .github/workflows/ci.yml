@@ -12,6 +12,15 @@ jobs:
         python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact event head checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual_head_sha="$(git rev-parse HEAD)"
+          test "$actual_head_sha" = "$EXPECTED_HEAD_SHA"
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}

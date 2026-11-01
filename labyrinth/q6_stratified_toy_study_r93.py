@@ -57,6 +57,45 @@ class Q6Cohorts:
     transfer: tuple[Challenge, ...]
 
 
+def _cohort_source_content(cohorts: Q6Cohorts) -> tuple[tuple[tuple[object, ...], ...], ...]:
+    """Detach all admitted cohort case values, including private gold.
+
+    Challenge is a frozen dataclass, but an in-process callback can still
+    rewrite a field with ``object.__setattr__``. A full primitive snapshot is
+    necessary: a prompt-only fingerprint would miss corrupted answer keys.
+    """
+    if type(cohorts) is not Q6Cohorts:
+        raise Q6StudyError("cohort source changed after admission")
+    groups = []
+    for label in _SPLITS:
+        cases = getattr(cohorts, label)
+        if type(cases) is not tuple:
+            raise Q6StudyError("cohort source changed after admission")
+        group = []
+        for case in cases:
+            if (type(case) is not Challenge
+                    or any(type(getattr(case, key)) is not str
+                           for key in ("id", "kind", "split", "prompt", "answer"))
+                    or type(case.tier) is not int
+                    or type(case.metadata) is not tuple
+                    or any(type(pair) is not tuple or len(pair) != 2
+                           or any(type(part) is not str for part in pair)
+                           for pair in case.metadata)):
+                raise Q6StudyError("cohort source changed after admission")
+            group.append((case.id, case.kind, case.tier, case.split,
+                          case.prompt, case.answer,
+                          tuple((key, value) for key, value in case.metadata)))
+        groups.append(tuple(group))
+    return tuple(groups)
+
+
+def _assert_cohort_source_unchanged(
+    cohorts: Q6Cohorts, source: tuple[tuple[tuple[object, ...], ...], ...],
+) -> None:
+    if _cohort_source_content(cohorts) != source:
+        raise Q6StudyError("cohort source changed after admission")
+
+
 def _parse(prompt: str) -> tuple[int, str, int]:
     if type(prompt) is not str:
         raise Q6StudyError("canonical arithmetic prompt required")
@@ -329,13 +368,20 @@ def run_q6_toy_study(
         previously_exposed_eval_prompts=exposure_snapshot,
         previously_exposed_train_prompts=train_exposure_snapshot,
     )
+    admitted_source = _cohort_source_content(cohorts)
+    def score_admitted_cohorts(model: ToyLinearAdapter) -> dict[str, int]:
+        _assert_cohort_source_unchanged(cohorts, admitted_source)
+        observed = _snapshot(model, cohorts)
+        _assert_cohort_source_unchanged(cohorts, admitted_source)
+        return observed
+
     # Freeze the admitted public source rosters before optimizer callbacks.
     # This is the planned TRAIN set, not an independent per-step visit ledger.
     train_prompts = tuple(c.prompt for c in cohorts.train_a + cohorts.train_b)
     eval_prompts = tuple(c.prompt for c in cohorts.heldout + cohorts.transfer)
     arms = {label: ToyLinearAdapter(seed=seed) for label in
             ("trained", "zero_update", "inverted_labels")}
-    scores = {label: {"initial": _snapshot(model, cohorts)}
+    scores = {label: {"initial": score_admitted_cohorts(model)}
               for label, model in arms.items()}
     initial = arms["trained"].model_hash
     zero_initial = arms["zero_update"].model_hash
@@ -346,11 +392,13 @@ def run_q6_toy_study(
                                      ("after_b", cohorts.train_b, epochs_stage_b)):
             stages: dict[str, dict] = {}
             for label, model in arms.items():
+                _assert_cohort_source_unchanged(cohorts, admitted_source)
                 receipt = model.train(
                     batch, epochs=epochs, learning_rate=float(learning_rate),
                     update_enabled=label != "zero_update",
                     shuffled_labels=label == "inverted_labels",
                 )
+                _assert_cohort_source_unchanged(cohorts, admitted_source)
                 stages[label] = receipt
                 # A fully converged learner may legitimately make no further
                 # update in stage B; require genuine updates across the whole
@@ -363,12 +411,15 @@ def run_q6_toy_study(
                     raise Q6StudyError("zero-update control mutated")
             optimizer[phase] = stages
             for label, model in arms.items():
-                scores[label][phase] = _snapshot(model, cohorts)
+                scores[label][phase] = score_admitted_cohorts(model)
+            _assert_cohort_source_unchanged(cohorts, admitted_source)
             checkpoint = Path(scratch) / f"trained-{phase}.json"
             saved_digest = arms["trained"].save_checkpoint(checkpoint)
+            _assert_cohort_source_unchanged(cohorts, admitted_source)
             if saved_digest != arms["trained"].model_hash:
                 raise Q6StudyError("checkpoint publication/readback hash mismatch")
             arms["trained"] = ToyLinearAdapter.load_checkpoint(checkpoint)
+            _assert_cohort_source_unchanged(cohorts, admitted_source)
             if arms["trained"].model_hash != saved_digest:
                 raise Q6StudyError("fresh-load lost trained toy parameters")
             if phase == "after_a":
@@ -382,6 +433,7 @@ def run_q6_toy_study(
     inverted_updates = sum(optimizer[phase]["inverted_labels"]["parameter_updates"] for phase in optimizer)
     if train_updates <= 0 or inverted_updates <= 0:
         raise Q6StudyError("no real toy parameter updates")
+    _assert_cohort_source_unchanged(cohorts, admitted_source)
     return {
         "schema": SCHEMA,
         "status": "SOURCE_ONLY_TOY_Q6_UNQUALIFIED",

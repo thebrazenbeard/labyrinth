@@ -6,6 +6,7 @@ from hashlib import sha256
 import unittest
 from unittest.mock import patch
 
+import labyrinth.q6_stratified_toy_study_r93 as q6_study
 from labyrinth.q6_stratified_toy_study_r93 import (
     Q6StudyError, Q6ExposureExhaustion, Q6ExposureReuse,
     construct_q6_cohorts, run_q6_toy_study,
@@ -15,6 +16,64 @@ from labyrinth.toy_backend import ToyLinearAdapter
 
 
 class Q6StratifiedToyStudyTests(unittest.TestCase):
+    def test_evaluator_callback_cannot_mutate_scored_gold(self):
+        cohorts = construct_q6_cohorts(seed=7, per_profile=2)
+        affected = cohorts.heldout[0]
+        original_generate = ToyLinearAdapter.generate
+        invoked = False
+
+        def generate_then_mutate(model, prompt):
+            nonlocal invoked
+            response = original_generate(model, prompt)
+            if not invoked:
+                invoked = True
+                object.__setattr__(affected, "answer", "999999")
+            return response
+
+        with patch.object(q6_study, "construct_q6_cohorts", return_value=cohorts):
+            with patch.object(ToyLinearAdapter, "generate", new=generate_then_mutate):
+                with self.assertRaisesRegex(Q6StudyError, "cohort source changed"):
+                    run_q6_toy_study(seed=7, per_profile=2,
+                                     epochs_stage_a=2, epochs_stage_b=2)
+
+    def test_optimizer_callback_cannot_mutate_admitted_cohort_source(self):
+        # Frozen Challenge is not sufficient: object.__setattr__ can rewrite
+        # TRAIN supervision or heldout gold after the one-time partition check.
+        # Reported prompt commitments must never describe different source
+        # bytes than those used by the local scorer.
+        mutations = (
+            ("heldout_gold", "heldout", {"answer": "999999"}),
+            ("transfer_prompt_and_gold", "transfer", {
+                "prompt": "Calculate 11 + 12.\nRespond with exactly one line: ANSWER: <integer>.",
+                "answer": "23",
+            }),
+            ("unvisited_train_b_metadata", "train_b", {"metadata": (("forged", "yes"),)}),
+            ("train_a_split", "train_a", {"split": "q6_heldout"}),
+            ("heldout_id", "heldout", {"id": "forged-case"}),
+            ("transfer_kind_tier", "transfer", {"kind": "forged", "tier": 99}),
+        )
+        original_train = ToyLinearAdapter.train
+        for label, partition, replacements in mutations:
+            with self.subTest(mutation=label):
+                cohorts = construct_q6_cohorts(seed=7, per_profile=2)
+                affected = getattr(cohorts, partition)[0]
+                invoked = False
+
+                def train_then_mutate(model, *args, **kwargs):
+                    nonlocal invoked
+                    result = original_train(model, *args, **kwargs)
+                    if not invoked:
+                        invoked = True
+                        for name, value in replacements.items():
+                            object.__setattr__(affected, name, value)
+                    return result
+
+                with patch.object(q6_study, "construct_q6_cohorts", return_value=cohorts):
+                    with patch.object(ToyLinearAdapter, "train", new=train_then_mutate):
+                        with self.assertRaisesRegex(Q6StudyError, "cohort source changed"):
+                            run_q6_toy_study(seed=7, per_profile=2,
+                                             epochs_stage_a=2, epochs_stage_b=2)
+
     def test_fixed_balanced_semantic_profiles_and_range_shift(self):
         for seed in (1, 7, 9103):
             with self.subTest(seed=seed):

@@ -85,6 +85,28 @@ def _source_arithmetic(case: Challenge) -> tuple[str, tuple[str, int, int]]:
     return str(answer), (op, a, b)
 
 
+def _source_arithmetic_atoms(case: Challenge) -> frozenset[tuple[str, int, int]]:
+    """All arithmetic computations exposed inside one validated TRAIN case.
+
+    A contrast prompt explicitly exposes ``a+b`` and ``a-b`` before asking
+    for their difference ``b+b``. Source novelty must account for all three,
+    or a later TRAIN challenge can repeat a constituent computation while
+    evading the older single-key overlap check.
+    """
+    _answer, reduced_key = _source_arithmetic(case)
+    if case.kind != "arithmetic_contrast":
+        return frozenset((reduced_key,))
+    matched = _CONTRAST.fullmatch(case.prompt[:-len(_INSTRUCTION)])
+    if matched is None:  # Already rejected by the canonical source oracle.
+        raise ValueError("unrecognized staged TRAIN contrast grammar")
+    a, b = int(matched[1]), int(matched[2])
+    return frozenset({
+        ("+", min(a, b), max(a, b)),
+        ("-", a, b),
+        ("+", b, b),
+    })
+
+
 def snapshot_staged_roster(
     roster: "MinotaurHfTrainRoster", config: PilotConfig,
     scope: TrainingScopeSpec,
@@ -113,13 +135,14 @@ def snapshot_staged_roster(
                 or len(original.answer) > 64 or type(original.metadata) is not tuple):
             raise ValueError("untrusted or malformed staged TRAIN case")
         case = _primitive_train_snapshot(original)
-        computed, semantic = _source_arithmetic(case)
+        computed, _semantic = _source_arithmetic(case)
+        atoms = _source_arithmetic_atoms(case)
         if (case.answer != computed or case.id in ids or case.prompt in prompts
-                or semantic in keys):
+                or atoms.intersection(keys)):
             raise ValueError("staged TRAIN answer/identity/semantic overlap invalid")
         ids.add(case.id)
         prompts.add(case.prompt)
-        keys.add(semantic)
+        keys.update(atoms)
         copied.append(case)
         public.append({
             "id": case.id, "kind": case.kind, "prompt": case.prompt,
@@ -170,14 +193,15 @@ def replay_staged_roster(
                 or not _SHA.fullmatch(item["prompt_sha256"])):
             raise ValueError("invalid staged TRAIN public commitment")
         case = Challenge(item["id"], item["kind"], 1, "train", item["prompt"], "")
-        computed, semantic = _source_arithmetic(case)
+        computed, _semantic = _source_arithmetic(case)
+        atoms = _source_arithmetic_atoms(case)
         case = Challenge(case.id, case.kind, case.tier, case.split, case.prompt, computed)
         if (hashlib.sha256(case.prompt.encode("utf-8")).hexdigest() != item["prompt_sha256"]
-                or case.id in ids or case.prompt in prompts or semantic in keys):
-            raise ValueError("staged TRAIN source case identity/answer mismatch")
+                or case.id in ids or case.prompt in prompts or atoms.intersection(keys)):
+            raise ValueError("staged TRAIN source case identity/semantic overlap mismatch")
         ids.add(case.id)
         prompts.add(case.prompt)
-        keys.add(semantic)
+        keys.update(atoms)
         cases.append(case)
     expected = _training_visit_exposures(cases, seed=config.seed, steps=config.steps)
     if record["optimizer_exposures"] != [list(pair) for pair in expected]:
@@ -193,6 +217,12 @@ class MinotaurHfTrainRoster:
     cycle_index: int
     train_cases: tuple[Challenge, ...] = field(repr=False)
     ordered_optimizer_exposures: tuple[tuple[str, str], ...]
+    # A cycle-zero source replay can independently derive each adaptive room
+    # from prior TRAIN feedback. These detached primitive values carry no
+    # answer key or privileged host approval; older source-only callers can
+    # still construct a roster without them, but adaptive HF admission cannot.
+    initial_checkpoint_sha256: str = ""
+    adaptive_feedback_rows: tuple[tuple[str, str, str, int, str, str], ...] = ()
 
     @property
     def physically_authenticated(self) -> bool:
@@ -344,6 +374,32 @@ def collect_minotaur_hf_roster(
                 != hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()):
             raise ValueError("TRAIN catalog is not approved by the current registry")
 
+    # The adaptive chamber's room_id and case_seed are derived from the
+    # *previous* feedback, not from the static initial maze room IDs. Retain
+    # this minimal public route history so the report auditor can replay the
+    # assignment without trusting arbitrary caller-supplied case seeds.
+    history = runner.state.history
+    observed = runner.observations
+    if len(history) != len(snapshots) or len(observed) != len(snapshots):
+        raise ValueError("adaptive TRAIN source history is incomplete")
+    feedback_rows: list[tuple[str, str, str, int, str, str]] = []
+    for event, case, outcome in zip(history, snapshots, observed, strict=True):
+        assignment, feedback = event.assignment, event.feedback
+        prompt_sha = hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
+        if (feedback.room_id != assignment.room_id
+                or feedback.case_id != case.id
+                or feedback.prompt_sha256 != prompt_sha
+                or feedback.score != int(outcome.correct)
+                or outcome.room_id != assignment.room_id
+                or outcome.case_id != case.id
+                or outcome.prompt_sha256 != prompt_sha):
+            raise ValueError("adaptive TRAIN route history differs from admitted cases")
+        feedback_rows.append((
+            assignment.room_id, feedback.case_id, feedback.prompt_sha256,
+            feedback.score, feedback.checkpoint_before_sha256,
+            feedback.checkpoint_after_sha256,
+        ))
+
     return MinotaurHfTrainRoster(
         scope_sha256=scope.fingerprint,
         cycle_index=runner.state.plan.cycle_index,
@@ -351,4 +407,6 @@ def collect_minotaur_hf_roster(
         ordered_optimizer_exposures=_training_visit_exposures(
             snapshots, seed=config.seed, steps=config.steps,
         ),
+        initial_checkpoint_sha256=runner.state.initial_checkpoint_sha256,
+        adaptive_feedback_rows=tuple(feedback_rows),
     )

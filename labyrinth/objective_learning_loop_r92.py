@@ -97,6 +97,27 @@ def _hash_prompt(challenge: Challenge) -> str:
     return sha256(challenge.prompt.encode("utf-8")).hexdigest()
 
 
+def _arithmetic_semantic_atom(challenge: Challenge) -> tuple[str, int, int]:
+    """Identify the exact operation, including commutative addition aliases.
+
+    This deliberately covers only the approved canonical tier-one grammar;
+    equal numerical answers to different problems are not semantic aliases.
+    """
+    if (type(challenge) is not Challenge or type(challenge.prompt) is not str
+            or type(challenge.answer) is not str):
+        raise ValueError("arithmetic source requires canonical Challenge and string gold")
+    match = _PROMPT.fullmatch(challenge.prompt)
+    if match is None:
+        raise ValueError("unsupported development arithmetic semantic grammar")
+    left, operator, right = int(match[1]), match[2], int(match[3])
+    expected = left + right if operator == "+" else left - right
+    if challenge.answer != str(expected):
+        raise ValueError("arithmetic source gold disagrees with objective rubric")
+    if operator == "+":
+        left, right = sorted((left, right))
+    return operator, left, right
+
+
 def _exam_seed(scope: TrainingScopeSpec, cycle_index: int, section: str) -> int:
     raw = f"objective-loop-r92-dev\x1f{scope.fingerprint}\x1f{cycle_index}\x1f{section}"
     return int.from_bytes(sha256(raw.encode("ascii")).digest()[:8], "big") % 2**31
@@ -116,23 +137,26 @@ def _development_cases(
 
 
 def _check_train(
-    prepared: tuple[PreparedTrainingRoom, ...], state,
+    prepared: tuple[PreparedTrainingRoom, ...], state, *,
+    forbidden_semantics: set[tuple[str, int, int]] | None = None,
 ) -> None:
     if len(prepared) != len(state.maze.rooms):
         raise ValueError("missing generated objective TRAIN rooms")
     operators: set[str] = set()
+    semantics: list[tuple[str, int, int]] = []
     for entry in prepared:
         case = entry.challenge
         match = _PROMPT.fullmatch(case.prompt)
         if (case.split != "train" or case.kind != "arithmetic" or case.tier != 1
                 or match is None or dict(case.metadata).get("generator") != "labyrinth-v1"):
             raise ValueError("approved arithmetic provider returned nonexecutable TRAIN material")
-        a, op, b = int(match[1]), match[2], int(match[3])
-        if case.answer != str(a + b if op == "+" else a - b):
-            raise ValueError("arithmetic source gold disagrees with objective rubric")
-        operators.add(op)
+        semantics.append(_arithmetic_semantic_atom(case))
+        operators.add(match[2])
     if operators != {"+", "-"}:
         raise ValueError("the toy objective must exercise both operator coefficients")
+    if (len(set(semantics)) != len(semantics)
+            or set(semantics) & (forbidden_semantics or set())):
+        raise ValueError("TRAIN arithmetic semantic overlap with prior exposures")
     ids = [entry.challenge.id for entry in prepared]
     prompts = [_hash_prompt(entry.challenge) for entry in prepared]
     forbidden_ids = set(state.used_training_case_ids) | set(state.sealed_exam_case_ids)
@@ -143,7 +167,10 @@ def _check_train(
         raise ValueError("TRAIN batch duplicates previously exposed material")
 
 
-def _check_exam(exam: tuple[tuple[str, Challenge], ...], prepared, state) -> None:
+def _check_exam(
+    exam: tuple[tuple[str, Challenge], ...], prepared, state, *,
+    forbidden_semantics: set[tuple[str, int, int]] | None = None,
+) -> None:
     ids = [case.id for _, case in exam]
     prompts = [_hash_prompt(case) for _, case in exam]
     training_ids = {entry.challenge.id for entry in prepared}
@@ -157,6 +184,12 @@ def _check_exam(exam: tuple[tuple[str, Challenge], ...], prepared, state) -> Non
             or any(case.split != "eval" or case.kind != "arithmetic"
                    or case.tier != 1 for _, case in exam)):
         raise ValueError("development material overlaps TRAIN or sealed exam material")
+    semantic_atoms = [_arithmetic_semantic_atom(case) for _, case in exam]
+    prior_semantics = {_arithmetic_semantic_atom(entry.challenge) for entry in prepared}
+    prior_semantics.update(forbidden_semantics or set())
+    if (len(set(semantic_atoms)) != len(semantic_atoms)
+            or set(semantic_atoms) & prior_semantics):
+        raise ValueError("development arithmetic semantic overlap with TRAIN or prior exposure")
 
 
 def _scores(learner: ToyLinearAdapter, cases: tuple[tuple[str, Challenge], ...]) -> tuple[float, ...]:
@@ -220,6 +253,9 @@ def run_objective_learning_loop(
     learner = ToyLinearAdapter.load_checkpoint(files[0]["path"])
     state = begin_journey(scope, checkpoint_sha256=initial_hash)
     cycles: list[dict] = []
+    # The journey records prompt/case identities, not arithmetic aliases.
+    # Retain local semantic exposure identity across both toy cycles.
+    used_semantics: set[tuple[str, int, int]] = set()
 
     for cycle_index, epochs in enumerate(epochs_by_cycle):
         if state.phase != TRAINING:
@@ -234,9 +270,13 @@ def run_objective_learning_loop(
         # GENERATE source-backed TRAIN material for precisely this generated
         # maze. An ObjectiveContract alone cannot synthesize an executable task.
         prepared = prepare_training_rooms(state.maze)
-        _check_train(prepared, state)
+        _check_train(prepared, state, forbidden_semantics=used_semantics)
         development = _development_cases(scope, cycle_index, exam_count_per_slice)
-        _check_exam(development, prepared, state)
+        _check_exam(development, prepared, state, forbidden_semantics=used_semantics)
+        used_semantics.update(_arithmetic_semantic_atom(entry.challenge)
+                              for entry in prepared)
+        used_semantics.update(_arithmetic_semantic_atom(case)
+                              for _, case in development)
 
         # EXPERIENCE: actual pre-optimizer responses to prompt-only TRAIN views;
         # separate read-only pre-scoring of reserved development cases.
