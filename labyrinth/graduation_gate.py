@@ -220,6 +220,16 @@ def decide_graduation(
     # a prior `graduated` flag or alter the policy branch without a receipt.
     if type(policy) is not GraduationPolicy or type(state) is not GateState:
         raise TypeError("expected GraduationPolicy and trusted GateState")
+    # `frozen=True` prevents ordinary assignment, but not
+    # `object.__setattr__`. Snapshot through the exact constructor so an
+    # attacker cannot lower mastery thresholds or inflate statistical alpha
+    # after initial construction, then have the direct gate trust that policy.
+    # The snapshot also prevents subsequent mutations of the caller's policy
+    # from changing decisions mid-evaluation.
+    try:
+        policy = replace(policy)
+    except (TypeError, ValueError, OverflowError):
+        return GateDecision("BLOCKED", ("invalid or mutated graduation policy",), state)
     if (type(state.next_attempt) is not int or state.next_attempt < 1
             or type(state.consumed_run_ids) is not frozenset
             or any(type(r) is not str or not _ID.fullmatch(r) for r in state.consumed_run_ids)

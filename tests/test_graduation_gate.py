@@ -320,6 +320,24 @@ class MinotaurGraduationTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 replace(POLICY, **bad)
 
+    def test_mutated_frozen_policy_cannot_graduate_all_wrong_model(self):
+        # Frozen dataclasses are not a security boundary: object.__setattr__
+        # can change a previously valid instance after __post_init__. The
+        # direct gate must revalidate before consuming any signed evidence.
+        tampered = replace(POLICY)
+        for field, value in (
+            ("objective_kind", "skill_mastery"),
+            ("min_accuracy", 0.0),
+            ("min_format_rate", 0.0),
+            ("significance_alpha", 100.0),
+        ):
+            object.__setattr__(tampered, field, value)
+        evidence = evaluated_receipt(candidate_correct=False)
+        result = decision(evidence, policy=tampered)
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertFalse(result.state.graduated)
+        self.assertEqual(result.state.next_attempt, 1)
+
     def test_graduation_policy_cannot_skip_private_holdout_or_transfer(self):
         # Before this fix a caller could rename a training-only slice into an
         # exam and shrink it to two examples. A trusted signer still matters,

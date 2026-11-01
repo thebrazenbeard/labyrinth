@@ -425,6 +425,113 @@ class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
         self.assertIn('or result.skipped', workflow)
         self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
 
+    def test_r90_consolidation_boundaries_are_mandatory_in_both_neural_triggers(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        path_groups = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        paths = (
+            "labyrinth/rezon_receipt_binding_r69.py",
+            "labyrinth/schedule_pin_boundary_w2.py",
+            "labyrinth/graduation_state_external_custody_w4.py",
+            "labyrinth/q7_temporal_custody_source.py",
+            "labyrinth/q8_host_authority_probe.py",
+            "labyrinth/graduation_gate.py",
+            "labyrinth/objective_challenge_provider_r92.py",
+            "labyrinth/minotaur_counterfactual_corridors_r92.py",
+            "labyrinth/q5_holdout_eval_r92.py",
+            "labyrinth/objective_learning_loop_r92.py",
+            "scripts/experiments/q5_multiseed_campaign.py",
+            "docs/qualification/REZON_RECEIPT_BINDING_R69.md",
+            "docs/qualification/Q7_TEMPORAL_CUSTODY_SOURCE.md",
+            "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md",
+            "docs/qualification/Q5_PRIVATE_HOLDOUT_EVAL_R92.md",
+            "tests/test_private_wheel_cli_checkpoint_r70.py",
+            "tests/test_rezon_receipt_binding_r69.py",
+            "tests/test_schedule_pin_boundary_w2.py",
+            "tests/test_graduation_state_external_custody_w4.py",
+            "tests/test_q5_multiseed_campaign.py",
+            "tests/test_q7_temporal_custody_source.py",
+            "tests/test_q8_host_authority_probe.py",
+            "tests/test_graduation_gate.py",
+            "tests/test_objective_challenge_provider_r92.py",
+            "tests/test_minotaur_counterfactual_corridors_r92.py",
+            "tests/test_q5_holdout_eval_r92.py",
+            "tests/test_objective_learning_loop_r92.py",
+        )
+        for trigger, manifest in path_groups.items():
+            for path in paths:
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertTrue((root / path).is_file())
+                    self.assertIn(f'      - "{path}"', manifest)
+        for module, minimum in (
+            ("tests.test_private_wheel_cli_checkpoint_r70", 1),
+            ("tests.test_rezon_receipt_binding_r69", 5),
+            ("tests.test_schedule_pin_boundary_w2", 6),
+            ("tests.test_graduation_state_external_custody_w4", 10),
+            ("tests.test_q5_multiseed_campaign", 9),
+            ("tests.test_q7_temporal_custody_source", 9),
+            ("tests.test_graduation_gate", 27),
+            ("tests.test_objective_challenge_provider_r92", 7),
+            ("tests.test_minotaur_counterfactual_corridors_r92", 19),
+            ("tests.test_q8_host_authority_probe", 18),
+            ("tests.test_q5_holdout_eval_r92", 20),
+            ("tests.test_objective_learning_loop_r92", 5),
+        ):
+            with self.subTest(module=module):
+                self.assertIn(f'("{module}", {minimum})', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_r92_combined_r68_r72_docs_trigger_pinned_neural_ci(self):
+        # PR #77 and #82 were independently green, but the union must keep
+        # each newly documented qualification contract under BOTH triggers.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        triggers = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        documented_contracts = (
+            "MINOTAUR_REGISTRY_TRANSITION_R72.md",
+            "Q5_EVALUATION_PREREG_R68.md",
+            "Q5_SIGNED_DATA_WITNESS_R72.md",
+            "Q7_PRECOMMIT_SUMMARY_IMMUTABILITY_R68.md",
+            "Q8_SOURCE_ACCEPTANCE_VALIDATOR_R68.md",
+            "R72_MINOTAUR_MEASURED_TOY_CORRIDOR.md",
+            "RETENTION_TRANSFER_COHORT_R68.md",
+            "REZON_TWO_ADAPTER_SOURCE_PARTITION_R68.md",
+            "R76_REZON_TWO_TOY_CONSUMER.md",
+        )
+        for filename in documented_contracts:
+            path = f"docs/qualification/{filename}"
+            self.assertTrue((root / path).is_file())
+            for trigger, paths in triggers.items():
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', paths)
+
+    def test_r92_neural_checkpoint_changes_trigger_both_neural_workflows(self):
+        # Local dependency-absent source checks may skip 9 Torch tests; the
+        # pinned neural runner installs dependencies and MUST reject skips.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        triggers = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for path in ("labyrinth/neural_cycle_checkpoint_r92.py",
+                     "tests/test_neural_cycle_checkpoint_r92.py"):
+            self.assertTrue((root / path).is_file())
+            for manifest in triggers:
+                self.assertIn(f'      - "{path}"', manifest)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+        self.assertIn('("tests.test_neural_cycle_checkpoint_r92", 21)', workflow)
+
     def test_l12_l14_neural_and_custody_boundaries_are_required_in_cpu_ci(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
