@@ -85,6 +85,7 @@ on:
       - "labyrinth/objective_challenge_provider_r92.py"
       - "labyrinth/approved_train_provider_r90.py"
       - "labyrinth/objective_training_run.py"
+      - "labyrinth/approved_cognitive_empathy_train_r90.py"
       - "labyrinth/minotaur_counterfactual_corridors_r92.py"
       - "labyrinth/neural_cycle_checkpoint_r92.py"
       - "scripts/experiments/q5_multiseed_campaign.py"
@@ -112,6 +113,8 @@ on:
       - "tests/test_objective_learning_loop_r92.py"
       - "tests/test_approved_train_provider_r90.py"
       - "tests/test_objective_training_run.py"
+      - "tests/test_approved_cognitive_empathy_train_r90.py"
+      - "docs/qualification/R90_COGNITIVE_PERSPECTIVE_TRAIN_REBUILD.md"
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/rezon_toy_pair_consumer_r76.py"
       - "labyrinth/minotaur_train_roster_manifest_v1.py"
@@ -341,6 +344,7 @@ on:
       - "labyrinth/objective_challenge_provider_r92.py"
       - "labyrinth/approved_train_provider_r90.py"
       - "labyrinth/objective_training_run.py"
+      - "labyrinth/approved_cognitive_empathy_train_r90.py"
       - "labyrinth/minotaur_counterfactual_corridors_r92.py"
       - "labyrinth/neural_cycle_checkpoint_r92.py"
       - "scripts/experiments/q5_multiseed_campaign.py"
@@ -368,6 +372,8 @@ on:
       - "tests/test_objective_learning_loop_r92.py"
       - "tests/test_approved_train_provider_r90.py"
       - "tests/test_objective_training_run.py"
+      - "tests/test_approved_cognitive_empathy_train_r90.py"
+      - "docs/qualification/R90_COGNITIVE_PERSPECTIVE_TRAIN_REBUILD.md"
       - "labyrinth/rezon_two_adapter_source_partition_r68.py"
       - "labyrinth/rezon_toy_pair_consumer_r76.py"
       - "labyrinth/minotaur_train_roster_manifest_v1.py"
@@ -726,6 +732,10 @@ jobs:
               # Neither test module grants external authority or graduation.
               ("tests.test_approved_train_provider_r90", 7),
               ("tests.test_objective_training_run", 14),
+              # A bounded, synthetic 30-scenario perspective TRAIN corpus;
+              # enforce all lexical-shortcut, replay, and source-binding tests.
+              # Scores never claim independent empathy mastery or host custody.
+              ("tests.test_approved_cognitive_empathy_train_r90", 34),
               ("tests.test_adaptive_minotaur_r93", 9),
               ("tests.test_graduation_gate", 28),
               ("tests.test_objective_challenge_provider_r92", 7),

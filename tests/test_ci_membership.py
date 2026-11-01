@@ -38,6 +38,29 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
 
 
 class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_cognitive_perspective_train_source_is_mandatory_on_pr_and_main(self):
+        # The source-only synthetic perspective provider is a new TRAIN
+        # boundary.  All 34 hostile/corpus tests must run with no skips in
+        # the pinned neural CI, not only optional generic unittest discovery.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        pr_paths = workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+            "  push:\n", 1)[0]
+        push_paths = workflow.split("  push:\n", 1)[1].split(
+            "  workflow_dispatch:\n", 1)[0]
+        for path in (
+            "labyrinth/approved_cognitive_empathy_train_r90.py",
+            "tests/test_approved_cognitive_empathy_train_r90.py",
+            "docs/qualification/R90_COGNITIVE_PERSPECTIVE_TRAIN_REBUILD.md",
+        ):
+            for event, manifest in (("pull_request", pr_paths),
+                                    ("push/main", push_paths)):
+                with self.subTest(path=path, event=event):
+                    self.assertIn(f'      - "{path}"', manifest)
+        self.assertIn(
+            '("tests.test_approved_cognitive_empathy_train_r90", 34)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
     def test_train_completion_primitive_boundary_is_required_by_cpu_ci(self):
         workflow = (Path(__file__).resolve().parents[1] /
                     ".github/workflows/minotaur-neural-cpu.yml").read_text()
