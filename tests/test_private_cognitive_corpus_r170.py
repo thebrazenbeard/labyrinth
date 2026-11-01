@@ -342,6 +342,15 @@ class PrivateCognitiveCorpusR170Tests(unittest.TestCase):
                 CorpusSource(0, "unknown", "a" * 40, "b" * 64),
             ))
 
+    def test_repository_identity_rejects_str_subclass_comparison_override(self):
+        class ForgedRepository(str):
+            def __ne__(self, other):
+                return False
+
+        with self.assertRaisesRegex(ValueError, "source declaration"):
+            CorpusSource(0, ForgedRepository("untrusted/source"),
+                         "a" * 40, "b" * 64)
+
     def test_public_status_cannot_be_label_or_seed_oracle(self):
         train0, _ = _cycle_exports()
         other_contract = cognitive_contract(seed=313)
