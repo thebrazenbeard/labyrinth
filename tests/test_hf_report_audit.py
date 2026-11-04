@@ -9,15 +9,27 @@ import tempfile
 import unittest
 
 from labyrinth.evaluation import score_response
-from labyrinth.hf_pilot import EVAL_SEED_XOR, LEGACY_SCHEMA, _prompt_commitment
+from labyrinth.hf_pilot import (
+    EVAL_SEED_XOR, LEGACY_SCHEMA, PRE_EXPOSURE_SCHEMA, PilotConfig,
+    _prompt_commitment, _training_visit_exposures, _training_visit_indices,
+    training_cases,
+)
 from labyrinth.maze import generate_maze
 from labyrinth.runner import _source_state
-from labyrinth.hf_report_audit import audit_hf_report
+from labyrinth.hf_report_audit import audit_hf_report as strict_audit_hf_report
 
 
-def pilot_fixture():
-    train = generate_maze(seed=13, count=2, tiers=(1,), split="train")
-    heldout = generate_maze(seed=13 ^ EVAL_SEED_XOR, count=2, tiers=(1,), split="eval")
+def audit_hf_report(report):
+    """The original fixture exercises historical v2 internal-consistency only."""
+    return strict_audit_hf_report(report, allow_legacy=True)
+
+
+def pilot_fixture(*, seed=13, count=2):
+    train, heldout = training_cases(PilotConfig(
+        model_path="C:/fixture/base", output_dir="C:/fixture/run",
+        seed=seed, train_count=count, eval_count=count,
+        tiers=(1,), steps=2,
+    ))
     trials = []
     for challenge in heldout:
         response = "ANSWER: 0"
@@ -33,12 +45,12 @@ def pilot_fixture():
         "format_valid": len(trials), "format_rate": 1.0, "trials": trials,
     }
     visits = {"steps": 2, "example_visits": 2,
-              "visited_case_ids": [c.id for c in train],
+              "visited_case_ids": [c.id for c in train[:2]],
               "input_tokens_seen": 200, "losses": [2.5, 2.0]}
     return {
         "schema": LEGACY_SCHEMA, "source": _source_state(),
         "config": {"model_path": "C:/fixture/base", "output_dir": "C:/fixture/run",
-                   "seed": 13, "train_count": 2, "eval_count": 2,
+                   "seed": seed, "train_count": count, "eval_count": count,
                    "tiers": [1], "steps": 2, "max_tokens": 256,
                    "max_new_tokens": 16, "learning_rate": 0.0002,
                    "lora_rank": 4, "lora_alpha": 8, "device": "cpu"},
@@ -67,12 +79,152 @@ def pilot_fixture():
     }
 
 
+def matched_v3_fixture():
+    """A valid historical matched-sham pilot, without in-loop exposure proof."""
+    report = pilot_fixture()
+    report["schema"] = "labyrinth.hf-lora-pilot.v3"
+    report["initial_persistent_buffers_sha256"] = "c" * 64
+    report["config"]["answer_only"] = True
+    report["control_data"].update({
+        "answer_scaffold_supplied": True,
+        "sham_optimizer_steps": 2, "sham_train_case_visits": 2,
+        "sham_evaluation_before_updates": False, "sham_is_compute_matched": True,
+    })
+    report["training"]["sham"] = dict(report["training"]["candidate"])
+    train, _ = training_cases(PilotConfig(
+        model_path="unused", output_dir="unused", seed=13,
+        train_count=2, eval_count=2, tiers=(1,), steps=2,
+    ))
+    expected = [train[i].id for i in _training_visit_indices(train, seed=13, steps=2)]
+    for arm in ("sham", "candidate", "corrupted"):
+        report["training"][arm]["visited_case_ids"] = expected
+    return report
+
+
 class HfReportAuditTests(unittest.TestCase):
+    def test_legacy_schema_cannot_downgrade_a_default_required_exposure_audit(self):
+        report = matched_v3_fixture()
+        # Before the versioned contract, a claim with its new source marker and
+        # ledgers deleted could still return PASS merely by using the old v3.
+        self.assertEqual(strict_audit_hf_report(report)["status"], "FAIL")
+        compatible = strict_audit_hf_report(report, allow_legacy=True)
+        self.assertEqual(compatible["status"], "PASS", compatible["failures"])
+        self.assertEqual(compatible["evidence_contract"], "legacy-internal-consistency-only")
+        self.assertFalse(compatible["authenticated_model_execution"])
+
+    def test_new_version_requires_complete_in_loop_ledger_even_after_reserialization(self):
+        report = matched_v3_fixture()
+        report["schema"] = "labyrinth.hf-lora-pilot.v3-exposure.v1"
+        report["optimizer_exposure_recording"] = (
+            "in-loop-completed-optimizer-step.v1:source-only")
+        train, _ = training_cases(PilotConfig(
+            model_path="unused", output_dir="unused", seed=13,
+            train_count=2, eval_count=2, tiers=(1,), steps=2,
+        ))
+        expected = [[train[i].id, hashlib.sha256(train[i].prompt.encode()).hexdigest()]
+                    for i in _training_visit_indices(train, seed=13, steps=2)]
+        for arm in ("sham", "candidate", "corrupted"):
+            report["training"][arm]["visited_exposures"] = [list(x) for x in expected]
+
+        self.assertEqual(strict_audit_hf_report(report)["status"], "PASS")
+        tampered = json.loads(json.dumps(report))
+        del tampered["optimizer_exposure_recording"]
+        for arm in ("sham", "candidate", "corrupted"):
+            del tampered["training"][arm]["visited_exposures"]
+        self.assertEqual(strict_audit_hf_report(tampered)["status"], "FAIL")
+        # A caller who expects v4 cannot accept a schema-downgrade to v3.
+        tampered["schema"] = "labyrinth.hf-lora-pilot.v3"
+        self.assertEqual(strict_audit_hf_report(tampered)["status"], "FAIL")
+        compatible = strict_audit_hf_report(tampered, allow_legacy=True)
+        self.assertEqual(compatible["status"], "PASS", compatible["failures"])
+        self.assertEqual(compatible["evidence_contract"], "legacy-internal-consistency-only")
+
+    def test_report_audit_rejects_forged_optional_visit_exposures(self):
+        report = pilot_fixture()
+        train, _ = training_cases(PilotConfig(
+            model_path="unused", output_dir="unused", seed=13,
+            train_count=2, eval_count=2, tiers=(1,), steps=2,
+        ))
+        # Legacy sequential visits are different from v3's seeded schedule;
+        # use the actual sequential source order for this v2 report.
+        expected = [[case.id, hashlib.sha256(case.prompt.encode()).hexdigest()]
+                    for case in train[:2]]
+        for arm in ("candidate", "corrupted"):
+            report["training"][arm]["visited_exposures"] = [list(row) for row in expected]
+        self.assertEqual(audit_hf_report(report)["status"], "PASS")
+        hostile_rows = (
+            [["foreign-eval-id", "0" * 64] for _ in expected],
+            [expected[1], expected[0]],
+            [expected[0], [expected[1][0], "0" * 64]],
+            expected[:1],
+            ["not-an-exposure"] * 2,
+            {"case": expected[0]},
+        )
+        for hostile in hostile_rows:
+            with self.subTest(hostile=hostile):
+                report["training"]["candidate"]["visited_exposures"] = hostile
+                checked = audit_hf_report(report)
+                self.assertEqual(checked["status"], "FAIL", checked)
+                self.assertTrue(any("exposure" in item for item in checked["failures"]))
+
+    def test_optional_visit_exposures_require_consistent_arm_coverage(self):
+        report = pilot_fixture()
+        train, _ = training_cases(PilotConfig(
+            model_path="unused", output_dir="unused", seed=13,
+            train_count=2, eval_count=2, tiers=(1,), steps=2,
+        ))
+        report["training"]["candidate"]["visited_exposures"] = [
+            [case.id, hashlib.sha256(case.prompt.encode()).hexdigest()]
+            for case in train[:2]
+        ]
+        checked = audit_hf_report(report)
+        self.assertEqual(checked["status"], "FAIL", checked)
+        self.assertTrue(any("exposure" in item for item in checked["failures"]))
+
+    def test_v3_visit_exposures_match_regenerated_seeded_schedule(self):
+        report = pilot_fixture()
+        report["schema"] = PRE_EXPOSURE_SCHEMA
+        report["initial_persistent_buffers_sha256"] = "c" * 64
+        report["config"]["answer_only"] = True
+        report["control_data"].update({
+            "answer_scaffold_supplied": True,
+            "sham_optimizer_steps": 2, "sham_train_case_visits": 2,
+            "sham_evaluation_before_updates": False,
+            "sham_is_compute_matched": True,
+        })
+        report["training"]["sham"] = dict(report["training"]["candidate"])
+        train, _ = training_cases(PilotConfig(
+            model_path="unused", output_dir="unused", seed=13,
+            train_count=2, eval_count=2, tiers=(1,), steps=2,
+        ))
+        planned = list(_training_visit_exposures(train, seed=13, steps=2))
+        for arm in ("sham", "candidate", "corrupted"):
+            report["training"][arm]["visited_case_ids"] = [case_id for case_id, _ in planned]
+            # In-process pilot values contain tuple pairs; serialized reports
+            # contain JSON arrays. Both forms represent the same commitment.
+            report["training"][arm]["visited_exposures"] = list(planned)
+        self.assertEqual(audit_hf_report(report)["status"], "PASS")
+        report["training"]["sham"]["visited_exposures"] = [list(pair) for pair in reversed(planned)]
+        checked = audit_hf_report(report)
+        self.assertEqual(checked["status"], "FAIL", checked)
+        self.assertTrue(any("exposure" in item for item in checked["failures"]))
+
     def test_consistent_full_preview_scores_pass_internal_audit(self):
         result = audit_hf_report(pilot_fixture())
         self.assertEqual(result["status"], "PASS")
         self.assertEqual(result["checked_trials"], 8)
         self.assertFalse(result["authenticated_model_execution"])
+
+    def test_rerolled_semantic_arithmetic_heldout_is_audited_against_actual_pilot_split(self):
+        report = pilot_fixture(seed=1073, count=32)
+        old_heldout = generate_maze(
+            seed=1073 ^ EVAL_SEED_XOR, count=32, tiers=(1,), split="eval",
+        )
+        self.assertNotEqual(report["heldout_case_ids"], [case.id for case in old_heldout])
+        checked = audit_hf_report(report)
+        self.assertEqual(checked["status"], "PASS", checked["failures"])
+        self.assertEqual(checked["checked_trials"], 128)
+        self.assertFalse(checked["authenticated_model_execution"])
 
     def test_forged_per_trial_score_and_summary_are_rejected(self):
         report = pilot_fixture()
@@ -113,6 +265,29 @@ class HfReportAuditTests(unittest.TestCase):
         self.assertEqual(result["status"], "FAIL")
         self.assertTrue(any("visit" in x for x in result["failures"]))
         self.assertTrue(any("id" in x for x in result["failures"]))
+
+    def test_in_loop_optimizer_exposure_marker_requires_exact_prompt_roster(self):
+        report = pilot_fixture()
+        train, _ = training_cases(PilotConfig(
+            model_path="unused", output_dir="unused", seed=13,
+            train_count=2, eval_count=2, tiers=(1,), steps=2,
+        ))
+        expected = [[case.id, hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()]
+                    for case in train[:2]]
+        report["optimizer_exposure_recording"] = (
+            "in-loop-completed-optimizer-step.v1:source-only")
+        for arm in ("candidate", "corrupted"):
+            report["training"][arm]["visited_exposures"] = [list(pair) for pair in expected]
+        self.assertEqual(audit_hf_report(report)["status"], "PASS")
+        report["training"]["candidate"]["visited_exposures"][0][1] = "0" * 64
+        result = audit_hf_report(report)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertTrue(any("optimizer TRAIN exposure" in failure
+                            for failure in result["failures"]))
+        report["training"]["candidate"]["visited_exposures"] = [list(pair)
+                                                                   for pair in expected]
+        del report["training"]["corrupted"]["visited_exposures"]
+        self.assertEqual(audit_hf_report(report)["status"], "FAIL")
 
     def test_missing_checkpoint_receipt_is_not_audit_pass(self):
         report = pilot_fixture()
@@ -161,7 +336,7 @@ class HfReportAuditTests(unittest.TestCase):
             source = Path(tmp) / "malformed_preview.json"
             source.write_text(json.dumps(report, ensure_ascii=True), encoding="utf-8")
             checked = subprocess.run(
-                [sys.executable, "-m", "labyrinth", "audit-hf-report", "--input", str(source)],
+                [sys.executable, "-m", "labyrinth", "audit-hf-report", "--input", str(source), "--allow-legacy"],
                 text=True, capture_output=True, timeout=30,
             )
             self.assertEqual(checked.returncode, 2)
@@ -185,10 +360,15 @@ class HfReportAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "pilot_report.json"
             source.write_text(json.dumps(pilot_fixture()), encoding="utf-8")
-            command = [sys.executable, "-m", "labyrinth", "audit-hf-report", "--input", str(source)]
+            command = [sys.executable, "-m", "labyrinth", "audit-hf-report", "--input", str(source), "--allow-legacy"]
+            strict = subprocess.run(command[:-1], text=True, capture_output=True, timeout=30)
+            self.assertEqual(strict.returncode, 2, strict.stderr)
+            self.assertEqual(json.loads(strict.stdout)["status"], "FAIL")
             valid = subprocess.run(command, text=True, capture_output=True, timeout=30)
             self.assertEqual(valid.returncode, 0, valid.stderr)
             self.assertEqual(json.loads(valid.stdout)["status"], "PASS")
+            self.assertEqual(json.loads(valid.stdout)["evidence_contract"],
+                             "legacy-internal-consistency-only")
             tampered = json.loads(source.read_text(encoding="utf-8"))
             tampered["evaluations"]["candidate"]["correct"] = 99
             source.write_text(json.dumps(tampered), encoding="utf-8")

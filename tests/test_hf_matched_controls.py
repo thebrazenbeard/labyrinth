@@ -59,10 +59,10 @@ class MatchedControlsTests(unittest.TestCase):
     def test_v3_audit_requires_matched_sham_and_original_v2_stays_valid(self):
         old = pilot_fixture()
         old["schema"] = "labyrinth.hf-lora-pilot.v2"
-        self.assertEqual(audit_hf_report(old)["status"], "PASS")
+        self.assertEqual(audit_hf_report(old, allow_legacy=True)["status"], "PASS")
         import labyrinth.hf_pilot as pilot
         newer = pilot_fixture()
-        newer["schema"] = pilot.SCHEMA
+        newer["schema"] = pilot.PRE_EXPOSURE_SCHEMA
         newer["initial_persistent_buffers_sha256"] = "c" * 64
         newer["config"]["answer_only"] = True
         newer["control_data"].update({
@@ -79,12 +79,12 @@ class MatchedControlsTests(unittest.TestCase):
         expected = [train[i].id for i in _training_visit_indices(train, seed=13, steps=2)]
         for arm in ("sham", "candidate", "corrupted"):
             newer["training"][arm]["visited_case_ids"] = expected
-        self.assertEqual(audit_hf_report(newer)["status"], "PASS")
+        self.assertEqual(audit_hf_report(newer, allow_legacy=True)["status"], "PASS")
         newer["control_data"]["sham_is_compute_matched"] = False
-        self.assertEqual(audit_hf_report(newer)["status"], "FAIL")
+        self.assertEqual(audit_hf_report(newer, allow_legacy=True)["status"], "FAIL")
         newer["control_data"]["sham_is_compute_matched"] = True
         newer["training"]["sham"]["visited_case_ids"] = list(reversed(expected))
-        self.assertEqual(audit_hf_report(newer)["status"], "FAIL")
+        self.assertEqual(audit_hf_report(newer, allow_legacy=True)["status"], "FAIL")
 
 
 if __name__ == "__main__":

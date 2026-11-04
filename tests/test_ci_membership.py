@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from scripts.minotaur_ci import missing_required, test_ids, unexpected_skips
 
@@ -34,3 +35,859 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
         self.assertEqual(unexpected_skips([(other,"named pipes unsupported")],
                                           platform="nt"),
                          [(other,"named pipes unsupported")])
+
+
+class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_train_completion_primitive_boundary_is_required_by_cpu_ci(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"tests/test_r42_complete_maze_primitive_boundary.py"', event_paths)
+        self.assertIn('("tests.test_r42_complete_maze_primitive_boundary", 5)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_canonical_maze_identity_is_required_by_cpu_ci(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/journey.py"', event_paths)
+            self.assertIn('"tests/test_r48_canonical_maze_identity.py"', event_paths)
+        self.assertIn('("tests.test_r48_canonical_maze_identity", 7)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_legacy_minotaur_exam_boundary_is_a_required_cpu_suite(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"tests/test_r40_face_minotaur_primitive_boundary.py"',
+                          event_paths)
+        self.assertIn('("tests.test_r40_face_minotaur_primitive_boundary", 6)',
+                      workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_direct_evaluator_rejects_forged_private_final_in_required_cpu_suite(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        for event_paths in (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        ):
+            self.assertIn('"labyrinth/minotaur_*.py"', event_paths)
+            self.assertIn('"tests/test_minotaur_*.py"', event_paths)
+            self.assertIn('"labyrinth/independent_holdout.py"', event_paths)
+            self.assertIn('"tests/test_independent_holdout.py"', event_paths)
+        self.assertIn('("tests.test_minotaur_exam", 16)', workflow)
+        self.assertIn('("tests.test_independent_holdout", 18)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_r36_toy_evidence_is_required_and_archived_as_non_authorizing_artifact(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"scripts/qualify_toy_cpu_evidence_r36.py"', event_paths)
+            self.assertIn('"tests/test_r36_toy_cpu_evidence_receipt.py"', event_paths)
+        self.assertIn('("tests.test_r36_toy_cpu_evidence_receipt", 9)', workflow)
+        self.assertIn('python -m scripts.qualify_toy_cpu_evidence_r36 --execute', workflow)
+        self.assertIn('checked_head="$(git rev-parse HEAD)"', workflow)
+        self.assertIn('checked_tree="$(git rev-parse \'HEAD^{tree}\')"', workflow)
+        self.assertIn('uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02', workflow)
+        self.assertIn('if-no-files-found: error', workflow)
+        self.assertIn('retention-days: 14', workflow)
+
+    def test_hardened_minotaur_exam_intake_is_required_without_optional_skips(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        self.assertIn('("tests.test_minotaur_exam_intake_guard_r36", 10)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_real_toy_physical_case_identities_cannot_be_diluted_by_counts(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        required = (
+            "tests.test_fullstate_physical_gate_r8.PhysicalFullStateContinuityGate.test_interrupted_vs_uninterrupted_adamw_rng_and_exposure_cursor",
+            "tests.test_optimizer_runner_v2_r19.OptimizerRunnerV2ToyAdamWTests.test_v2_journal_binds_cycle0_receipt_and_restores_continuous_adamw",
+            "tests.test_optimizer_runner_v2_r19.OptimizerRunnerV2ToyAdamWTests.test_v2_foreign_fork_is_rejected_and_pending_is_not_replayed",
+            "tests.test_checkpoint_manifest_v2_r19.V2PhysicalCheckpointTests.test_real_adamw_v2_save_and_restore_never_cross_load_as_v1",
+            "tests.test_v2_checkpoint_cpu_smoke_r22.ToyV2CpuPhysicalTests.test_real_toy_torch_adamw_two_cycle_resume_and_fresh_reload",
+            "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_real_torch_tensor_updates_frozen_base_and_optimizer_moments",
+            "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_noop_training_cannot_claim_real_learning",
+            "tests.test_minilm_optimizer_state_resume.PhysicalMazeAdamWResumeTests.test_fresh_python_process_restarts_v2_cycle_with_optimizer_rng_continuity",
+        )
+        for exact_case in required:
+            self.assertIn('"' + exact_case + '"', workflow)
+        self.assertIn("missing_required(required_physical_ids, discovered_ids)", workflow)
+
+    def test_five_arm_source_contract_changes_trigger_required_cpu_tests(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/five_arm_experiment_contract.py"', event_paths)
+            self.assertIn('"tests/test_five_arm_experiment_contract.py"', event_paths)
+        self.assertIn('("tests.test_five_arm_experiment_contract", 39)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_five_arm_statistical_screen_is_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/five_arm_statistical_screen.py"', event_paths)
+            self.assertIn('"tests/test_five_arm_statistical_screen.py"', event_paths)
+        self.assertIn('("tests.test_five_arm_statistical_screen", 8)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_source_only_evidence_pointer_is_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/evidence_pointer.py"', event_paths)
+            self.assertIn('"tests/test_evidence_pointer.py"', event_paths)
+        self.assertIn('("tests.test_evidence_pointer", 8)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_r51_journey_history_integrity_is_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/journey.py"', event_paths)
+            self.assertIn('"tests/test_r51_pending_history_integrity.py"', event_paths)
+        self.assertIn('("tests.test_r51_pending_history_integrity", 17)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_r53_measured_neural_cli_is_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"scripts/qualify_maze_conditioned_minilm_cpu.py"', event_paths)
+            self.assertIn('"tests/test_measured_cli_binding_r53.py"', event_paths)
+        self.assertIn('("tests.test_measured_cli_binding_r53", 10)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_q7_signed_source_precommit_is_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for event_paths in paths:
+            self.assertIn('"labyrinth/final_exam_precommit.py"', event_paths)
+            self.assertIn('"tests/test_final_exam_precommit.py"', event_paths)
+        self.assertIn('("tests.test_final_exam_precommit", 14)', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_graduation_auth_dependency_is_pinned_in_both_workflows(self):
+        root = Path(__file__).resolve().parents[1]
+        generic = (root / ".github/workflows/ci.yml").read_text()
+        neural = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        self.assertIn("-e '.[auth]' \"cryptography==50.0.2\"", generic)
+        self.assertIn('"cryptography==50.0.2"', neural)
+        self.assertIn('cryptography.__version__ == "50.0.2"', neural)
+
+    def test_private_wheel_requires_pinned_build_backend_in_both_ci_interpreters(self):
+        root = Path(__file__).resolve().parents[1]
+        for workflow_name in ("ci.yml", "minotaur-neural-cpu.yml"):
+            workflow = (root / ".github/workflows" / workflow_name).read_text()
+            with self.subTest(workflow=workflow_name):
+                backend_install = 'python -m pip install --disable-pip-version-check "setuptools==80.9.0"'
+                self.assertIn(backend_install, workflow)
+                # Installed-wheel regression intentionally uses --no-index and
+                # --no-build-isolation: the active interpreter must possess the
+                # exact PEP 517 backend BEFORE the editable project install.
+                self.assertLess(workflow.index(backend_install), workflow.index(' -e '))
+
+    def test_r57_source_boundaries_are_required_not_optional_in_neural_cpu_ci(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        boundaries = (
+            "labyrinth/minotaur_policy_learning.py",
+            "labyrinth/retention_sample_planning_r57.py",
+            "labyrinth/rezon_pointer_mapping_r57.py",
+            "scripts/verify_minilm_fresh_process_r57.py",
+            "tests/test_r57_minotaur_policy_regression.py",
+            "tests/test_retention_sample_planning_r57.py",
+            "tests/test_rezon_pointer_mapping_r57.py",
+            "tests/test_fresh_process_eval_manifest_r57.py",
+        )
+        for name, manifest in paths_by_trigger.items():
+            for path in boundaries:
+                with self.subTest(trigger=name, path=path):
+                    self.assertIn(f'      - "{path}"', manifest)
+
+        for module_name, minimum in (
+            ("tests.test_r57_minotaur_policy_regression", 2),
+            ("tests.test_retention_sample_planning_r57", 10),
+            ("tests.test_rezon_pointer_mapping_r57", 10),
+            ("tests.test_fresh_process_eval_manifest_r57", 10),
+        ):
+            with self.subTest(module=module_name):
+                self.assertIn(f'("{module_name}", {minimum})', workflow)
+
+        # The pinned runner must reject all skips, including optional skips,
+        # and never silently substitute missing modules or counts.
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+
+    def test_r68_source_only_qualification_contracts_are_mandatory_and_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        boundaries = (
+            "labyrinth/q5_evaluation_preregistration_r68.py",
+            "labyrinth/retention_transfer_cohort_r68.py",
+            "labyrinth/final_exam_precommit.py",
+            "labyrinth/q8_external_acceptance_source_r68.py",
+            "labyrinth/rezon_two_adapter_source_partition_r68.py",
+            "labyrinth/minotaur_policy_learning.py",
+            "tests/test_q5_evaluation_preregistration_r68.py",
+            "tests/test_retention_transfer_cohort_r68.py",
+            "tests/test_q7_precommit_summary_immutability_r68.py",
+            "tests/test_q8_external_acceptance_source_r68.py",
+            "tests/test_rezon_two_adapter_source_partition_r68.py",
+            "tests/test_r68_minotaur_policy_concurrency.py",
+        )
+        for trigger, event_paths in paths_by_trigger.items():
+            for path in boundaries:
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertIn(f'      - "{path}"', event_paths)
+
+        minimum_case_counts = (
+            ("tests.test_q5_evaluation_preregistration_r68", 10),
+            ("tests.test_retention_transfer_cohort_r68", 8),
+            ("tests.test_q7_precommit_summary_immutability_r68", 2),
+            ("tests.test_q8_external_acceptance_source_r68", 9),
+            ("tests.test_rezon_two_adapter_source_partition_r68", 13),
+            ("tests.test_r68_minotaur_policy_concurrency", 1),
+            ("tests.test_journey_policy_runner", 9),
+        )
+        for module_name, minimum in minimum_case_counts:
+            with self.subTest(module=module_name):
+                self.assertIn(f'("{module_name}", {minimum})', workflow)
+
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+        self.assertIn('R68 source-only', workflow)
+        self.assertIn('NO Q5/Q6/Q7/Q8 authority', workflow)
+
+    def test_r72_registry_transition_receipt_is_required_by_both_cpu_ci_triggers(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for trigger, event_paths in paths_by_trigger.items():
+            with self.subTest(trigger=trigger):
+                self.assertIn('      - "labyrinth/minotaur_policy_learning.py"', event_paths)
+                self.assertIn('      - "tests/test_r72_minotaur_registry_transition.py"', event_paths)
+
+        self.assertIn('("tests.test_r72_minotaur_registry_transition", 4)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+        self.assertIn('R72 source-only nonlearning registry receipt', workflow)
+
+    def test_r72_measured_toy_bridge_changes_trigger_required_no_skip_cpu_tests(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for trigger, event_paths in paths_by_trigger.items():
+            for path in (
+                "labyrinth/minotaur_measured_toy_bridge_r72.py",
+                "tests/test_minotaur_measured_toy_bridge_r72.py",
+            ):
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertIn(f'      - "{path}"', event_paths)
+        self.assertIn('("tests.test_minotaur_measured_toy_bridge_r72", 5)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('R72 measured toy', workflow)
+
+    def test_r72_signed_data_witness_is_mandatory_without_implicit_custody(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        path_groups = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for trigger, event_paths in path_groups.items():
+            for path in (
+                "labyrinth/q5_signed_data_witness_r72.py",
+                "tests/test_q5_signed_data_witness_r72.py",
+            ):
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertIn(f'      - "{path}"', event_paths)
+        self.assertIn('("tests.test_q5_signed_data_witness_r72", 9)', workflow)
+        self.assertIn('R72 signed data witness source-only', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+
+    def test_r76_two_live_toy_rezon_consumer_has_no_skip_cpu_gate_on_both_triggers(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        path_groups = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for trigger, event_paths in path_groups.items():
+            for path in (
+                "labyrinth/rezon_toy_pair_consumer_r76.py",
+                "tests/test_rezon_toy_pair_consumer_r76.py",
+            ):
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertIn(f'      - "{path}"', event_paths)
+        self.assertIn('("tests.test_rezon_toy_pair_consumer_r76", 9)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+        self.assertIn('R76 local two-toy Rezon consumer', workflow)
+
+    def test_r80_hf_train_roster_and_source_authority_boundary_are_no_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        path_groups = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        paths = (
+            "labyrinth/minotaur_hf_roster_bridge.py",
+            "labyrinth/hf_pilot.py",
+            "labyrinth/cli.py",
+            "labyrinth/hf_report_audit.py",
+            "labyrinth/hf_resume_bridge.py",
+            "labyrinth/checkpoint_schema_bridge.py",
+            "labyrinth/journey_policy_runner.py",
+            "tests/test_minotaur_hf_roster_bridge.py",
+            "tests/test_q5_toy_authority_combination_r79.py",
+            "tests/test_optimizer_lifecycle_r8.py",
+            "tests/test_hf_report_audit.py",
+            "tests/test_hf_resume_bridge.py",
+            "tests/test_checkpoint_schema_bridge.py",
+            "tests/test_hf_scoped_report_audit.py",
+            "tests/test_hf_event_recovery.py",
+        )
+        for trigger, event_paths in path_groups.items():
+            for path in paths:
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertIn(f'      - "{path}"', event_paths)
+        for module_name, expected in (
+            ("tests.test_minotaur_hf_roster_bridge", 14),
+            ("tests.test_hf_pilot", 28),
+            ("tests.test_hf_report_audit", 20),
+            ("tests.test_hf_resume_bridge", 24),
+            ("tests.test_checkpoint_schema_bridge", 8),
+            ("tests.test_hf_scoped_report_audit", 4),
+            ("tests.test_hf_event_recovery", 10),
+            ("tests.test_hf_journey_resume_integration", 10),
+            ("tests.test_optimizer_lifecycle_r8", 9),
+            ("tests.test_q5_toy_authority_combination_r79", 2),
+        ):
+            self.assertIn(f'("{module_name}", {expected})', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+        self.assertIn('This does NOT witness a physical', workflow)
+
+    def test_r84_staged_minotaur_train_entrypoint_is_required_by_cpu_ci(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        for event_paths in (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        ):
+            for name in (
+                "labyrinth/hf_pilot.py",
+                "labyrinth/minotaur_hf_roster_bridge.py",
+                "labyrinth/hf_report_audit.py",
+                "labyrinth/hf_resume_bridge.py",
+                "tests/test_minotaur_hf_run_pilot_r84.py",
+            ):
+                self.assertIn(f'      - "{name}"', event_paths)
+        self.assertIn('("tests.test_minotaur_hf_run_pilot_r84", 3)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:',
+                      workflow)
+
+    def test_r85_minotaur_train_roster_manifest_is_required_on_pr_and_main(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        pr_paths = workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+            "  push:\n", 1)[0]
+        main_paths = workflow.split("  push:\n", 1)[1].split(
+            "  workflow_dispatch:\n", 1)[0]
+        for path in (
+            "labyrinth/minotaur_train_roster_manifest_v1.py",
+            "tests/test_minotaur_train_roster_manifest_v1.py",
+        ):
+            with self.subTest(path=path):
+                self.assertIn(f'      - "{path}"', pr_paths)
+                self.assertIn(f'      - "{path}"', main_paths)
+        self.assertIn('("tests.test_minotaur_train_roster_manifest_v1", 9)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:',
+                      workflow)
+        self.assertIn('NOT accepted by the older model-training corpus importer', workflow)
+
+    def test_r60_private_wheel_contract_is_required_by_both_cpu_ci_triggers(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        path_groups = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        # Packaging relocates three reusable MiniLM contracts and alters two
+        # routing consumers. A diff touching only these files must still run
+        # pinned, no-skip CPU verification; the legacy CLI wrapper paths are
+        # already covered by the prior source contract.
+        required_paths = (
+            "labyrinth/minilm_cpu_experiment.py",
+            "labyrinth/maze_conditioned_minilm_cpu_experiment.py",
+            "labyrinth/maze_multiseed_protocol_cpu_experiment.py",
+            "labyrinth/fivearm_campaign_admission_r13.py",
+            "labyrinth/fivearm_capture_boundary_r15.py",
+            "tests/test_private_wheel_minilm_contract_r60.py",
+        )
+        for trigger, paths in path_groups.items():
+            for path in required_paths:
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertTrue((root / path).is_file())
+                    self.assertIn(f'      - "{path}"', paths)
+        self.assertIn('("tests.test_private_wheel_minilm_contract_r60", 1)', workflow)
+        self.assertIn('or result.skipped', workflow)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+
+    def test_r90_consolidation_boundaries_are_mandatory_in_both_neural_triggers(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        path_groups = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        paths = (
+            "labyrinth/rezon_receipt_binding_r69.py",
+            "labyrinth/schedule_pin_boundary_w2.py",
+            "labyrinth/graduation_state_external_custody_w4.py",
+            "labyrinth/q7_temporal_custody_source.py",
+            "labyrinth/q7_witnessed_cas_intake_r93.py",
+            "labyrinth/q8_witness_restore_r93.py",
+            "labyrinth/q6_stratified_toy_study_r93.py",
+            "labyrinth/minotaur_hf_roster_bridge.py",
+            "labyrinth/adaptive_minotaur_r93.py",
+            "labyrinth/q8_host_authority_probe.py",
+            "labyrinth/graduation_gate.py",
+            "labyrinth/objective_challenge_provider_r92.py",
+            "labyrinth/minotaur_counterfactual_corridors_r92.py",
+            "labyrinth/q5_holdout_eval_r92.py",
+            "labyrinth/objective_learning_loop_r92.py",
+            "scripts/experiments/q5_multiseed_campaign.py",
+            "docs/qualification/REZON_RECEIPT_BINDING_R69.md",
+            "docs/qualification/Q7_TEMPORAL_CUSTODY_SOURCE.md",
+            "docs/qualification/Q7_WITNESSED_SOURCE_CAS_R93.md",
+            "docs/qualification/Q8_HOST_WITNESS_RESTORE_R93.md",
+            "docs/qualification/Q6_STRATIFIED_TOY_SOURCE_STUDY_R93.md",
+            "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md",
+            "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md",
+            "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md",
+            "docs/qualification/Q5_PRIVATE_HOLDOUT_EVAL_R92.md",
+            "tests/test_private_wheel_cli_checkpoint_r70.py",
+            "tests/test_rezon_receipt_binding_r69.py",
+            "tests/test_schedule_pin_boundary_w2.py",
+            "tests/test_graduation_state_external_custody_w4.py",
+            "tests/test_q5_multiseed_campaign.py",
+            "tests/test_q7_temporal_custody_source.py",
+            "tests/test_q7_witnessed_cas_intake_r93.py",
+            "tests/test_q8_witness_restore_r93.py",
+            "tests/test_q6_stratified_toy_study_r93.py",
+            "tests/test_minotaur_hf_roster_bridge.py",
+            "tests/test_adaptive_minotaur_r93.py",
+            "tests/test_q8_host_authority_probe.py",
+            "tests/test_graduation_gate.py",
+            "tests/test_objective_challenge_provider_r92.py",
+            "tests/test_minotaur_counterfactual_corridors_r92.py",
+            "tests/test_q5_holdout_eval_r92.py",
+            "tests/test_objective_learning_loop_r92.py",
+        )
+        for trigger, manifest in path_groups.items():
+            for path in paths:
+                with self.subTest(trigger=trigger, path=path):
+                    self.assertTrue((root / path).is_file())
+                    self.assertIn(f'      - "{path}"', manifest)
+        for module, minimum in (
+            ("tests.test_qualify_minilm_cpu", 7),
+            ("tests.test_hf_pilot", 39),
+            ("tests.test_minotaur_hf_roster_bridge", 14),
+            ("tests.test_hf_report_audit", 20),
+            ("tests.test_external_monotonic_authority_contract", 17),
+            ("tests.test_private_wheel_cli_checkpoint_r70", 1),
+            ("tests.test_rezon_receipt_binding_r69", 5),
+            ("tests.test_schedule_pin_boundary_w2", 6),
+            ("tests.test_graduation_state_external_custody_w4", 10),
+            ("tests.test_q5_multiseed_campaign", 9),
+            ("tests.test_q7_temporal_custody_source", 9),
+            ("tests.test_q7_witnessed_cas_intake_r93", 12),
+            ("tests.test_q8_witness_restore_r93", 23),
+            ("tests.test_q6_stratified_toy_study_r93", 21),
+            ("tests.test_adaptive_minotaur_r93", 9),
+            ("tests.test_graduation_gate", 28),
+            ("tests.test_objective_challenge_provider_r92", 7),
+            ("tests.test_minotaur_counterfactual_corridors_r92", 19),
+            ("tests.test_q8_host_authority_probe", 18),
+            ("tests.test_q5_holdout_eval_r92", 23),
+            ("tests.test_objective_learning_loop_r92", 5),
+        ):
+            with self.subTest(module=module):
+                self.assertIn(f'("{module}", {minimum})', workflow)
+        self.assertIn('or result.skipped', workflow)
+
+    def test_r92_combined_r68_r72_docs_trigger_pinned_neural_ci(self):
+        # PR #77 and #82 were independently green, but the union must keep
+        # each newly documented qualification contract under BOTH triggers.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        triggers = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        documented_contracts = (
+            "MINOTAUR_REGISTRY_TRANSITION_R72.md",
+            "Q5_EVALUATION_PREREG_R68.md",
+            "Q5_SIGNED_DATA_WITNESS_R72.md",
+            "Q7_PRECOMMIT_SUMMARY_IMMUTABILITY_R68.md",
+            "Q8_SOURCE_ACCEPTANCE_VALIDATOR_R68.md",
+            "R72_MINOTAUR_MEASURED_TOY_CORRIDOR.md",
+            "RETENTION_TRANSFER_COHORT_R68.md",
+            "REZON_TWO_ADAPTER_SOURCE_PARTITION_R68.md",
+            "R76_REZON_TWO_TOY_CONSUMER.md",
+        )
+        for filename in documented_contracts:
+            path = f"docs/qualification/{filename}"
+            self.assertTrue((root / path).is_file())
+            for trigger, paths in triggers.items():
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', paths)
+
+    def test_r92_neural_checkpoint_changes_trigger_both_neural_workflows(self):
+        # Local dependency-absent source checks may skip 9 Torch tests; the
+        # pinned neural runner installs dependencies and MUST reject skips.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        triggers = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for path in ("labyrinth/neural_cycle_checkpoint_r92.py",
+                     "tests/test_neural_cycle_checkpoint_r92.py"):
+            self.assertTrue((root / path).is_file())
+            for manifest in triggers:
+                self.assertIn(f'      - "{path}"', manifest)
+        self.assertIn('raise SystemExit(f"required CPU source/custody tests failed or skipped:', workflow)
+        self.assertIn('("tests.test_neural_cycle_checkpoint_r92", 23)', workflow)
+
+    def test_l12_l14_neural_and_custody_boundaries_are_required_in_cpu_ci(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        boundaries = (
+            "labyrinth/monotonic_anchor_protocol.py",
+            "labyrinth/retention_family_registry.py",
+            "labyrinth/retention_entrypoint_guard.py",
+            "labyrinth/measured_weakness_feedback.py",
+            "labyrinth/atomic_artifact_publication.py",
+            "labyrinth/preregistered_control_matrix.py",
+            "labyrinth/arithmetic_semantic_case_key.py",
+            "labyrinth/measured_corridor_handoff.py",
+            "labyrinth/measured_taskmaster_transition.py",
+            "labyrinth/minotaur_development_feedback.py",
+            "labyrinth/authority_publication_service.py",
+            "labyrinth/arithmetic_retention_admission.py",
+            "labyrinth/development_event_reservation_service.py",
+            "labyrinth/measured_sentiment_corridors.py",
+            "labyrinth/minilm_optimizer_state_resume.py",
+            "labyrinth/sealed_semantic_exam_protocol.py",
+            "labyrinth/external_monotonic_authority_contract.py",
+            "labyrinth/measured_neural_batch_binding.py",
+            "labyrinth/train_exposure_attestation.py",
+            "labyrinth/maze_crash_resume_journal.py",
+            "labyrinth/pinned_model_inference_receipt.py",
+            "scripts/qualify_maze_conditioned_minilm_cpu.py",
+            "scripts/qualify_maze_multiseed_protocol_cpu.py",
+            "scripts/qualify_neural_journey_e2e_cpu.py",
+            "scripts/qualify_taskmaster_counterfactual_cpu.py",
+            "tests/test_monotonic_anchor_protocol.py",
+            "tests/test_retention_family_registry.py",
+            "tests/test_retention_entrypoint_guard.py",
+            "tests/test_measured_weakness_feedback.py",
+            "tests/test_atomic_artifact_publication.py",
+            "tests/test_preregistered_control_matrix.py",
+            "tests/test_arithmetic_semantic_case_key.py",
+            "tests/test_measured_corridor_handoff.py",
+            "tests/test_measured_taskmaster_transition.py",
+            "tests/test_minotaur_development_feedback.py",
+            "tests/test_authority_publication_service.py",
+            "tests/test_arithmetic_retention_admission.py",
+            "tests/test_development_event_reservation_service.py",
+            "tests/test_measured_sentiment_corridors.py",
+            "tests/test_minilm_optimizer_state_resume.py",
+            "tests/test_sealed_semantic_exam_protocol.py",
+            "tests/test_external_monotonic_authority_contract.py",
+            "tests/test_measured_neural_batch_binding.py",
+            "tests/test_minilm_runner_optimizer_optin.py",
+            "tests/test_train_exposure_attestation.py",
+            "tests/test_maze_crash_resume_journal.py",
+            "tests/test_minilm_measured_batches_optin.py",
+            "tests/test_signed_minotaur_tactic_neural_selection.py",
+            "tests/test_pinned_model_inference_receipt.py",
+            "tests/test_qualify_maze_measured_tactics_cpu.py",
+            "tests/test_qualify_maze_conditioned_minilm_cpu.py",
+            "tests/test_qualify_maze_prereg_controls_cpu.py",
+            "tests/test_qualify_maze_multiseed_protocol_cpu.py",
+            "tests/test_qualify_neural_journey_e2e_cpu.py",
+            "tests/test_qualify_taskmaster_counterfactual_cpu.py",
+        )
+        for path in boundaries:
+            with self.subTest(path=path, exists=True):
+                self.assertTrue((root / path).is_file())
+            for trigger, manifest in paths_by_trigger.items():
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', manifest)
+
+        step = workflow.split(
+            "      - name: Minotaur tests with neural dependencies present\n", 1)[1]
+        # The listed source tests are cheap and deterministic. They do not
+        # substitute for a physical pretrained training run or final exam.
+        for module in (
+            "tests.test_monotonic_anchor_protocol",
+            "tests.test_retention_family_registry",
+            "tests.test_retention_entrypoint_guard",
+            "tests.test_measured_weakness_feedback",
+            "tests.test_atomic_artifact_publication",
+            "tests.test_preregistered_control_matrix",
+            "tests.test_arithmetic_semantic_case_key",
+            "tests.test_measured_corridor_handoff",
+            "tests.test_measured_taskmaster_transition",
+            "tests.test_minotaur_development_feedback",
+            "tests.test_authority_publication_service",
+            "tests.test_arithmetic_retention_admission",
+            "tests.test_development_event_reservation_service",
+            "tests.test_measured_sentiment_corridors",
+            "tests.test_minilm_optimizer_state_resume",
+            "tests.test_sealed_semantic_exam_protocol",
+            "tests.test_external_monotonic_authority_contract",
+            "tests.test_measured_neural_batch_binding",
+            "tests.test_minilm_runner_optimizer_optin",
+            "tests.test_train_exposure_attestation",
+            "tests.test_maze_crash_resume_journal",
+            "tests.test_minilm_measured_batches_optin",
+            "tests.test_signed_minotaur_tactic_neural_selection",
+            "tests.test_pinned_model_inference_receipt",
+            "tests.test_qualify_maze_measured_tactics_cpu",
+            "tests.test_qualify_maze_multiseed_protocol_cpu",
+            "tests.test_qualify_maze_conditioned_minilm_cpu",
+            "tests.test_qualify_maze_prereg_controls_cpu",
+            "tests.test_qualify_neural_journey_e2e_cpu",
+            "tests.test_qualify_taskmaster_counterfactual_cpu",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(f'"{module}"', step)
+
+    def test_neural_journey_transitive_source_changes_trigger_pinned_cpu_ci(self):
+        # These modules are imported by the HF pilot, objective-conditioned
+        # generator, report auditor or adaptive taskmaster. Editing only one
+        # must not bypass the dependency-present CPU checks.
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        paths_by_trigger = {
+            "pull_request": workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+                "  push:\n", 1)[0],
+            "push/main": workflow.split("  push:\n", 1)[1].split(
+                "  workflow_dispatch:\n", 1)[0],
+        }
+        for path in (
+            "labyrinth/runner.py",
+            "labyrinth/training_scope.py",
+            "labyrinth/evaluation.py",
+            "labyrinth/maze.py",
+            "labyrinth/regenerative_maze.py",
+            "labyrinth/journey.py",
+            "labyrinth/program_maze.py",
+            "labyrinth/taskmaster_routing.py",
+            "labyrinth/minotaur_model.py",
+            "labyrinth/minotaur_policy_learning.py",
+        ):
+            with self.subTest(path=path, exists=True):
+                self.assertTrue((Path(__file__).resolve().parents[1] / path).is_file())
+            for trigger, manifest in paths_by_trigger.items():
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', manifest)
+
+    def test_adaptive_training_integrations_trigger_and_run_under_cpu_dependencies(self):
+        # The generic Python workflow allows optional neural skips. This
+        # separate dependency-present job must cover the TRAIN-only
+        # Minotaur/Labyrinth integration when its source changes.
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        pull_request_paths = workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+            "  push:\n", 1)[0]
+        main_push_paths = workflow.split("  push:\n", 1)[1].split(
+            "  workflow_dispatch:\n", 1)[0]
+        for path in (
+            "labyrinth/adaptive_corridors.py",
+            "labyrinth/journey_policy_runner.py",
+            "labyrinth/journey_challenges.py",
+            "labyrinth/semantic_chambers.py",
+            "tests/test_adaptive_corridors.py",
+            "tests/test_journey_policy_runner.py",
+            "tests/test_journey_challenges.py",
+            "tests/test_semantic_chambers.py",
+        ):
+            for trigger, manifest in (("pull_request", pull_request_paths),
+                                      ("push/main", main_push_paths)):
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', manifest)
+        test_step = workflow.split(
+            "      - name: Minotaur tests with neural dependencies present\n", 1)[1]
+        for module in (
+            "tests.test_adaptive_corridors",
+            "tests.test_journey_policy_runner",
+            "tests.test_journey_challenges",
+            "tests.test_semantic_chambers",
+            "tests.test_minotaur_exam",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(module, test_step)
+
+    def test_hf_neural_transition_changes_trigger_dependency_present_checks(self):
+        # The signed development transition and opt-in two-cycle harness are
+        # new neural boundaries. They must not rely solely on the generic
+        # Python workflow, which permits optional neural dependencies to skip.
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        pull_request_paths = workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+            "  push:\n", 1)[0]
+        main_push_paths = workflow.split("  push:\n", 1)[1].split(
+            "  workflow_dispatch:\n", 1)[0]
+        for path in (
+            "labyrinth/hf_development_transition.py",
+            "labyrinth/hf_resume_bridge.py",
+            "scripts/qualify_hf_regenerative.py",
+            "tests/test_hf_development_transition.py",
+            "tests/test_hf_resume_bridge.py",
+            "tests/test_hf_regenerative_harness.py",
+        ):
+            for trigger, manifest in (("pull_request", pull_request_paths),
+                                      ("push/main", main_push_paths)):
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', manifest)
+        test_step = workflow.split(
+            "      - name: Minotaur tests with neural dependencies present\n", 1)[1]
+        for module in (
+            "tests.test_hf_development_transition",
+            "tests.test_hf_resume_bridge",
+            "tests.test_hf_regenerative_harness",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(module, test_step)
+
+    def test_scoped_hf_and_objective_changes_trigger_dependency_present_checks(self):
+        # Public diagnostic rotation, scoped report custody and objective
+        # TRAIN materialization are also part of the HF journey boundary.
+        # An edit confined to any of them must trigger the pinned CPU job.
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        pull_request_paths = workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+            "  push:\n", 1)[0]
+        main_push_paths = workflow.split("  push:\n", 1)[1].split(
+            "  workflow_dispatch:\n", 1)[0]
+        for path in (
+            "labyrinth/hf_pilot.py",
+            "labyrinth/hf_report_audit.py",
+            "labyrinth/objective_contract.py",
+            "tests/test_hf_pilot.py",
+            "tests/test_hf_report_audit.py",
+            "tests/test_hf_journey_resume_integration.py",
+            "tests/test_hf_scoped_report_audit.py",
+            "tests/test_objective_contract.py",
+            "tests/test_reserved_structural_transfer.py",
+        ):
+            for trigger, manifest in (("pull_request", pull_request_paths),
+                                      ("push/main", main_push_paths)):
+                with self.subTest(path=path, trigger=trigger):
+                    self.assertIn(f'      - "{path}"', manifest)
+        test_step = workflow.split(
+            "      - name: Minotaur tests with neural dependencies present\n", 1)[1]
+        for module in (
+            "tests.test_hf_pilot",
+            "tests.test_hf_report_audit",
+            "tests.test_hf_journey_resume_integration",
+            "tests.test_hf_scoped_report_audit",
+            "tests.test_objective_contract",
+            "tests.test_reserved_structural_transfer",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(module, test_step)
