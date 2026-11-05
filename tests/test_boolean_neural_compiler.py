@@ -125,6 +125,23 @@ class NeuralCompilationTests(unittest.TestCase):
                                     capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(result.stdout), {"sha": self.linked.sha256(), "out": [1, 1]})
 
+    def test_committed_weight_fixture_matches_fresh_compilation(self):
+        fixture = Path(__file__).resolve().parent / "fixtures" / "boolean_full_adder_artifact.json"
+        recovered = load_manifest(fixture)
+        self.assertEqual(recovered.sha256(), self.linked.sha256())
+        for bits in product((0, 1), repeat=3):
+            self.assertEqual(recovered.evaluate(bits), self.linked.evaluate(bits))
+            self.assertEqual(recovered.evaluate(bits)[0] + 2 * recovered.evaluate(bits)[1], sum(bits))
+
+    def test_duplicate_manifest_keys_rejected(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "duplicate.json"
+            self.linked.write_manifest(path)
+            data = path.read_text()
+            path.write_text(data.replace('"format":', '"format": "forged", "format":', 1))
+            with self.assertRaisesRegex(ValueError, "duplicate"):
+                load_manifest(path)
+
     def test_corrupted_manifest_is_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "compiled.json"
