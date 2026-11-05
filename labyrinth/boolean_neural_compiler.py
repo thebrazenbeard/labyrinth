@@ -154,6 +154,8 @@ def load_manifest(path: Path) -> NeuralArtifact:
     architecture = payload["architecture"]
     if type(architecture) is not list or len(architecture) != 3 or any(type(x) is not int for x in architecture) or architecture != [n, len(artifact.w1), len(artifact.output_names)]:
         raise ValueError("manifest architecture mismatch")
+    if artifact.sha256() != digest:
+        raise ValueError("manifest reconstruction changed canonical content")
     return artifact
 
 
