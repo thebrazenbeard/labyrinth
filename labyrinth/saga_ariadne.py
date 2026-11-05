@@ -115,7 +115,7 @@ def append_saga_event(
     events: list[dict], *, kind: str, objective_id: str, scope_fingerprint: str,
     cycle_index: int, before: str, after: str, summary: dict,
 ) -> None:
-    if (type(events) is not list or len(events) >= 256
+    if (type(events) is not list or len(events) >= 512
             or type(objective_id) is not str or _ID.fullmatch(objective_id) is None
             or type(scope_fingerprint) is not str or _SHA.fullmatch(scope_fingerprint) is None
             or type(cycle_index) is not int or not 0 <= cycle_index <= 8
@@ -140,7 +140,7 @@ def verify_saga_ariadne(events: object, *, require_exit: bool = False) -> str:
     Returns the head digest. Anyone rewriting the complete record can compute
     a matching head; independent anchoring must be supplied separately.
     """
-    if type(events) is not list or not 1 <= len(events) <= 256:
+    if type(events) is not list or not 1 <= len(events) <= 512:
         raise ValueError("Ariadne journal requires bounded events")
     objective = scope = checkpoint = None
     previous_hash = ZERO

@@ -321,6 +321,43 @@ class SagaSessionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "retained checkpoint artifact changed"):
                 session.save_receipt_new(Path(tmp) / "untrusted-report.json")
 
+    def test_partial_training_hook_failure_quarantines_session_without_retry(self):
+        with TemporaryDirectory() as tmp:
+            session, learner, _, _ = self.make_session(Path(tmp))
+            session.step("left")
+            session.step("forward")
+            original = learner.train_supervised
+            physical_updates = []
+
+            def crash_after_effect(case):
+                written = original(case)
+                physical_updates.append(written)
+                raise RuntimeError("simulated process crash after physical checkpoint write")
+
+            learner.train_supervised = crash_after_effect
+            with self.assertRaisesRegex(RuntimeError, "after physical checkpoint write"):
+                session.step("train")
+            self.assertEqual(len(physical_updates), 1)
+            self.assertEqual(len(session.training_sparks), 0)
+            self.assertTrue(session.indeterminate)
+            self.assertEqual(session.observe().available_actions, ())
+            self.assertEqual(session.observe().development_status, "INDETERMINATE")
+            learner.train_supervised = original
+            with self.assertRaisesRegex(ValueError, "indeterminate training state"):
+                session.step("train")
+            self.assertEqual(len(physical_updates), 1)
+            with self.assertRaisesRegex(ValueError, "indeterminate training"):
+                session.save_receipt_new(Path(tmp) / "false-success.json")
+
+    def test_in_progress_export_is_explicitly_not_terminated(self):
+        with TemporaryDirectory() as tmp:
+            session, _, _, _ = self.make_session(Path(tmp))
+            report = Path(tmp) / "development-in-progress.json"
+            session.save_receipt_new(report)
+            value = load_json(report, strict=True)
+            self.assertEqual(value["session_status"], "IN_PROGRESS")
+            self.assertEqual(value["qualification"], "NOT_ESTABLISHED")
+
     def test_requires_real_checkpoint_and_rejects_claimed_update_without_new_bytes(self):
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "fake.bin"

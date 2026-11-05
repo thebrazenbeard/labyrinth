@@ -389,6 +389,9 @@ class SagaSession:
         self.action_count = 0
         self.terminated = False
         self.truncated = False
+        # Once a trainer may have written outside this process, an exception
+        # makes the state ambiguous. Never retry an unreceipted update.
+        self.indeterminate = False
         self.development_status = "NOT_EVALUATED"
         self.checkpoint = capture_checkpoint(checkpoint)
         self._used_weights_paths = {self.checkpoint.weights_path}
@@ -469,7 +472,7 @@ class SagaSession:
                      })
 
     def _current_actions(self) -> tuple[str, ...]:
-        if self.terminated or self.truncated:
+        if self.terminated or self.truncated or self.indeterminate:
             return ()
         if self.phase == "MINOTAUR":
             return ("face", "look")
@@ -477,7 +480,9 @@ class SagaSession:
         return ("look",) + tuple(action for action, _ in node.exits) + (("train",) if self.location == "chamber" else ())
 
     def observe(self) -> StepResult:
-        if self.terminated:
+        if self.indeterminate:
+            msg = "Training state is indeterminate after a possible partial update; manual checkpoint recovery is required."
+        elif self.terminated:
             msg = "The development journey has ended; no formal graduation has been established."
         elif self.truncated:
             msg = "The authorized action budget ended; no further training or examination is allowed."
@@ -502,6 +507,9 @@ class SagaSession:
         case = self.runner.operator_pending_train_case(view)
         previous = self.checkpoint
         self._verify_historical_artifacts()
+        old_development_status = self.development_status
+        self.indeterminate = True
+        self.development_status = "INDETERMINATE"
         paths = self.learner.train_supervised(case)
         # Check every retained checkpoint, not only immediate predecessor:
         # otherwise a later spark could silently rewrite W0 or an older Wt.
@@ -549,6 +557,11 @@ class SagaSession:
         else:
             self._prepare_world()
             next_text = self.nodes[self.location].prose
+        # Only after the training hook, all old/new checkpoint readbacks,
+        # runner update and Ariadne record have completed can another action
+        # be allowed. Any exception above leaves this session quarantined.
+        self.indeterminate = False
+        self.development_status = old_development_status
         return self._result("TRAIN_COMPLETED", next_text, outcome.correct)
 
     def _verify_historical_artifacts(self, *, after_training: bool = False) -> None:
@@ -647,6 +660,8 @@ class SagaSession:
         )
 
     def step(self, action: str) -> StepResult:
+        if self.indeterminate:
+            raise ValueError("indeterminate training state requires manual checkpoint recovery")
         if self.terminated or self.truncated:
             raise ValueError("development episode has ended")
         if type(action) is not str or not 1 <= len(action) <= 16 or action not in self._current_actions():
@@ -676,7 +691,12 @@ class SagaSession:
         """
         from .runner import load_json, save_json_new
 
-        head = verify_saga_ariadne(self.ariadne_events)
+        if self.indeterminate:
+            raise ValueError("cannot export a successful Ariadne receipt for indeterminate training")
+
+        head = verify_saga_ariadne(
+            self.ariadne_events, require_exit=self.terminated or self.truncated,
+        )
         self._verify_historical_artifacts()
         manifest = [
             {
@@ -696,6 +716,8 @@ class SagaSession:
             "ariadne_head_sha256": head,
             "checkpoint_manifest": manifest,
             "development_status": self.development_status,
+            "session_status": ("TERMINATED" if self.terminated else
+                               "TRUNCATED" if self.truncated else "IN_PROGRESS"),
             "qualification": "NOT_ESTABLISHED",
         }
         save_json_new(path, value)
