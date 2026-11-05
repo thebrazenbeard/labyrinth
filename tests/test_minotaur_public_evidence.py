@@ -1,4 +1,6 @@
 ﻿"""Real trained Minotaur neural inference must compose with independent V5 evaluation."""
+from contextlib import nullcontext
+from types import SimpleNamespace
 import unittest
 try:
     import torch
@@ -8,6 +10,62 @@ except ImportError:
 from labyrinth.minotaur_algebraic_eval_v5 import (
     AtomicEvaluationCase, ProgramRolloutCase,
 )
+
+
+class NeuralHeadContractTests(unittest.TestCase):
+    def test_incomplete_neural_head_refuses_without_raising(self):
+        from labyrinth.minotaur_public_evidence import evaluate_compact_public
+
+        atomic=[AtomicEvaluationCase("safe","ADD",95,5,3,"heldout")]
+        training=[(0,0,0,0)]
+        missing_mode=type("MissingMode", (), {
+            "predict": lambda self,*args: 3,
+            "eval": lambda self: None,
+        })()
+        missing_restore=type("MissingRestore", (), {
+            "training": True,
+            "predict": lambda self,*args: 3,
+            "eval": lambda self: None,
+        })()
+        for head in (missing_mode, missing_restore):
+            with self.subTest(head=type(head).__name__):
+                report=evaluate_compact_public(head,atomic,[],training,None)
+                self.assertEqual(report["disposition"],"REFUSED")
+                self.assertEqual(report["reason"],"unsupported_neural_head")
+                self.assertEqual(report["qualification"],"NOT_ESTABLISHED")
+                self.assertEqual(report["graduation_authority"],"none")
+
+    def test_failed_mode_restoration_refuses_even_correct_public_prediction(self):
+        from labyrinth.minotaur_public_evidence import evaluate_compact_public
+
+        class Scalar:
+            ndim=0
+            def __init__(self,value):
+                self.value=value
+            def item(self):
+                return self.value
+
+        class BrokenRestore:
+            training=True
+            def eval(self):
+                self.training=False
+            def train(self,_mode):
+                raise RuntimeError("restoration unavailable")
+            def predict(self,*_args):
+                return Scalar(3)
+
+        fake_torch=SimpleNamespace(
+            long=object(), no_grad=nullcontext,
+            tensor=lambda value,dtype: Scalar(value),
+        )
+        report=evaluate_compact_public(
+            BrokenRestore(),[AtomicEvaluationCase("safe","ADD",95,5,3)],
+            [],[(0,0,0,0)],fake_torch,
+        )
+        self.assertEqual(report["disposition"],"REFUSED")
+        self.assertEqual(report["reason"],"neural_inference_failed")
+        self.assertEqual(report["qualification"],"NOT_ESTABLISHED")
+        self.assertEqual(report["graduation_authority"],"none")
 
 
 @unittest.skipUnless(torch is not None,"torch optional")
