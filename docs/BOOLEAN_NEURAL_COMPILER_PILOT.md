@@ -13,14 +13,14 @@ affine weights and biases. Inference never invokes the reference functions.
 ## Run on CPU ($0, no model downloads)
 
 Requires Python 3.10+ **standard library only**. No NumPy, PyTorch, LLM APIs,
-gradients, optimizer, pretrained model, package installation, or network access.
+gradients, optimizer, pretrained model, package installation (when run from the repository root), or network access.
 
 ```bash
 python -m unittest discover -s tests -p 'test_boolean_neural_compiler.py' -v
-python scripts/verify_boolean_neural_compiler.py
+python -m scripts.verify_boolean_neural_compiler
 ```
 
-`verify.py` prints reference-vs-neural results and reproducible weight hashes,
+`scripts.verify_boolean_neural_compiler` prints reference-vs-neural results and reproducible weight hashes,
 then (if run with `--write PATH`) saves a canonical JSON manifest. The
 `load_manifest` function checks format, ABI, shapes and the serialized digest;
 the tests also reload that manifest in a **separate Python process**. No
