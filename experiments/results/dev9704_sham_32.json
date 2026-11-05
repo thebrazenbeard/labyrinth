@@ -1,0 +1,107 @@
+{
+  "arm": "sham",
+  "checkpoint_sha256": "8bc78203ed842936183342dd1224509b34a00059dde9f0b33aca0f1e093a488e",
+  "elapsed_seconds": 10.715,
+  "generation_config_sha256": "c164c3b4af3e886f057a2d75feb4761bd99b151b2a18a323b49bec4add0dcea8",
+  "parameter_sha256": "05e2bfb7ec08dd65d97c82bc1ffaceef5b4dbb4be33aeb497f40f37863746b58",
+  "schema": "labyrinth.neural-public-arm.v1",
+  "trial_count": 16,
+  "trials": [
+    {
+      "case_id": "matched-t4-0-b8a4725eabe9fac6-canonical",
+      "generation_seed": 8192,
+      "prompt_sha256": "8fd136b52c5cbcf904a87875e4e928762264b1ecc20b3a1287e356708814dd2a",
+      "response": "\nAnswer:"
+    },
+    {
+      "case_id": "matched-t4-0-b8a4725eabe9fac6-paraphrased",
+      "generation_seed": 8193,
+      "prompt_sha256": "c85d4aebbd4faa0ba089c7faae555fc3db5e51c40bc3e5563cee5447737e1fa1",
+      "response": "\nWhat is the output of the following program?\n\n"
+    },
+    {
+      "case_id": "matched-t4-1-90f06095af1be65f-canonical",
+      "generation_seed": 8194,
+      "prompt_sha256": "bf9f69dcd25941fbc52e04c698f08382d57163c5653d337c645ed1bcb98e0f2d",
+      "response": "\nAnswer:"
+    },
+    {
+      "case_id": "matched-t4-1-90f06095af1be65f-paraphrased",
+      "generation_seed": 8195,
+      "prompt_sha256": "12138f82d89992c54276073a40933eefa7d226f79d9851070605d09e088fbeb1",
+      "response": "\nWhat is the output of the following program?\n\n"
+    },
+    {
+      "case_id": "matched-t4-2-5b5df5f6037c84de-canonical",
+      "generation_seed": 8196,
+      "prompt_sha256": "cb82f0c51a12b3c710962c85224f0778dc7e5b2dc257d8997545e6a97f81e6a1",
+      "response": "\nAnswer:"
+    },
+    {
+      "case_id": "matched-t4-2-5b5df5f6037c84de-paraphrased",
+      "generation_seed": 8197,
+      "prompt_sha256": "e67b7c4a471bf4d08752f260fbf54b82888f3c6de82db6be251c0ac9c37f6a5d",
+      "response": "\nWhat is the output of the following program?\n\n"
+    },
+    {
+      "case_id": "matched-t4-3-aeffbfd195d9836d-canonical",
+      "generation_seed": 8198,
+      "prompt_sha256": "86d4469e06fbc79f61fe13b92fd3e28d0e88bd25f759743123316a0621ab210b",
+      "response": "\nAnswer:"
+    },
+    {
+      "case_id": "matched-t4-3-aeffbfd195d9836d-paraphrased",
+      "generation_seed": 8199,
+      "prompt_sha256": "1c7b0d15e1c1eaef501ae89f3580f9097837799e11464fa8d6f6919e372bbf54",
+      "response": "\nWhat is the output of the following program?\n\n"
+    },
+    {
+      "case_id": "matched-t4-4-3c451e93ef711353-canonical",
+      "generation_seed": 8200,
+      "prompt_sha256": "ea25b0fc45c13e28e1df30250485a65577bd2bc09e95ad1a6c24767f23e8ce38",
+      "response": "\nAnswer:"
+    },
+    {
+      "case_id": "matched-t4-4-3c451e93ef711353-paraphrased",
+      "generation_seed": 8201,
+      "prompt_sha256": "c88f814bbb9b55dbd6bfb742640ebd916cd1b547feb20e99ec452c45f50acab0",
+      "response": "\nHow would you modify the code to handle the case where"
+    },
+    {
+      "case_id": "matched-t4-5-44e4057eb5364ffc-canonical",
+      "generation_seed": 8202,
+      "prompt_sha256": "e093fe42315b249755156047e2a292abe3b81248f61bebc3d8cd63e8f96df4e3",
+      "response": "\nAnswer:"
+    },
+    {
+      "case_id": "matched-t4-5-44e4057eb5364ffc-paraphrased",
+      "generation_seed": 8203,
+      "prompt_sha256": "c02e4e07aff0ccda41ccde29420862fb9428637669e67b68f7f900f535160129",
+      "response": "\nWhat is the output of the following program?\n\n"
+    },
+    {
+      "case_id": "matched-t4-6-58ddd1aaa0fdc677-canonical",
+      "generation_seed": 8204,
+      "prompt_sha256": "6a112733cb9f85d51daf6ebc091a3731be9794f4addc40d0f314f979d1d93d95",
+      "response": "\nAnswer:"
+    },
+    {
+      "case_id": "matched-t4-6-58ddd1aaa0fdc677-paraphrased",
+      "generation_seed": 8205,
+      "prompt_sha256": "103a64ff5a66817b220819fac9d21f1b62ca41d2fd59ac285fe2a59cfc73fa4d",
+      "response": "\nWhat is the output of the following program?\n\n"
+    },
+    {
+      "case_id": "matched-t4-7-f83b1bf92fc787fb-canonical",
+      "generation_seed": 8206,
+      "prompt_sha256": "073ec8c3123679805fba628ade8a3d1aad2b937869e38058d3b1c0426b520458",
+      "response": "\nAnswer:"
+    },
+    {
+      "case_id": "matched-t4-7-f83b1bf92fc787fb-paraphrased",
+      "generation_seed": 8207,
+      "prompt_sha256": "fdd5e03b7a238458c774584f6d62313a0b8cc7752ff791b87badf820f4503b7b",
+      "response": "\nWhat is the output of the following program?\n\n"
+    }
+  ]
+}
