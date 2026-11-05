@@ -71,7 +71,7 @@ not independent attestation of loaded weights or persistent learning.
 ## Offline tests
 
 ~~~powershell
-py -3.11 -m unittest tests.test_conversation_ordeal -v
+py -3.11 -m unittest discover -s tests -p test_conversation_ordeal.py -v
 ~~~
 
 Tests use a fake backend; no model inference or network calls.
