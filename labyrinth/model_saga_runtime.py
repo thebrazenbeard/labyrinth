@@ -26,7 +26,8 @@ from .journey import (
     DEVELOPMENT_PASSED_PENDING_PRIVATE_QUALIFICATION,
     begin_journey, complete_maze, face_minotaur,
 )
-from .journey_policy_runner import TrainingCorridorRunner
+from .adaptive_corridors import offer_next_chamber
+from .journey_policy_runner import PedagogicalRoute, TrainingCorridorRunner
 from .maze import Challenge
 from .minotaur_exam import ExamCaseResult, MinotaurExamReceipt, evaluate_minotaur
 from .saga_ariadne import append_saga_event, verify_saga_ariadne
@@ -37,6 +38,7 @@ _ID = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z", re.ASCII)
 _ACTIONS = frozenset(("left", "right", "forward", "back"))
 _ANSWER = re.compile(r"ANSWER: ([+-]?\d+)\Z", re.ASCII)
 _MAX_ARTIFACT_BYTES = 16 * 1024 ** 3
+_PUBLIC_OUTCOME_WINDOW = 16
 
 
 @dataclass(frozen=True)
@@ -151,6 +153,10 @@ class SceneRequest:
     weak_skills: tuple[str, ...]
     prior_training_correct: tuple[bool, ...]
     public_seed: int
+    prior_training_tactics: tuple[str, ...] = ()
+    # Cumulative bounded public experience, including failed past cycles.
+    # The source keeps answers, prompts and case identifiers private.
+    prior_training_outcomes: tuple[PedagogicalOutcome, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -161,10 +167,24 @@ class SceneNode:
 
 
 @dataclass(frozen=True)
+class PedagogicalEncounter:
+    """Model-proposed learning consequence of entering one initial branch.
+
+    The values select only an already approved source-owned TRAIN grammar;
+    no gold, training prompt, grade or private exam material can be supplied.
+    """
+
+    branch_node_id: str
+    tactic: str
+    difficulty_delta: int
+
+
+@dataclass(frozen=True)
 class WorldProposal:
-    """A model-proposed, navigable map; chamber contains the TRAIN action."""
+    """A model-proposed map and optional bounded path-to-TRAIN consequences."""
 
     nodes: tuple[SceneNode, ...]
+    encounters: tuple[PedagogicalEncounter, ...] = ()
 
 
 def _check_world(world: WorldProposal) -> str:
@@ -213,10 +233,50 @@ def _check_world(world: WorldProposal) -> str:
             break
     if can_reach_chamber != set(nodes):
         raise ValueError("every narrative branch must have a route to training")
-    # Hash topology only, so cosmetic prose changes cannot masquerade as a
-    # regenerated maze layout.
-    encoded = json.dumps(sorted((node.node_id, sorted(node.exits)) for node in world.nodes),
-                         separators=(",", ":")).encode("utf-8")
+    if type(world.encounters) is not tuple:
+        raise ValueError("pedagogical encounters must be an immutable tuple")
+    direct_branches = {target for _, target in nodes["threshold"].exits}
+    if world.encounters:
+        if (len(world.encounters) != len(direct_branches)
+                or any(type(encounter) is not PedagogicalEncounter
+                       or type(encounter.branch_node_id) is not str
+                       or encounter.branch_node_id not in direct_branches
+                       for encounter in world.encounters)):
+            raise ValueError("pedagogical encounters must cover each direct branch once")
+        if len({encounter.branch_node_id for encounter in world.encounters}) != len(direct_branches):
+            raise ValueError("duplicated pedagogical branch consequence")
+        for encounter in world.encounters:
+            PedagogicalRoute(encounter.tactic, encounter.difficulty_delta)
+        if len({(e.tactic, e.difficulty_delta) for e in world.encounters}) < 2:
+            raise ValueError("distinct choices must change the TRAIN encounter")
+        # A raw shift differs from another shift yet can disappear at the
+        # difficulty clamps (e.g. level 5 with 0 vs +1). Reject even these
+        # latent equivalences, because the model world must *always* provide
+        # meaningfully different source-controlled TRAIN exposure for distinct
+        # entrance choices, regardless of live policy adjustment.
+        for allowed_baseline in range(1, 6):
+            normalized = {
+                (e.tactic, max(1, min(5, allowed_baseline + e.difficulty_delta)))
+                for e in world.encounters
+            }
+            if len(normalized) != len(world.encounters):
+                raise ValueError("model world branches collapse to the same TRAIN encounter")
+    # Bind graph structure and bounded pedagogical consequences to the world
+    # fingerprint, never the cosmetic prose. Legacy non-pedagogical proposals
+    # retain their preexisting topology hash.
+    structure = sorted((node.node_id, sorted(node.exits)) for node in world.nodes)
+    if world.encounters:
+        encoded_subject = {
+            "graph": structure,
+            "train_encounters": sorted(
+                (e.branch_node_id, e.tactic, e.difficulty_delta)
+                for e in world.encounters
+            ),
+        }
+    else:
+        encoded_subject = structure
+    encoded = json.dumps(encoded_subject, separators=(",", ":"),
+                         sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -230,6 +290,32 @@ class ExamPressure:
 
 
 @dataclass(frozen=True)
+class ExamCoveragePolicy:
+    """Operator-owned exam intensity declared independent of skill narrowness.
+
+    For arithmetic DEVELOPMENT_ONLY the source scorer always requires both
+    heldout and narrative transfer splits (four fresh cases per split). A
+    numeric lower bound must be explicitly chosen for the actual objective;
+    the untrusted Minotaur cannot relax it in response to observed weaknesses.
+    """
+
+    minimum_difficulty: int
+
+    def __post_init__(self) -> None:
+        if type(self.minimum_difficulty) is not int or not 1 <= self.minimum_difficulty <= 5:
+            raise ValueError("operator arithmetic exam difficulty must be in [1, 5]")
+
+
+@dataclass(frozen=True)
+class PedagogicalOutcome:
+    """Public TRAIN aggregate that can guide the next development pressure."""
+
+    tactic: str
+    difficulty: int
+    correct: bool
+
+
+@dataclass(frozen=True)
 class ExamPressureContext:
     objective_id: str
     cycle_index: int
@@ -237,6 +323,8 @@ class ExamPressureContext:
     weak_skills: tuple[str, ...]
     baseline_correct: int
     baseline_count: int
+    prior_training_outcomes: tuple[PedagogicalOutcome, ...] = ()
+    minimum_difficulty: int = 1
 
 
 @dataclass(frozen=True)
@@ -250,6 +338,7 @@ class ExaminerRequest:
     baseline_sha256: str
     pressure: ExamPressure
     fresh_seed: int
+    minimum_difficulty: int = 1
 
 
 @dataclass(frozen=True)
@@ -306,8 +395,12 @@ class OperatorArithmeticDevelopmentExaminer:
         if type(request) is not ExaminerRequest or not callable(predict):
             raise ValueError("exact developmental examiner request and prediction callback required")
         pressure = request.pressure
+        if (type(request.minimum_difficulty) is not int
+                or not 1 <= request.minimum_difficulty <= 5):
+            raise ValueError("operator minimum exam difficulty must be in [1, 5]")
         if (type(pressure) is not ExamPressure or pressure.focus_skill != "arithmetic"
                 or type(pressure.difficulty) is not int or not 1 <= pressure.difficulty <= 5
+                or pressure.difficulty < request.minimum_difficulty
                 or pressure.tactic not in ("holdout", "transfer", "mixed")):
             raise ValueError("unsupported arithmetic development pressure")
         # Domain separate from TRAIN routing and from a second development
@@ -358,13 +451,20 @@ class SagaSession:
         self, scope: TrainingScopeSpec, *, learner: SagaLearner,
         checkpoint: CheckpointPaths, baseline_train_cases: tuple[Challenge, ...],
         scene_director: SceneDirector, minotaur_director: MinotaurDirector,
-        examiner: DevelopmentExaminer, action_budget: int = 64,
+        examiner: DevelopmentExaminer, exam_coverage_policy: ExamCoveragePolicy,
+        action_budget: int = 64,
+        require_pedagogical_encounters: bool = True,
     ) -> None:
         if type(scope) is not TrainingScopeSpec or scope.skills != ("arithmetic",):
             raise ValueError("first live saga episode supports arithmetic TRAIN only")
         TrainingScopeSpec.__post_init__(scope)
+        if type(exam_coverage_policy) is not ExamCoveragePolicy:
+            raise ValueError("explicit operator-owned exam coverage policy is required")
+        ExamCoveragePolicy.__post_init__(exam_coverage_policy)
         if type(action_budget) is not int or not 6 <= action_budget <= 512:
             raise ValueError("action budget must be in [6, 512]")
+        if type(require_pedagogical_encounters) is not bool:
+            raise ValueError("pedagogical encounters strictness must be a boolean")
         if (type(baseline_train_cases) is not tuple
                 or not 2 <= len(baseline_train_cases) <= 16
                 or any(type(case) is not Challenge or case.split != "train"
@@ -385,7 +485,9 @@ class SagaSession:
         self.scene_director = scene_director
         self.minotaur_director = minotaur_director
         self.examiner = examiner
+        self.exam_coverage_policy = exam_coverage_policy
         self.action_budget = action_budget
+        self.require_pedagogical_encounters = require_pedagogical_encounters
         self.action_count = 0
         self.terminated = False
         self.truncated = False
@@ -427,7 +529,7 @@ class SagaSession:
         self.runner = TrainingCorridorRunner.begin(
             scope, self.journey.maze, checkpoint_sha256=self.checkpoint.weights_sha256,
         )
-        self._completed_train_correct: list[bool] = []
+        self._public_training_history: list[PedagogicalOutcome] = []
         self._cycle_first_topology: dict[int, str] = {}
         self._exam_attempt = 0
         self._prepare_world()
@@ -441,19 +543,31 @@ class SagaSession:
         verify_saga_ariadne(self.ariadne_events)
 
     def _prepare_world(self) -> None:
-        self.view = self.runner.next_training_prompt()
+        # Preview the authorized next assignment without generating or
+        # exposing its TRAIN task. The path actually walked will now select
+        # the approved tactic/difficulty before source-owned case creation.
+        preview = offer_next_chamber(self.runner.state).pending
+        if preview is None:
+            raise ValueError("a living world needs an authorized next chamber")
+        self.view = None
+        recent_outcomes = tuple(self._public_training_history[-_PUBLIC_OUTCOME_WINDOW:])
         context = SceneRequest(
             objective_id=self.scope.objective_id, domain=self.scope.domain,
-            skill=self.view.skill, cycle_index=self.journey.cycle_index,
+            skill=preview.skill, cycle_index=self.journey.cycle_index,
             room_index=len(self.runner.observations), specificity=self.scope.specificity,
             weak_skills=(self.journey.attempts[-1].weak_skills if self.journey.attempts else ()),
-            prior_training_correct=tuple(self._completed_train_correct),
+            prior_training_correct=tuple(item.correct for item in recent_outcomes),
             public_seed=int.from_bytes(hashlib.sha256(
                 ("labyrinth-original-world-v1\x1f" + self.scope.fingerprint + "\x1f"
-                 + str(self.journey.cycle_index) + "\x1f" + self.view.room_id).encode()
+                 + str(self.journey.cycle_index) + "\x1f" + preview.room_id).encode()
             ).digest()[:8], "big"),
+            prior_training_tactics=tuple(item.tactic for item in recent_outcomes),
+            prior_training_outcomes=recent_outcomes,
         )
         world = self.scene_director.propose_world(context)
+        if (type(world) is WorldProposal and self.require_pedagogical_encounters
+                and not world.encounters):
+            raise ValueError("living labyrinth requires consequential pedagogical encounters")
         topology = _check_world(world)
         cycle = self.journey.cycle_index
         if cycle not in self._cycle_first_topology:
@@ -462,11 +576,18 @@ class SagaSession:
             self._cycle_first_topology[cycle] = topology
         self.world = world
         self.nodes = {node.node_id: node for node in world.nodes}
+        self._encounter_by_branch = {
+            encounter.branch_node_id: PedagogicalRoute(
+                encounter.tactic, encounter.difficulty_delta,
+            ) for encounter in world.encounters
+        }
+        self._selected_route = None
+        self._selected_branch = None
         self.location = "threshold"
         self.phase = "EXPLORE"
         self._record("scene", cycle, self.checkpoint.weights_sha256,
                      self.checkpoint.weights_sha256, {
-                         "skill": self.view.skill,
+                         "skill": preview.skill,
                          "room_index": len(self.runner.observations),
                          "topology_sha256": topology,
                      })
@@ -500,6 +621,8 @@ class SagaSession:
     def _train(self) -> StepResult:
         # Only the prompt-only view is provided to prediction. The trusted
         # operator-side update gets TRAIN supervision *after* prediction.
+        if type(self._selected_branch) is not str or self._selected_branch not in self.nodes:
+            raise ValueError("TRAIN lacks a recorded chosen world branch")
         view = self.view
         response = self.learner.predict(view.prompt)
         if type(response) is not str or len(response) > 4096:
@@ -532,7 +655,9 @@ class SagaSession:
             self._used_optimizer_paths.add(successor.optimizer_path)
         self.checkpoint = successor
         self.checkpoint_refs.append(successor)
-        self._completed_train_correct.append(outcome.correct)
+        self._public_training_history.append(PedagogicalOutcome(
+            outcome.tactic, outcome.difficulty, outcome.correct,
+        ))
         self.training_sparks.append(TrainingSpark(
             cycle_index=self.journey.cycle_index,
             room_index=len(self.runner.observations) - 1,
@@ -547,6 +672,10 @@ class SagaSession:
                          "policy_before_sha256": outcome.policy_before_sha256,
                          "policy_after_sha256": outcome.policy_after_sha256,
                          "checkpoint_path": successor.weights_path,
+                         "branch_node_id": self._selected_branch,
+                         "train_tactic": outcome.tactic,
+                         "train_difficulty": outcome.difficulty,
+                         "train_prompt_sha256": view.prompt_sha256,
                      })
         if self.runner.is_complete:
             receipt = self.runner.self_reported_completion_receipt()
@@ -578,18 +707,31 @@ class SagaSession:
                 raise ValueError(reason)
 
     def _face_minotaur(self) -> StepResult:
+        recent_outcomes = tuple(self._public_training_history[-_PUBLIC_OUTCOME_WINDOW:])
         context = ExamPressureContext(
             objective_id=self.scope.objective_id, cycle_index=self.journey.cycle_index,
             skills=self.scope.skills,
             weak_skills=self.journey.attempts[-1].weak_skills if self.journey.attempts else (),
             baseline_correct=self.entrance.baseline.correct_count,
             baseline_count=self.entrance.baseline.case_count,
+            prior_training_outcomes=recent_outcomes,
+            minimum_difficulty=self.exam_coverage_policy.minimum_difficulty,
         )
-        pressure = self.minotaur_director.propose_pressure(context)
-        if (type(pressure) is not ExamPressure or pressure.focus_skill not in self.scope.skills
-                or type(pressure.difficulty) is not int or not 1 <= pressure.difficulty <= 5
-                or pressure.tactic not in ("holdout", "transfer", "mixed")):
+        proposed_pressure = self.minotaur_director.propose_pressure(context)
+        if (type(proposed_pressure) is not ExamPressure
+                or proposed_pressure.focus_skill not in self.scope.skills
+                or type(proposed_pressure.difficulty) is not int
+                or not 1 <= proposed_pressure.difficulty <= 5
+                or proposed_pressure.tactic not in ("holdout", "transfer", "mixed")):
             raise ValueError("invalid Minotaur pressure proposal")
+        # Difficulty coverage is operator-owned by the explicit exam rubric,
+        # not training specificity (which measures scope narrowness). The
+        # Minotaur may intensify but never relax this owner-set requirement.
+        pressure = ExamPressure(
+            proposed_pressure.focus_skill,
+            max(self.exam_coverage_policy.minimum_difficulty, proposed_pressure.difficulty),
+            proposed_pressure.tactic,
+        )
         exam_seed = int.from_bytes(hashlib.sha256(
             ("labyrinth-operator-development-exam-v1\x1f" + self.scope.fingerprint
              + "\x1f" + str(self.journey.cycle_index) + "\x1f"
@@ -599,6 +741,7 @@ class SagaSession:
             self.scope.objective_id, self.scope.fingerprint,
             self.journey.cycle_index, self.checkpoint.weights_sha256,
             self.entrance.checkpoint.weights_sha256, pressure, exam_seed,
+            minimum_difficulty=self.exam_coverage_policy.minimum_difficulty,
         )
         self._exam_attempt += 1
         receipt = self.examiner.assess(request, self.learner.predict)
@@ -625,7 +768,6 @@ class SagaSession:
                      })
         if updated.phase == TRAINING:
             self.runner = self.runner.regenerate(updated)
-            self._completed_train_correct.clear()
             self._record("regeneration", updated.cycle_index,
                          self.checkpoint.weights_sha256, self.checkpoint.weights_sha256, {
                              "weak_skills": list(decision.weak_skills),
@@ -680,6 +822,18 @@ class SagaSession:
         if action == "train":
             return self._train()
         next_node = dict(self.nodes[self.location].exits)[action]
+        if self.location == "threshold":
+            self._selected_route = self._encounter_by_branch.get(next_node)
+            self._selected_branch = next_node
+        if next_node == "chamber" and self.view is None:
+            old_development_status = self.development_status
+            # Source-side task admission/registry updates are effects too:
+            # a partial failure must not be retried as a fresh prompt.
+            self.indeterminate = True
+            self.development_status = "INDETERMINATE"
+            self.view = self.runner.next_training_prompt(route=self._selected_route)
+            self.indeterminate = False
+            self.development_status = old_development_status
         self.location = next_node
         return self._result("MOVE", self.nodes[next_node].prose)
 
@@ -729,7 +883,7 @@ class SagaSession:
 
 __all__ = [
     "BaselineMeasurement", "CheckpointPaths", "CheckpointRef", "EntranceState", "TrainingSpark",
-    "SceneRequest", "SceneNode", "WorldProposal", "ExamPressure", "ExamPressureContext",
+    "SceneRequest", "SceneNode", "PedagogicalEncounter", "WorldProposal", "ExamPressure", "ExamCoveragePolicy", "ExamPressureContext", "PedagogicalOutcome",
     "ExaminerRequest", "StepResult", "SagaSession", "capture_checkpoint",
     "OperatorArithmeticDevelopmentExaminer",
 ]

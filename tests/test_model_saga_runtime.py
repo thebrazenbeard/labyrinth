@@ -11,10 +11,10 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from labyrinth.maze import Challenge
-from labyrinth.minotaur_exam import ExamCaseResult, MinotaurExamReceipt
+from labyrinth.minotaur_exam import ExamCaseResult, MinotaurExamReceipt, evaluate_minotaur
 from labyrinth.model_saga_runtime import (
-    CheckpointPaths, ExamPressure, ExaminerRequest,
-    OperatorArithmeticDevelopmentExaminer, SagaSession, SceneNode,
+    CheckpointPaths, ExamPressure, ExamCoveragePolicy, ExaminerRequest,
+    OperatorArithmeticDevelopmentExaminer, PedagogicalEncounter, SagaSession, SceneNode,
     WorldProposal, capture_checkpoint,
 )
 from labyrinth.saga_ariadne import (
@@ -73,6 +73,20 @@ class GeneratedDirector:
                       (("forward", "chamber"),) +
                       (("back", "threshold"),) if not context.cycle_index else (("forward", "chamber"),)),
             SceneNode("chamber", "A training chamber, not a private examination.", ()),
+        ), encounters=(
+            PedagogicalEncounter("archive", "contrast", 1),
+            PedagogicalEncounter("forge", "transfer", -1),
+        ))
+
+
+class ConsequentialDirector(GeneratedDirector):
+    """Model routes offer different, source-owned ways to learn the same skill."""
+
+    def propose_world(self, context):
+        base = super().propose_world(context)
+        return replace(base, encounters=(
+            PedagogicalEncounter("archive", "contrast", 1),
+            PedagogicalEncounter("forge", "transfer", -1),
         ))
 
 
@@ -114,6 +128,221 @@ class OperatorExaminer:
 
 
 class SagaSessionTests(unittest.TestCase):
+    def test_model_created_world_must_causally_shape_training_by_default(self):
+        class CosmeticDirector(GeneratedDirector):
+            def propose_world(self, context):
+                return replace(super().propose_world(context), encounters=())
+
+        with TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "requires consequential pedagogical"):
+                self.make_session(Path(tmp), director=CosmeticDirector())
+        # A caller deliberately invoking the obsolete decorative mode can
+        # still reproduce historical sessions; it is not the living default.
+        with TemporaryDirectory() as tmp:
+            learner = FileLearner(Path(tmp))
+            scope = TrainingScopeSpec("old-story", "arithmetic", ("arithmetic",), 2, 1, 2, 19)
+            session = SagaSession(
+                scope, learner=learner, checkpoint=learner.initial,
+                baseline_train_cases=(_case(0), _case(1)),
+                scene_director=CosmeticDirector(), minotaur_director=PressureModel(),
+                examiner=OperatorExaminer(), exam_coverage_policy=ExamCoveragePolicy(2),
+                require_pedagogical_encounters=False,
+            )
+            self.assertFalse(session.world.encounters)
+
+    def test_pedagogical_path_feedback_reaches_daedalus_and_minotaur_without_gold(self):
+        class ResponsivePressure(PressureModel):
+            def propose_pressure(self, context):
+                self.contexts.append(context)
+                tactic = context.prior_training_outcomes[0].tactic
+                return ExamPressure("arithmetic", 4 if tactic == "contrast" else 2, "mixed")
+
+        results = {}
+        for branch in ("left", "right"):
+            with TemporaryDirectory() as tmp:
+                director = ConsequentialDirector()
+                session, _, _, examiner = self.make_session(Path(tmp), director=director)
+                session.minotaur_director = ResponsivePressure()
+                session.step(branch)
+                session.step("forward")
+                first_tactic = session.runner.training_registry[-1].tactic
+                session.step("train")
+                self.assertEqual(director.requests[-1].prior_training_tactics, (first_tactic,))
+                session.step("right")
+                session.step("forward")
+                session.step("train")
+                self.assertEqual(session.phase, "MINOTAUR")
+                session.step("face")
+                pressure_context = session.minotaur_director.contexts[-1]
+                self.assertEqual(pressure_context.prior_training_outcomes[0].tactic,
+                                 first_tactic)
+                self.assertTrue(all(type(item.correct) is bool
+                                    for item in pressure_context.prior_training_outcomes))
+                self.assertNotIn("ANSWER:", repr(pressure_context))
+                self.assertNotIn("case_id", repr(pressure_context))
+                results[branch] = examiner.requests[-1].pressure.difficulty
+        self.assertEqual(results, {"left": 4, "right": 2})
+
+    def test_failed_pedagogical_task_materialization_cannot_be_retried(self):
+        with TemporaryDirectory() as tmp:
+            session, _, _, _ = self.make_session(Path(tmp), director=ConsequentialDirector())
+            session.step("left")
+
+            def partial_failure(*, route):
+                raise RuntimeError("source TRAIN admission failed ambiguously")
+
+            session.runner.next_training_prompt = partial_failure
+            with self.assertRaisesRegex(RuntimeError, "admission failed"):
+                session.step("forward")
+            self.assertTrue(session.indeterminate)
+            self.assertEqual(session.observe().available_actions, ())
+            with self.assertRaisesRegex(ValueError, "indeterminate training"):
+                session.step("forward")
+            with self.assertRaisesRegex(ValueError, "indeterminate training"):
+                session.save_receipt_new(Path(tmp) / "false-progress.json")
+
+    def test_world_branch_choice_changes_actual_approved_train_challenge(self):
+        with TemporaryDirectory() as left_tmp, TemporaryDirectory() as right_tmp:
+            left, _, _, _ = self.make_session(Path(left_tmp), director=ConsequentialDirector())
+            right, _, _, _ = self.make_session(Path(right_tmp), director=ConsequentialDirector())
+            # The source-owned challenge must not exist before the learner
+            # actually chooses a route in the model-created world.
+            self.assertIsNone(left.view)
+            self.assertIsNone(right.view)
+            self.assertEqual(left.runner.training_registry, ())
+            self.assertEqual(right.runner.training_registry, ())
+            left.step("left")
+            left.step("forward")
+            right.step("right")
+            right.step("forward")
+            self.assertIn("Expression A", left.view.prompt)
+            self.assertIn("workshop", right.view.prompt.lower())
+            self.assertNotEqual(left.view.prompt_sha256, right.view.prompt_sha256)
+            self.assertEqual(left.runner.training_registry[-1].tactic, "contrast")
+            self.assertEqual(right.runner.training_registry[-1].tactic, "transfer")
+            self.assertNotEqual(left.runner.training_registry[-1].difficulty,
+                                right.runner.training_registry[-1].difficulty)
+            self.assertEqual(left.runner.operator_pending_train_case(left.view).split, "train")
+            self.assertEqual(right.runner.operator_pending_train_case(right.view).split, "train")
+            left_result = left.step("train")
+            right_result = right.step("train")
+            self.assertEqual(left_result.event, "TRAIN_COMPLETED")
+            self.assertEqual(right_result.event, "TRAIN_COMPLETED")
+            for session, expected_branch, expected_tactic in (
+                (left, "archive", "contrast"),
+                (right, "forge", "transfer"),
+            ):
+                train_receipt = next(event["summary"] for event in session.ariadne_events
+                                     if event["kind"] == "train")
+                self.assertEqual(train_receipt["branch_node_id"], expected_branch)
+                self.assertEqual(train_receipt["train_tactic"], expected_tactic)
+                self.assertEqual(train_receipt["train_prompt_sha256"],
+                                 session.runner.observations[0].prompt_sha256)
+                self.assertEqual(train_receipt["train_difficulty"],
+                                 session.runner.observations[0].difficulty)
+            for session in (left, right):
+                self.assertNotEqual(session.training_sparks[0].after.weights_sha256,
+                                    session.entrance.checkpoint.weights_sha256)
+            # No behavior-based improvement is claimed: the test learner
+            # gives the same wrong answer in both counterfactuals.
+            self.assertFalse(left.training_sparks[0].train_correct)
+            self.assertFalse(right.training_sparks[0].train_correct)
+            self.assertNotEqual(left.ariadne_events[-2]["summary"]["policy_after_sha256"],
+                                right.ariadne_events[-2]["summary"]["policy_after_sha256"])
+
+    def test_representation_transfer_is_real_modality_not_claimed_new_arithmetic(self):
+        class RepresentationDirector(GeneratedDirector):
+            def propose_world(self, context):
+                return replace(super().propose_world(context), encounters=(
+                    PedagogicalEncounter("archive", "practice", 0),
+                    PedagogicalEncounter("forge", "transfer", 0),
+                ))
+
+        with TemporaryDirectory() as one, TemporaryDirectory() as two:
+            left, _, _, _ = self.make_session(Path(one), director=RepresentationDirector())
+            right, _, _, _ = self.make_session(Path(two), director=RepresentationDirector())
+            for session, choice in ((left, "left"), (right, "right")):
+                session.step(choice)
+                session.step("forward")
+            self.assertNotEqual(left.view.prompt_sha256, right.view.prompt_sha256)
+            self.assertEqual(left.runner.training_registry[-1].tactic, "practice")
+            self.assertEqual(right.runner.training_registry[-1].tactic, "transfer")
+            # Presentation/modality differs, but the operator must not infer
+            # a novel arithmetic computation or neural learning from that.
+            self.assertIn("Calculate", left.view.prompt)
+            self.assertIn("workshop", right.view.prompt.lower())
+
+    def test_lived_train_outcomes_survive_failed_minotaur_into_regenerated_world(self):
+        with TemporaryDirectory() as tmp:
+            session, _, director, _ = self.make_session(Path(tmp), director=ConsequentialDirector())
+            for choice in ("left", "right"):
+                session.step(choice)
+                session.step("forward")
+                session.step("train")
+            self.assertEqual(session.phase, "MINOTAUR")
+            session.step("face")  # Synthetic examiner fails cycle 0.
+            cycle_one_context = next(req for req in director.requests if req.cycle_index == 1)
+            self.assertEqual(cycle_one_context.prior_training_tactics,
+                             ("contrast", "transfer"))
+            self.assertEqual(cycle_one_context.prior_training_correct, (False, False))
+            self.assertEqual(len(cycle_one_context.prior_training_outcomes), 2)
+            self.assertEqual([item.difficulty for item in cycle_one_context.prior_training_outcomes],
+                             [3, 1])
+            self.assertNotIn("ANSWER:", repr(cycle_one_context))
+            self.assertNotIn("case_id", repr(cycle_one_context))
+
+    def test_minotaur_cannot_lower_operator_owned_exam_difficulty_floor(self):
+        with TemporaryDirectory() as tmp:
+            session, _, _, examiner = self.make_session(
+                Path(tmp), director=ConsequentialDirector(),
+                specificity=1, exam_floor=5,
+            )
+            session.minotaur_director = PressureModel()  # Proposes difficulty 1.
+            while session.phase != "MINOTAUR":
+                session.step("left")
+                session.step("forward")
+                session.step("train")
+            context = session.minotaur_director.contexts
+            self.assertEqual(context, [])
+            session.step("face")
+            self.assertEqual(context[-1].minimum_difficulty, 5)
+            self.assertEqual(examiner.requests[-1].minimum_difficulty, 5)
+            self.assertEqual(examiner.requests[-1].pressure.difficulty, 5)
+            verdict = next(event for event in session.ariadne_events if event["kind"] == "verdict")
+            self.assertEqual(verdict["summary"]["pressure_difficulty"], 5)
+
+    def test_world_rejects_unsafe_or_nonconsequential_pedagogical_proposals(self):
+        class InvalidEncounterDirector(GeneratedDirector):
+            def __init__(self, variant):
+                super().__init__()
+                self.variant = variant
+
+            def propose_world(self, context):
+                world = super().propose_world(context)
+                good = PedagogicalEncounter("archive", "contrast", 1)
+                second = PedagogicalEncounter("forge", "transfer", -1)
+                variants = {
+                    "unapproved_tactic": (good, replace(second, tactic="graduate")),
+                    "gold_injection": (good, replace(second, tactic="ANSWER: 42")),
+                    "unbounded_difficulty": (good, replace(second, difficulty_delta=9)),
+                    "missing_branch": (good,),
+                    "duplicate_branch": (good, replace(second, branch_node_id="archive")),
+                    "cosmetic_only": (good, replace(second, tactic="contrast", difficulty_delta=1)),
+                    "clamped_same_tactic": (
+                        PedagogicalEncounter("archive", "practice", 0),
+                        PedagogicalEncounter("forge", "practice", 1),
+                    ),
+                    "nonbranch": (good, replace(second, branch_node_id="chamber")),
+                }
+                return replace(world, encounters=variants[self.variant])
+
+        for variant in ("unapproved_tactic", "gold_injection", "unbounded_difficulty",
+                        "missing_branch", "duplicate_branch", "cosmetic_only",
+                        "clamped_same_tactic", "nonbranch"):
+            with self.subTest(variant=variant), TemporaryDirectory() as tmp:
+                with self.assertRaises(ValueError):
+                    self.make_session(Path(tmp), director=InvalidEncounterDirector(variant))
+
     def test_ariadne_path_accepts_lappy_drive_but_not_relative_or_unc(self):
         self.assertTrue(_is_local_absolute_checkpoint_path(r"D:\VERA\models\w0.bin"))
         self.assertTrue(_is_local_absolute_checkpoint_path("/tmp/weights/w0.bin"))
@@ -132,19 +361,21 @@ class SagaSessionTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 _validate_summary("entrance", {**valid_summary, "checkpoint_path": invalid})
 
-    def make_session(self, root: Path, *, budget: int = 64, director=None, examiner=None):
+    def make_session(self, root: Path, *, budget: int = 64, director=None, examiner=None,
+                     specificity: int = 2, exam_floor: int = 2):
         learner = FileLearner(root)
         director = director or GeneratedDirector()
         examiner = examiner or OperatorExaminer()
         scope = TrainingScopeSpec(
             objective_id="model-saga", domain="arithmetic", skills=("arithmetic",),
-            specificity=2, scale=1, max_cycles=2, seed=19,
+            specificity=specificity, scale=1, max_cycles=2, seed=19,
         )
         session = SagaSession(
             scope, learner=learner, checkpoint=learner.initial,
             baseline_train_cases=(_case(0), _case(1)),
             scene_director=director, minotaur_director=PressureModel(),
-            examiner=examiner, action_budget=budget,
+            examiner=examiner, exam_coverage_policy=ExamCoveragePolicy(exam_floor),
+            action_budget=budget,
         )
         return session, learner, director, examiner
 
@@ -261,9 +492,10 @@ class SagaSessionTests(unittest.TestCase):
     def test_rejects_branch_that_is_reachable_but_cannot_reach_training(self):
         class DeadEndDirector:
             def propose_world(self, context):
-                nodes = list(GeneratedDirector().propose_world(context).nodes)
+                original = GeneratedDirector().propose_world(context)
+                nodes = list(original.nodes)
                 nodes[2] = replace(nodes[2], exits=())
-                return WorldProposal(tuple(nodes))
+                return replace(original, nodes=tuple(nodes))
 
         with TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(ValueError, "every narrative branch must have a route"):
@@ -284,6 +516,12 @@ class SagaSessionTests(unittest.TestCase):
             self.assertEqual(kinds[0], "entrance")
             self.assertEqual(kinds[-1], "exit")
             self.assertEqual(kinds.count("train"), len(learner.training_targets))
+            train_summaries = [event["summary"] for event in session.ariadne_events
+                               if event["kind"] == "train"]
+            self.assertEqual({item["branch_node_id"] for item in train_summaries}, {"forge"})
+            self.assertEqual({item["train_tactic"] for item in train_summaries}, {"transfer"})
+            self.assertTrue(all(len(item["train_prompt_sha256"]) == 64
+                                for item in train_summaries))
             self.assertEqual(kinds.count("verdict"), 2)
             self.assertEqual(kinds.count("regeneration"), 1)
             self.assertEqual(session.ariadne_events[0]["summary"]["baseline_correct"], 0)
@@ -299,6 +537,18 @@ class SagaSessionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "chain/content mismatch"):
                 verify_saga_ariadne(altered)
             altered = deepcopy(session.ariadne_events)
+            actual_train = next(item for item in altered if item["kind"] == "train")
+            actual_train["summary"]["branch_node_id"] = "archive"
+            with self.assertRaisesRegex(ValueError, "chain/content mismatch"):
+                verify_saga_ariadne(altered)
+            altered = deepcopy(session.ariadne_events)
+            actual_train = next(item for item in altered if item["kind"] == "train")
+            del actual_train["summary"]["train_prompt_sha256"]
+            with self.assertRaisesRegex(ValueError, "chain/content mismatch"):
+                verify_saga_ariadne(altered)
+            with self.assertRaisesRegex(ValueError, "invalid or incomplete"):
+                _validate_summary("train", actual_train["summary"])
+            altered = deepcopy(session.ariadne_events)
             altered[-1]["parent_sha256"] = "0" * 64
             with self.assertRaisesRegex(ValueError, "chain/content mismatch"):
                 verify_saga_ariadne(altered)
@@ -310,6 +560,17 @@ class SagaSessionTests(unittest.TestCase):
             self.assertEqual(len(saved["checkpoint_manifest"]), len(session.checkpoint_refs))
             with self.assertRaises(FileExistsError):
                 session.save_receipt_new(report_path)
+
+    def test_old_v1_ariadne_train_summary_still_validates_without_route_fields(self):
+        historical_summary = {
+            "skill": "arithmetic", "room_index": 0, "train_correct": False,
+            "policy_before_sha256": "0" * 64,
+            "policy_after_sha256": "1" * 64,
+            "checkpoint_path": "/tmp/weights-1.bin",
+        }
+        _validate_summary("train", historical_summary)
+        with self.assertRaisesRegex(ValueError, "invalid or incomplete"):
+            _validate_summary("train", {**historical_summary, "branch_node_id": "forge"})
 
     def test_export_rejects_later_external_checkpoint_mutation(self):
         with TemporaryDirectory() as tmp:
@@ -436,6 +697,45 @@ class SagaSessionTests(unittest.TestCase):
         )
         self.assertEqual({case.split for case in low.cases}, {"heldout", "transfer"})
         self.assertTrue(all(case.prompt_sha256 and not hasattr(case, "answer") for case in low.cases))
+        with self.assertRaisesRegex(ValueError, "unsupported arithmetic development pressure"):
+            examiner.assess(replace(base, minimum_difficulty=5), exact_arithmetic)
+
+    def test_easy_pressure_would_false_pass_weak_model_but_coverage_policy_prevents_it(self):
+        def weak_single_digit_predict(prompt: str) -> str:
+            match = re.match(r"Compute (\d+) ([+-]) (\d+)\.", prompt)
+            if match:
+                a, operation, b = int(match[1]), match[2], int(match[3])
+            else:
+                match = re.match(
+                    r"A vessel carries (\d+) units, then (receives|spends) (\d+) units",
+                    prompt,
+                )
+                if not match:
+                    return "ANSWER: invalid"
+                a, operation, b = int(match[1]), match[2], int(match[3])
+            if a > 9 or b > 9:
+                return "ANSWER: invalid"
+            result = a + b if operation in ("+", "receives") else a - b
+            return f"ANSWER: {result}"
+
+        scope = TrainingScopeSpec("weak-exam", "arithmetic", ("arithmetic",), 1, 1, 2, 61)
+        examiner = OperatorArithmeticDevelopmentExaminer(lambda prompt: "ANSWER: invalid")
+        request = ExaminerRequest(
+            scope.objective_id, scope.fingerprint, 0, "b" * 64, "a" * 64,
+            ExamPressure("arithmetic", 1, "mixed"), 781,
+        )
+        weak_exposure = examiner.assess(request, weak_single_digit_predict)
+        self.assertEqual(evaluate_minotaur(scope, weak_exposure).status, "PASS")
+        # This is why the Minotaur may not unilaterally set exam difficulty.
+        # A separately declared operator coverage floor of 5 prevents the
+        # same weak predictor from obtaining this misleading easy-exam PASS.
+        with self.assertRaisesRegex(ValueError, "unsupported arithmetic development pressure"):
+            examiner.assess(replace(request, minimum_difficulty=5), weak_single_digit_predict)
+        mandatory = examiner.assess(replace(
+            request, pressure=ExamPressure("arithmetic", 5, "mixed"),
+            minimum_difficulty=5,
+        ), weak_single_digit_predict)
+        self.assertEqual(evaluate_minotaur(scope, mandatory).status, "FAIL")
 
 
 if __name__ == "__main__":
