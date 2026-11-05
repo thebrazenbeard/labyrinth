@@ -126,6 +126,10 @@ def _parser() -> argparse.ArgumentParser:
     journey_controls.add_argument("--epochs-by-cycle", help="Comma-separated positive epochs, one per cycle (default: 4 each)")
     journey_controls.add_argument("--learning-rate", type=float, default=0.5)
     journey_controls.add_argument("--report", metavar="JSON", help="Exclusively create JSON control receipts")
+    chronicle = subcommands.add_parser(
+        "journey-chronicle", help="Read a toy development report as a bounded Labyrinth chronicle"
+    )
+    chronicle.add_argument("--input", required=True, metavar="JSON", help="Existing toy-journey report")
     return parser
 
 
@@ -193,6 +197,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "audit-report":
             report = audit_report(load_json(args.input, strict=True),
                                   artifact=load_json(args.artifact, strict=True) if args.artifact else None)
+        elif args.command == "journey-chronicle":
+            from .saga_narrative import render_journey_chronicle
+
+            print(render_journey_chronicle(load_json(args.input, strict=True)))
+            return 0
         elif args.command == "audit-hf-report":
             report = audit_hf_report(load_json(args.input, strict=True), allow_legacy=args.allow_legacy)
         elif args.command == "train-toy":

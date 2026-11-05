@@ -7,6 +7,7 @@ campaign state writes, graduation authority, or Vera activation.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Any, Sequence
 
 from .minotaur_algebraic_eval_v5 import (
@@ -22,6 +23,15 @@ def _refusal(reason: str) -> dict[str, Any]:
         "disposition":"REFUSED", "reason":reason,
         "qualification":"NOT_ESTABLISHED", "graduation_authority":"none",
     }
+
+
+@contextmanager
+def _restore_training_mode(head: Any, was_training: bool):
+    """Always attempt restoration; an error is caught by the caller's refusal path."""
+    try:
+        yield
+    finally:
+        head.train(was_training)
 
 
 def evaluate_compact_public(
@@ -71,9 +81,16 @@ def evaluate_compact_public(
         )
         if preview_program["disposition"]!="SCORED":
             return _refusal("independent_evaluator_refused")
-    if not hasattr(head,"predict") or not hasattr(head,"eval"):
+    try:
+        # Validate every mode method used below before invoking the model.
+        was_training=getattr(head,"training",None)
+        if (not callable(getattr(head,"predict",None))
+                or not callable(getattr(head,"eval",None))
+                or not callable(getattr(head,"train",None))
+                or type(was_training) is not bool):
+            return _refusal("unsupported_neural_head")
+    except Exception:
         return _refusal("unsupported_neural_head")
-    was_training=head.training
 
     def neural_predict(op: str,x: int,y: int) -> int:
         if (type(op) is not str or op not in _OPS
@@ -95,39 +112,39 @@ def evaluate_compact_public(
         return value
 
     try:
-        head.eval()
-        with torch.no_grad():
-            # Recheck public oracle claims before invoking predictions.
-            # The independent evaluator rejects forged labels or malformed IDs.
-            preview=evaluate_atomic_predictions(
-                atomic_cases,{case.case_id:None for case in atomic_cases},
-                training_atoms=training,
-            )
-            if preview["disposition"]!="SCORED":
-                return _refusal("independent_evaluator_refused")
-            predictions={
-                case.case_id:neural_predict(case.op,case.x,case.y)
-                for case in atomic_cases
-            }
-            atomic=evaluate_atomic_predictions(
-                atomic_cases,predictions,training_atoms=training,
-            )
-            if atomic["disposition"]!="SCORED":
-                return _refusal("independent_evaluator_refused")
-            if program_cases:
-                program=evaluate_program_rollouts(program_cases,neural_predict)
-                if program["disposition"]!="SCORED":
+        with _restore_training_mode(head,was_training):
+            head.eval()
+            with torch.no_grad():
+                # Recheck public oracle claims before invoking predictions.
+                # The independent evaluator rejects forged labels or malformed IDs.
+                preview=evaluate_atomic_predictions(
+                    atomic_cases,{case.case_id:None for case in atomic_cases},
+                    training_atoms=training,
+                )
+                if preview["disposition"]!="SCORED":
                     return _refusal("independent_evaluator_refused")
-            else:
-                program={"disposition":"NOT_EVALUATED",
-                         "qualification":"NOT_ESTABLISHED",
-                         "graduation_authority":"none"}
+                predictions={
+                    case.case_id:neural_predict(case.op,case.x,case.y)
+                    for case in atomic_cases
+                }
+                atomic=evaluate_atomic_predictions(
+                    atomic_cases,predictions,training_atoms=training,
+                )
+                if atomic["disposition"]!="SCORED":
+                    return _refusal("independent_evaluator_refused")
+                if program_cases:
+                    program=evaluate_program_rollouts(program_cases,neural_predict)
+                    if program["disposition"]!="SCORED":
+                        return _refusal("independent_evaluator_refused")
+                else:
+                    program={"disposition":"NOT_EVALUATED",
+                             "qualification":"NOT_ESTABLISHED",
+                             "graduation_authority":"none"}
     except Exception:
         # A failed neural callback must never become a scored public result.
+        # A failed mode restoration is also refused, never scored.
         # A normal refusal carries no raw untrusted exception data.
         return _refusal("neural_inference_failed")
-    finally:
-        head.train(was_training)
 
     return {
         "disposition":"PUBLIC_DIAGNOSTIC",

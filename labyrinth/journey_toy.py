@@ -26,6 +26,7 @@ from .maze import Challenge, generate_maze
 from .minotaur_exam import ExamCaseResult, MinotaurExamReceipt, evaluate_minotaur
 from .toy_backend import ToyLinearAdapter
 from .training_scope import TrainingScopeSpec
+from .ariadne_thread import THREAD_SCHEMA, append_ariadne_event, verify_ariadne_thread
 
 
 SCHEMA = "labyrinth.toy-journey.v1"
@@ -111,6 +112,18 @@ def run_toy_journey(
     baseline_hash = learner.model_hash
     state = begin_journey(scope, checkpoint_sha256=baseline_hash)
     trajectory: list[dict] = []
+    ariadne_thread: list[dict] = []
+
+    def thread_event(kind: str, cycle_index: int, before: str, after: str,
+                     status: str, summary: dict | None = None) -> None:
+        append_ariadne_event(
+            ariadne_thread, kind=kind, objective_id=scope.objective_id,
+            scope_fingerprint=scope.fingerprint, cycle_index=cycle_index,
+            checkpoint_before_sha256=before, checkpoint_after_sha256=after,
+            status=status, summary=summary,
+        )
+
+    thread_event("entrance", 0, baseline_hash, baseline_hash, TRAINING)
 
     for cycle_index, epochs in enumerate(epochs_by_cycle):
         if state.phase != TRAINING:
@@ -144,6 +157,12 @@ def run_toy_journey(
         state = complete_maze(state, receipt)
         if state.phase != AWAITING_EXAM or state.checkpoint_sha256 != learner.model_hash:
             raise RuntimeError("journey state and trained learner disagree")
+        thread_event("train_complete", cycle_index, before, after, AWAITING_EXAM, {
+            "training_case_count": len(prepared),
+            "training_room_count": len(prepared),
+            "parameter_updates": trained["parameter_updates"],
+            "epochs": epochs,
+        })
 
         fresh = _exam_cases(scope, cycle_index, exam_count_per_slice)
         exam_ids = {case.id for _, case in fresh}
@@ -181,6 +200,14 @@ def run_toy_journey(
         state = face_minotaur(state, exam)
         if state.checkpoint_sha256 != learner.model_hash:
             raise RuntimeError("maze regeneration unexpectedly reset learner weights")
+        thread_event("minotaur_verdict", cycle_index, after, after, decision.status, {
+            "exam_case_count": len(observations),
+            "exam_candidate_correct": sum(entry.score for entry in observations),
+            "exam_frozen_baseline_correct": sum(entry.baseline_score for entry in observations),
+            "weak_skills": list(decision.weak_skills),
+        })
+        if state.phase == TRAINING:
+            thread_event("maze_regenerated", cycle_index + 1, after, after, TRAINING)
         trajectory.append({
             "cycle_index": cycle_index,
             "checkpoint_before_sha256": before,
@@ -198,7 +225,9 @@ def run_toy_journey(
             "weak_skills": list(decision.weak_skills),
         })
 
-    return {
+    thread_event("exit", len(trajectory) - 1, learner.model_hash,
+                 learner.model_hash, state.phase)
+    result = {
         "schema": SCHEMA,
         "scope_fingerprint": scope.fingerprint,
         "objective_id": scope.objective_id,
@@ -207,6 +236,9 @@ def run_toy_journey(
         "final_phase": state.phase,
         "cycles": trajectory,
         "attempts": len(state.attempts),
+        "ariadne_thread_schema": THREAD_SCHEMA,
+        "ariadne_thread": ariadne_thread,
+        "ariadne_thread_head_sha256": ariadne_thread[-1]["event_sha256"],
         "formal_graduation": False,
         "qualification": "NOT_ESTABLISHED",
         "limitations": [
@@ -216,3 +248,5 @@ def run_toy_journey(
             "Checkpoint hashes are local integrity receipts, not proof of operator custody.",
         ],
     }
+    verify_ariadne_thread(result)
+    return result
