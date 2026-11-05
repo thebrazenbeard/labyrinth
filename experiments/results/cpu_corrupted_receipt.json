@@ -1,0 +1,25 @@
+{
+  "arm": "corrupted",
+  "base_model_sha256": "5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c",
+  "base_tokenizer_sha256": "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+  "case_visits": 2,
+  "checkpoint_sha256": "8579b573fb5e8885116d748856b771b3cb587cd31cd94505163a58644066bc23",
+  "elapsed_seconds": 3.865,
+  "gradient_steps": 2,
+  "last_block_sha256_after": "2137ad5a088cd8113a3ec891c73c1ae5dcfcc39bbd521e23d787c6c2e47a1286",
+  "last_block_sha256_before": "05e2bfb7ec08dd65d97c82bc1ffaceef5b4dbb4be33aeb497f40f37863746b58",
+  "losses": [
+    2.418713331222534,
+    2.1291439533233643
+  ],
+  "lr": 0.0001,
+  "model_parameters": 134515008,
+  "optimizer": "AdamW",
+  "optimizer_step_calls": 2,
+  "schema": "labyrinth.cpu-neural-pilot.v1",
+  "seed": 1701,
+  "torch_version": "2.8.0+cpu",
+  "trainable_parameters": 3540096,
+  "training_data_sha256": "e866f32890eec13e9c8ab06399b52d28f42377dde1bae0bfe79c8afb41b4cc71",
+  "unique_training_cases": 12
+}

@@ -1,0 +1,335 @@
+{
+  "adaptive_vs_uniform": null,
+  "arm_summary": {
+    "baseline": {
+      "accuracy": 0.0,
+      "correct": 0,
+      "format_adherence": 0.0,
+      "format_valid": 0,
+      "total": 16,
+      "wilson_95": [
+        0.0,
+        0.1936076805344365
+      ]
+    },
+    "corrupted": {
+      "accuracy": 0.0,
+      "correct": 0,
+      "format_adherence": 0.0,
+      "format_valid": 0,
+      "total": 16,
+      "wilson_95": [
+        0.0,
+        0.1936076805344365
+      ]
+    },
+    "sham": {
+      "accuracy": 0.0,
+      "correct": 0,
+      "format_adherence": 0.0,
+      "format_valid": 0,
+      "total": 16,
+      "wilson_95": [
+        0.0,
+        0.1936076805344365
+      ]
+    },
+    "trained": {
+      "accuracy": 0.0,
+      "correct": 0,
+      "format_adherence": 0.0,
+      "format_valid": 0,
+      "total": 16,
+      "wilson_95": [
+        0.0,
+        0.1936076805344365
+      ]
+    }
+  },
+  "base_model_sha256": "5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c",
+  "base_tokenizer_sha256": "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+  "by": {
+    "slice": {
+      "structural": {
+        "baseline": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 16,
+          "wilson_95": [
+            0.0,
+            0.1936076805344365
+          ]
+        },
+        "corrupted": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 16,
+          "wilson_95": [
+            0.0,
+            0.1936076805344365
+          ]
+        },
+        "sham": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 16,
+          "wilson_95": [
+            0.0,
+            0.1936076805344365
+          ]
+        },
+        "trained": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 16,
+          "wilson_95": [
+            0.0,
+            0.1936076805344365
+          ]
+        }
+      }
+    },
+    "template_group": {
+      "group_0001": {
+        "baseline": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "corrupted": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "sham": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "trained": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        }
+      },
+      "group_0002": {
+        "baseline": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "corrupted": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "sham": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "trained": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        }
+      },
+      "group_0003": {
+        "baseline": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "corrupted": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "sham": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "trained": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        }
+      },
+      "group_0004": {
+        "baseline": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "corrupted": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "sham": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        },
+        "trained": {
+          "accuracy": 0.0,
+          "correct": 0,
+          "format_adherence": 0.0,
+          "format_valid": 0,
+          "total": 4,
+          "wilson_95": [
+            0.0,
+            0.4898908364545973
+          ]
+        }
+      }
+    }
+  },
+  "case_count": 16,
+  "eval_manifest_sha256": "e3f1de8f7220ecf525a2244212dab2d919fcc3f0a0113b7cffc33a7f3835a951",
+  "eval_split": "final",
+  "generation_config_sha256": "c164c3b4af3e886f057a2d75feb4761bd99b151b2a18a323b49bec4add0dcea8",
+  "limitations": [
+    "Artifact digests and optimizer counts are caller assertions; verify actual files and step logs independently.",
+    "Wilson intervals treat cases as independent and overstate precision with repeated templates.",
+    "Cluster-bootstrap intervals are exploratory and unreliable with only a few structural templates.",
+    "Exact McNemar p-values ignore template clustering and multiple comparisons.",
+    "Any final-split use for tuning contaminates that split; this tool cannot detect prior unseen exposures.",
+    "Same seeds and cases do not prove determinism or identical runtime state across inference arms.",
+    "The independent correctness of private gold and semantic equivalence of representation rewrites require separate oracle checks."
+  ],
+  "paired_vs_baseline": {
+    "corrupted": {
+      "baseline_right_candidate_wrong": 0,
+      "baseline_wrong_candidate_right": 0,
+      "cluster_bootstrap_delta_95_exploratory": [
+        0.0,
+        0.0
+      ],
+      "delta_accuracy": 0.0,
+      "exact_mcnemar_p_exploratory": 1.0
+    },
+    "sham": {
+      "baseline_right_candidate_wrong": 0,
+      "baseline_wrong_candidate_right": 0,
+      "cluster_bootstrap_delta_95_exploratory": [
+        0.0,
+        0.0
+      ],
+      "delta_accuracy": 0.0,
+      "exact_mcnemar_p_exploratory": 1.0
+    },
+    "trained": {
+      "baseline_right_candidate_wrong": 0,
+      "baseline_wrong_candidate_right": 0,
+      "cluster_bootstrap_delta_95_exploratory": [
+        0.0,
+        0.0
+      ],
+      "delta_accuracy": 0.0,
+      "exact_mcnemar_p_exploratory": 1.0
+    }
+  },
+  "schema": "labyrinth.paired-analysis.v1",
+  "source_commit": "a2bd26a96c25c76e954d5d8c34726cdb539f8ece",
+  "template_count": 4
+}
