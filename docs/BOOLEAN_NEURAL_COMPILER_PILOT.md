@@ -37,6 +37,14 @@ input. An output matrix encodes the complete truth table. This is exact
 **synthesis**, not learned generalization. The linker concatenates disjoint
 hidden channels and creates a block-diagonal readout; it rejects ABI conflicts.
 
+## Measured local performance
+
+The reproducible [2026-11-05 scratch CPU receipt](receipts/BOOLEAN_NEURAL_CPU_SCRATCH_2026-11-05.json)
+records 8/8 agreement and ~92x **slower** median per-case execution for the pure-Python
+ReLU interpreter compared with direct arithmetic on that container host.
+This is a local-process benchmark, **not Lappy**, optimized tensor/GPU inference,
+process peak RSS, or GGUF performance.
+
 ## Known limitations / hostile review
 
 - **Exponential scaling:** `2^n` detector neurons per `n`-input function;
