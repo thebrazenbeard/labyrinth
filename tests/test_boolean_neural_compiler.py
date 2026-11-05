@@ -31,6 +31,22 @@ class NeuralCompilationTests(unittest.TestCase):
                 self.assertEqual(self.linked.evaluate(bits),
                                  self.parity.evaluate(bits) + self.majority.evaluate(bits))
 
+    def test_mutable_abi_and_boolean_architecture_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "immutable"):
+            NeuralArtifact("mutable", list(INPUT_ABI), ("sum_bit",),
+                           self.parity.w1, self.parity.b1, self.parity.w2, self.parity.b2)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "bad_architecture.json"
+            payload = self.linked.manifest()
+            payload["architecture"][0] = True
+            import hashlib
+            payload["sha256"] = hashlib.sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+            ).hexdigest()
+            path.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(ValueError, "architecture"):
+                load_manifest(path)
+
     def test_abi_is_explicit_and_stable(self):
         self.assertEqual(self.linked.input_names, INPUT_ABI)
         self.assertEqual(self.linked.output_names, ("sum_bit", "carry_out"))
