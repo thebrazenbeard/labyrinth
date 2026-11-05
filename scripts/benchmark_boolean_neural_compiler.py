@@ -2,8 +2,8 @@
 """Stdlib-only CPU benchmark: compiled ReLU weights vs a Python full-adder.
 
 Measures the *same exhaustive eight binary inputs* for each implementation.
-The compiled evaluator lives in the adjacent weightspace_pilot package, or a
-directory supplied with --pilot-dir. It is a tiny reference implementation,
+The compiled evaluator is the Labyrinth Boolean neural pilot. This is a tiny
+reference implementation,
 not a hardware neural accelerator or a claim about model generalization.
 
 Usage:
