@@ -27,7 +27,7 @@ from .adaptive_corridors import (
 from .journey_challenges import TraineeRoomView
 from .journey import JourneyState, TrainingCompletionReceipt
 from .maze import Challenge
-from .minotaur_model import RoomContext, RoomPlan, plan_training_room
+from .minotaur_model import TACTICS, RoomContext, RoomPlan, plan_training_room
 from .maze import Challenge
 from .minotaur_policy_learning import (
     MinotaurTrainingPolicy, TrainCaseApproval, TrainRegistryAdmissionReceipt,
@@ -40,6 +40,24 @@ from .training_scope import TrainingScopeSpec
 
 _ANSWER = re.compile(r"ANSWER: ([+-]?\d+)\Z", re.ASCII)
 _MAX_DETERMINISTIC_REDRAWS = 512
+
+
+@dataclass(frozen=True)
+class PedagogicalRoute:
+    """Bounded TRAIN-only influence of a learner's model-world path.
+
+    The route does not contain a question, answer, exam item, policy receipt or
+    arbitrary executable program. Only the source generator materializes gold.
+    """
+
+    tactic: str
+    difficulty_delta: int
+
+    def __post_init__(self) -> None:
+        if (type(self.tactic) is not str or self.tactic not in TACTICS
+                or type(self.difficulty_delta) is not int
+                or self.difficulty_delta not in (-1, 0, 1)):
+            raise ValueError("pedagogical route requires a bounded TRAIN tactic/difficulty")
 
 
 @dataclass(frozen=True)
@@ -188,7 +206,7 @@ class TrainingCorridorRunner:
             raise ValueError("pending TRAIN challenge does not match admission")
         return case
 
-    def next_training_prompt(self) -> TraineeRoomView:
+    def next_training_prompt(self, *, route: PedagogicalRoute | None = None) -> TraineeRoomView:
         """Materialize exactly one next chamber using *current* policy state.
 
         The returned view is the sole learner-facing object; never return a
@@ -196,6 +214,10 @@ class TrainingCorridorRunner:
         """
         if self._in_flight is not None or self.state.pending is not None:
             raise ValueError("complete the pending TRAIN chamber first")
+        if route is not None:
+            if type(route) is not PedagogicalRoute:
+                raise ValueError("untrusted TRAIN route requires exact typed pedagogy")
+            PedagogicalRoute.__post_init__(route)
         assigned_state = offer_next_chamber(self.state)
         assigned = assigned_state.pending
         if assigned is None:  # Defensive; offer_next_chamber always creates it.
@@ -229,6 +251,12 @@ class TrainingCorridorRunner:
             selection = RoomPlan(
                 assigned.room_id, resolved, proposed.tactic,
                 "policy_plus_adaptive_train", None,
+            )
+        if route is not None:
+            selection = RoomPlan(
+                assigned.room_id,
+                max(1, min(5, selection.difficulty + route.difficulty_delta)),
+                route.tactic, "world_path_plus_source_train", None,
             )
         # The difficulty-one practice grammar has a finite operand space.
         # Following repeated incorrect responses it is entirely possible for

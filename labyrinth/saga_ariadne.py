@@ -23,12 +23,18 @@ _FIELDS = frozenset((
     "cycle_index", "checkpoint_before_sha256", "checkpoint_after_sha256",
     "summary", "parent_sha256", "event_sha256",
 ))
+_LEGACY_TRAIN_FIELDS = frozenset((
+    "skill", "room_index", "train_correct", "policy_before_sha256",
+    "policy_after_sha256", "checkpoint_path",
+))
+_TRAIN_ROUTE_FIELDS = frozenset((
+    "branch_node_id", "train_tactic", "train_difficulty", "train_prompt_sha256",
+))
 _SUMMARY_FIELDS = {
     "entrance": frozenset(("checkpoint_path", "optimizer_status", "optimizer_sha256",
                              "baseline_count", "baseline_correct")),
     "scene": frozenset(("skill", "room_index", "topology_sha256")),
-    "train": frozenset(("skill", "room_index", "train_correct", "policy_before_sha256",
-                          "policy_after_sha256", "checkpoint_path")),
+    "train": _LEGACY_TRAIN_FIELDS | _TRAIN_ROUTE_FIELDS,
     "verdict": frozenset(("status", "weak_skills", "exam_count", "candidate_score",
                             "baseline_score", "focus_skill", "pressure_difficulty",
                             "pressure_tactic")),
@@ -60,7 +66,9 @@ def _hash(event: dict) -> str:
 
 
 def _validate_summary(kind: str, summary: dict) -> None:
-    if kind not in _SUMMARY_FIELDS or type(summary) is not dict or frozenset(summary) != _SUMMARY_FIELDS[kind]:
+    if (kind not in _SUMMARY_FIELDS or type(summary) is not dict
+            or (frozenset(summary) != _SUMMARY_FIELDS[kind]
+                and (kind != "train" or frozenset(summary) != _LEGACY_TRAIN_FIELDS))):
         raise ValueError("invalid or incomplete Ariadne public event summary")
     for key, value in summary.items():
         if key.endswith("sha256"):
@@ -69,7 +77,7 @@ def _validate_summary(kind: str, summary: dict) -> None:
             if type(value) is not str or _SHA.fullmatch(value) is None:
                 raise ValueError("invalid Ariadne digest")
         elif key in ("baseline_count", "baseline_correct", "room_index", "exam_count",
-                     "pressure_difficulty"):
+                     "pressure_difficulty", "train_difficulty"):
             if type(value) is not int or not 0 <= value <= 100_000:
                 raise ValueError("invalid Ariadne public count")
         elif key == "train_correct":
@@ -97,6 +105,13 @@ def _validate_summary(kind: str, summary: dict) -> None:
             raise ValueError("inconsistent Ariadne entrance baseline")
         if (summary["optimizer_status"] == "WEIGHTS_ONLY_CONTINUITY") != (summary["optimizer_sha256"] is None):
             raise ValueError("Ariadne optimizer provenance does not match")
+    if kind == "train" and frozenset(summary) == _SUMMARY_FIELDS["train"]:
+        if (summary["train_tactic"] not in ("practice", "contrast", "transfer")
+                or type(summary["train_difficulty"]) is not int
+                or summary["train_difficulty"] not in range(1, 6)
+                or type(summary["branch_node_id"]) is not str
+                or _ID.fullmatch(summary["branch_node_id"]) is None):
+            raise ValueError("invalid answerless Ariadne route evidence")
     if kind == "verdict":
         if (summary["status"] not in ("PASS", "FAIL", "INCONCLUSIVE")
                 or summary["exam_count"] < 1
