@@ -173,6 +173,8 @@ def load(path: Path) -> NeuralProgram:
                             tuple(abi["outputs"]), tuple(layers))
     if payload["architecture"] != [len(program.input_names)] + [layer.output_width for layer in program.layers]:
         raise ValueError("architecture mismatch")
+    if program.sha256() != digest:
+        raise ValueError("manifest reconstruction changed canonical content")
     return program
 
 
