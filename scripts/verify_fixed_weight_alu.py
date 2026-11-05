@@ -30,7 +30,8 @@ def run() -> None:
         weights = load_stepper(path)
 
         for bits in product((0, 1), repeat=5):
-            assert weights.forward(bits) == opcode_reference(bits)
+            if weights.forward(bits) != opcode_reference(bits):
+                raise AssertionError(f'neural ISA mismatch at bits={bits}')
 
         program1 = EncodedProgram("counter", ((0, 1, 1),) * 3)
         program2 = EncodedProgram("xor-then-add", ((1, 0, 0), (1, 0, 1), (0, 1, 1)))
@@ -42,12 +43,15 @@ def run() -> None:
         for program, expected in zip(programs, expected_states):
             session = HostSupervisor.start(weights, program)
             result = session.run()
-            assert result == expected
+            if result != expected:
+                raise AssertionError(f'program {program.name} expected {expected}, got {result}')
             print(f"program={program.name} word_count={len(program.words)} final_state={result} "
                   f"program_sha256={program.sha256()}")
 
-        assert weights.sha256() == compiled_hash
-        assert frozen_bytes == path.read_bytes()
+        if weights.sha256() != compiled_hash:
+            raise AssertionError('frozen neural weight hash mismatch')
+        if frozen_bytes != path.read_bytes():
+            raise AssertionError('frozen neural weight bytes changed during execution')
         print(f"exhaustive_domain=32/32 neural_weights_sha256={weights.sha256()}")
         print(f"architecture=5->32->3 parameter_count=291 weight_file_bytes={exact_weight_bytes}")
 
