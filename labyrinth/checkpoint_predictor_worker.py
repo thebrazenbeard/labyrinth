@@ -22,6 +22,32 @@ from .entrance_state_v1 import _inventory, _state_digest
 
 
 _MATH = re.compile(r"Calculate (\d+) ([+-]) (\d+)\.")
+_DEV_ID = re.compile(r"devprobe-[A-Za-z0-9_.:-]{1,100}\Z", re.ASCII)
+_SHA = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+
+
+def _prompt_only_probes(value: Any) -> list[dict[str, str]]:
+    """Reject score keys at the inference boundary, including direct callers."""
+    if type(value) is not list or not 1 <= len(value) <= 32:
+        raise ValueError("worker requires bounded prompt-only development probes")
+    seen_ids: set[str] = set()
+    seen_prompts: set[str] = set()
+    for probe in value:
+        if (type(probe) is not dict
+                or set(probe) != {"case_id", "skill", "prompt", "prompt_sha256"}
+                or any(type(item) is not str for item in probe.values())
+                or _DEV_ID.fullmatch(probe["case_id"]) is None
+                or not 1 <= len(probe["skill"]) <= 64
+                or not 1 <= len(probe["prompt"].encode("utf-8")) <= 512
+                or _SHA.fullmatch(probe["prompt_sha256"]) is None
+                or hashlib.sha256(probe["prompt"].encode("utf-8")).hexdigest()
+                   != probe["prompt_sha256"]
+                or probe["case_id"] in seen_ids
+                or probe["prompt_sha256"] in seen_prompts):
+            raise ValueError("predictor worker accepts prompts, never expected gold or scores")
+        seen_ids.add(probe["case_id"])
+        seen_prompts.add(probe["prompt_sha256"])
+    return value
 
 
 def _toy_responses(probes: list[dict], adapter: Path, *, digest_only: bool) -> list[str]:
@@ -110,6 +136,7 @@ def process(payload: dict[str, Any]) -> dict[str, Any]:
                 "worker_source_sha256"}
     if type(payload) is not dict or set(payload) != expected:
         raise ValueError("worker input is not an exact development-only predictor request")
+    probes = _prompt_only_probes(payload["public_probes"])
     code_digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     if payload["worker_source_sha256"] != code_digest:
         raise ValueError("worker runtime source differs from caller-pinned exact implementation")
@@ -128,21 +155,21 @@ def process(payload: dict[str, Any]) -> dict[str, Any]:
     if predictor == "mock-local-file-arithmetic":
         if payload["localhost_endpoint"] is not None:
             raise ValueError("file predictor cannot accept a service URL")
-        predictions = _toy_responses(payload["public_probes"], adapter, digest_only=False)
+        predictions = _toy_responses(probes, adapter, digest_only=False)
         runtime_binding = "LOCAL_MODEL_BYTES_READ_BY_WORKER"
     elif predictor == "mock-bytes-digest-only":
         if payload["localhost_endpoint"] is not None:
             raise ValueError("file predictor cannot accept a service URL")
-        predictions = _toy_responses(payload["public_probes"], adapter, digest_only=True)
+        predictions = _toy_responses(probes, adapter, digest_only=True)
         runtime_binding = "LOCAL_MODEL_BYTES_READ_BY_WORKER_NO_SKILL"
     elif predictor == "hf-local-file":
         if payload["localhost_endpoint"] is not None:
             raise ValueError("file predictor cannot accept a service URL")
-        predictions = _local_hf_responses(payload["public_probes"], base, adapter)
+        predictions = _local_hf_responses(probes, base, adapter)
         runtime_binding = "LOCAL_HF_WEIGHTS_LOADED_BY_WORKER_UNATTESTED"
     elif predictor == "localhost-self-attested":
         predictions = _localhost_responses(
-            payload["public_probes"], payload["localhost_endpoint"], state_sha,
+            probes, payload["localhost_endpoint"], state_sha,
         )
         runtime_binding = "UNVERIFIED_LOCALHOST_SERVICE_HASH_ECHO_ONLY"
     else:
