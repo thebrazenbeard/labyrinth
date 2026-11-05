@@ -1,0 +1,82 @@
+{
+  "abi": {
+    "inputs": [
+      "a",
+      "b"
+    ],
+    "outputs": [
+      "xnor_bit"
+    ]
+  },
+  "architecture": [
+    2,
+    4,
+    2,
+    1
+  ],
+  "format": "bounded-boolean-sequential-relu-v1",
+  "layers": [
+    {
+      "activation": "relu",
+      "biases": [
+        1,
+        0,
+        0,
+        -1
+      ],
+      "weights": [
+        [
+          -1,
+          -1
+        ],
+        [
+          -1,
+          1
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "activation": "relu",
+      "biases": [
+        1,
+        0
+      ],
+      "weights": [
+        [
+          0,
+          -1,
+          -1,
+          0
+        ],
+        [
+          0,
+          1,
+          1,
+          0
+        ]
+      ]
+    },
+    {
+      "activation": "linear",
+      "biases": [
+        0
+      ],
+      "weights": [
+        [
+          1,
+          0
+        ]
+      ]
+    }
+  ],
+  "name": "xnor-via-neural-fusion",
+  "sha256": "5da213c498c71e83504e1fb295155ce698c56772d340274e1cbca59d305eb0b5"
+}
