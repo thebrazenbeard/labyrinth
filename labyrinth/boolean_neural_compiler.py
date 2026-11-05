@@ -59,6 +59,10 @@ class NeuralArtifact:
     b2: tuple[int, ...]  # [outputs]
 
     def __post_init__(self) -> None:
+        if type(self.input_names) is not tuple or type(self.output_names) is not tuple:
+            raise ValueError("ABI names must be immutable tuples")
+        if type(self.name) is not str or not self.name:
+            raise ValueError("invalid artifact name")
         n, m, h = len(self.input_names), len(self.output_names), len(self.w1)
         if n < 1 or m < 1 or h < 1:
             raise ValueError("empty input/output/hidden ABI")
@@ -147,7 +151,8 @@ def load_manifest(path: Path) -> NeuralArtifact:
         tuple(tuple(row) for row in payload["w1"]), tuple(payload["b1"]),
         tuple(tuple(row) for row in payload["w2"]), tuple(payload["b2"]),
     )
-    if payload["architecture"] != [n, len(artifact.w1), len(artifact.output_names)]:
+    architecture = payload["architecture"]
+    if type(architecture) is not list or len(architecture) != 3 or any(type(x) is not int for x in architecture) or architecture != [n, len(artifact.w1), len(artifact.output_names)]:
         raise ValueError("manifest architecture mismatch")
     return artifact
 
