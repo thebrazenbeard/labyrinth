@@ -42,7 +42,7 @@ class NeuralCompilationTests(unittest.TestCase):
 
     def test_immutable_parameters(self):
         with self.assertRaises(TypeError):
-            self.linked.w1[0, 0] = 777
+            self.linked.w1[0][0] = 777
 
     def test_negative_control_corrupted_weights_fail(self):
         mutable_weights = [list(row) for row in self.linked.w2]
