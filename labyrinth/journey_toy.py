@@ -114,12 +114,13 @@ def run_toy_journey(
     trajectory: list[dict] = []
     ariadne_thread: list[dict] = []
 
-    def thread_event(kind: str, cycle_index: int, before: str, after: str, status: str) -> None:
+    def thread_event(kind: str, cycle_index: int, before: str, after: str,
+                     status: str, summary: dict | None = None) -> None:
         append_ariadne_event(
             ariadne_thread, kind=kind, objective_id=scope.objective_id,
             scope_fingerprint=scope.fingerprint, cycle_index=cycle_index,
             checkpoint_before_sha256=before, checkpoint_after_sha256=after,
-            status=status,
+            status=status, summary=summary,
         )
 
     thread_event("entrance", 0, baseline_hash, baseline_hash, TRAINING)
@@ -156,7 +157,12 @@ def run_toy_journey(
         state = complete_maze(state, receipt)
         if state.phase != AWAITING_EXAM or state.checkpoint_sha256 != learner.model_hash:
             raise RuntimeError("journey state and trained learner disagree")
-        thread_event("train_complete", cycle_index, before, after, AWAITING_EXAM)
+        thread_event("train_complete", cycle_index, before, after, AWAITING_EXAM, {
+            "training_case_count": len(prepared),
+            "training_room_count": len(prepared),
+            "parameter_updates": trained["parameter_updates"],
+            "epochs": epochs,
+        })
 
         fresh = _exam_cases(scope, cycle_index, exam_count_per_slice)
         exam_ids = {case.id for _, case in fresh}
@@ -194,7 +200,12 @@ def run_toy_journey(
         state = face_minotaur(state, exam)
         if state.checkpoint_sha256 != learner.model_hash:
             raise RuntimeError("maze regeneration unexpectedly reset learner weights")
-        thread_event("minotaur_verdict", cycle_index, after, after, decision.status)
+        thread_event("minotaur_verdict", cycle_index, after, after, decision.status, {
+            "exam_case_count": len(observations),
+            "exam_candidate_correct": sum(entry.score for entry in observations),
+            "exam_frozen_baseline_correct": sum(entry.baseline_score for entry in observations),
+            "weak_skills": list(decision.weak_skills),
+        })
         if state.phase == TRAINING:
             thread_event("maze_regenerated", cycle_index + 1, after, after, TRAINING)
         trajectory.append({

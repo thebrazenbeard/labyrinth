@@ -78,7 +78,7 @@ def render_journey_chronicle(report: object) -> str:
         total = _count(cycle.get("exam_case_count"), "exam_case_count", minimum=1)
         epochs = _count(cycle.get("epochs"), "epochs", minimum=1)
         if (not 2 <= rooms <= _MAX_TOY_ROOMS or not 1 <= epochs <= 1000
-                or updates != rooms * epochs or not 8 <= total <= 64):
+                or updates > rooms * epochs or not 8 <= total <= 64):
             raise ValueError("impossible toy journey room, epoch, update or exam count")
         candidate = _count(cycle.get("exam_candidate_correct"), "exam_candidate_correct")
         frozen = _count(cycle.get("exam_frozen_baseline_correct"), "exam_frozen_baseline_correct")
@@ -116,6 +116,8 @@ def render_journey_chronicle(report: object) -> str:
     if any(field in report for field in thread_fields):
         verify_ariadne_thread(report)
         lines.append("  Ariadne's local event chain verified internally; not independently anchored.")
+    else:
+        lines.append("  Legacy development report: no Ariadne event chain; event integrity unverified.")
     lines.extend(["", "At the exit:"])
     if phase == EXHAUSTED:
         lines.append("  The authorized cycles are exhausted; no graduation is established.")

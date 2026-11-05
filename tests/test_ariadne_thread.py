@@ -36,6 +36,21 @@ class AriadneThreadTests(unittest.TestCase):
         self.assertEqual(events[3]["checkpoint_before_sha256"], events[1]["checkpoint_after_sha256"])
         self.assertEqual(events[4]["checkpoint_before_sha256"], events[3]["checkpoint_after_sha256"])
         self.assertEqual(events[3]["cycle_index"], 1)
+        for index, cycle in enumerate(report["cycles"]):
+            train = events[1 + index * 3]
+            verdict = events[2 + index * 3]
+            self.assertEqual(train["summary"], {
+                "training_case_count": cycle["training_case_count"],
+                "training_room_count": len(cycle["training_room_ids"]),
+                "parameter_updates": cycle["parameter_updates"],
+                "epochs": cycle["epochs"],
+            })
+            self.assertEqual(verdict["summary"], {
+                "exam_case_count": cycle["exam_case_count"],
+                "exam_candidate_correct": cycle["exam_candidate_correct"],
+                "exam_frozen_baseline_correct": cycle["exam_frozen_baseline_correct"],
+                "weak_skills": cycle["weak_skills"],
+            })
         for event in events:
             self.assertNotIn("gold", repr(event).lower())
             self.assertNotIn("case_id", event)
@@ -57,6 +72,18 @@ class AriadneThreadTests(unittest.TestCase):
             ("objective", lambda report: report.__setitem__("objective_id", "another")),
             ("head", lambda report: report.__setitem__(
                 "ariadne_thread_head_sha256", "b" * 64)),
+            ("train_summary", lambda report: report["ariadne_thread"][1]["summary"].__setitem__(
+                "parameter_updates", 999)),
+            ("verdict_summary", lambda report: report["ariadne_thread"][2]["summary"].__setitem__(
+                "exam_candidate_correct", 16)),
+            ("weak_skills", lambda report: report["ariadne_thread"][2]["summary"].__setitem__(
+                "weak_skills", ["not_the_reported_skill"])),
+            ("training_count_report", lambda report: report["cycles"][0].__setitem__(
+                "training_case_count", 9999)),
+            ("score_report", lambda report: report["cycles"][0].__setitem__(
+                "exam_candidate_correct", 16)),
+            ("updates_report", lambda report: report["cycles"][0].__setitem__(
+                "parameter_updates", 999)),
         ):
             with self.subTest(name=name):
                 report = deepcopy(self.report)

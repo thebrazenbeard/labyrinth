@@ -21,7 +21,14 @@ _KINDS = {"entrance", "train_complete", "minotaur_verdict", "maze_regenerated", 
 _FIELDS = frozenset({
     "schema", "sequence", "kind", "objective_id", "scope_fingerprint",
     "cycle_index", "checkpoint_before_sha256", "checkpoint_after_sha256",
-    "status", "parent_sha256", "event_sha256",
+    "status", "summary", "parent_sha256", "event_sha256",
+})
+_TRAIN_SUMMARY = frozenset({
+    "training_case_count", "training_room_count", "parameter_updates", "epochs",
+})
+_VERDICT_SUMMARY = frozenset({
+    "exam_case_count", "exam_candidate_correct", "exam_frozen_baseline_correct",
+    "weak_skills",
 })
 
 
@@ -37,7 +44,7 @@ def _digest_event(event: dict) -> str:
 def append_ariadne_event(
     thread: list[dict], *, kind: str, objective_id: str, scope_fingerprint: str,
     cycle_index: int, checkpoint_before_sha256: str,
-    checkpoint_after_sha256: str, status: str,
+    checkpoint_after_sha256: str, status: str, summary: dict | None = None,
 ) -> None:
     """Append a sealed event without including case IDs, prompts or gold labels."""
     if kind not in _KINDS or type(cycle_index) is not int or cycle_index < 0:
@@ -49,6 +56,32 @@ def append_ariadne_event(
             raise ValueError("invalid Ariadne hash identity")
     if type(status) is not str or not status:
         raise ValueError("invalid Ariadne status")
+    summary = {} if summary is None else summary
+    if type(summary) is not dict:
+        raise ValueError("Ariadne summary must be a dictionary")
+    keys = frozenset(summary)
+    allowed = (_TRAIN_SUMMARY if kind == "train_complete"
+               else _VERDICT_SUMMARY if kind == "minotaur_verdict"
+               else frozenset())
+    if keys != allowed:
+        raise ValueError("unexpected or missing Ariadne public summary fields")
+    for key, value in summary.items():
+        if key == "weak_skills":
+            if (type(value) is not list or len(value) > 16
+                    or any(type(skill) is not str or not re.fullmatch(
+                        r"[A-Za-z0-9_]{1,64}", skill,
+                    ) for skill in value)):
+                raise ValueError("invalid Ariadne weak skill names")
+        elif type(value) is not int or value < 0:
+            raise ValueError("Ariadne public summary counts must be nonnegative integers")
+    if kind == "train_complete" and any(summary[key] == 0 for key in _TRAIN_SUMMARY):
+        raise ValueError("Ariadne TRAIN summary must reflect completed nonzero work")
+    if kind == "minotaur_verdict" and (
+        summary["exam_case_count"] == 0
+        or summary["exam_candidate_correct"] > summary["exam_case_count"]
+        or summary["exam_frozen_baseline_correct"] > summary["exam_case_count"]
+    ):
+        raise ValueError("Ariadne development score count is inconsistent")
     event = {
         "schema": THREAD_SCHEMA,
         "sequence": len(thread),
@@ -59,6 +92,7 @@ def append_ariadne_event(
         "checkpoint_before_sha256": checkpoint_before_sha256,
         "checkpoint_after_sha256": checkpoint_after_sha256,
         "status": status,
+        "summary": summary.copy(),
         "parent_sha256": thread[-1]["event_sha256"] if thread else _ZERO,
     }
     event["event_sha256"] = _digest_event(event)
@@ -93,11 +127,13 @@ def verify_ariadne_thread(report: Mapping) -> bool:
             raise ValueError(f"invalid Ariadne {label} identity")
     expected: list[dict] = []
 
-    def add(kind: str, index: int, before: str, after: str, status: str) -> None:
+    def add(kind: str, index: int, before: str, after: str, status: str,
+            summary: dict | None = None) -> None:
         append_ariadne_event(expected, kind=kind, objective_id=objective,
                              scope_fingerprint=scope, cycle_index=index,
                              checkpoint_before_sha256=before,
-                             checkpoint_after_sha256=after, status=status)
+                             checkpoint_after_sha256=after, status=status,
+                             summary=summary)
 
     add("entrance", 0, baseline, baseline, "TRAINING")
     predecessor = baseline
@@ -111,8 +147,18 @@ def verify_ariadne_thread(report: Mapping) -> bool:
                 or type(after) is not str or _SHA256.fullmatch(after) is None
                 or verdict not in ("PASS", "FAIL", "INCONCLUSIVE")):
             raise ValueError("Ariadne checkpoint ancestry or Minotaur status mismatch")
-        add("train_complete", index, before, after, "AWAITING_EXAM")
-        add("minotaur_verdict", index, after, after, verdict)
+        add("train_complete", index, before, after, "AWAITING_EXAM", {
+            "training_case_count": cycle.get("training_case_count"),
+            "training_room_count": len(cycle.get("training_room_ids", ())),
+            "parameter_updates": cycle.get("parameter_updates"),
+            "epochs": cycle.get("epochs"),
+        })
+        add("minotaur_verdict", index, after, after, verdict, {
+            "exam_case_count": cycle.get("exam_case_count"),
+            "exam_candidate_correct": cycle.get("exam_candidate_correct"),
+            "exam_frozen_baseline_correct": cycle.get("exam_frozen_baseline_correct"),
+            "weak_skills": cycle.get("weak_skills"),
+        })
         predecessor = after
         if index < len(cycles) - 1:
             if verdict != "FAIL":

@@ -68,6 +68,7 @@ class SagaNarrativeTests(unittest.TestCase):
         rendered = render_journey_chronicle(synthetic)
         self.assertIn("Development criteria passed", rendered)
         self.assertIn("graduation remains unestablished", rendered)
+        self.assertIn("no Ariadne event chain; event integrity unverified", rendered)
         synthetic["cycles"][-1]["exam_status"] = "FAIL"
         with self.assertRaisesRegex(ValueError, "contradicts"):
             render_journey_chronicle(synthetic)
@@ -103,6 +104,31 @@ class SagaNarrativeTests(unittest.TestCase):
                 forged["cycles"][0][field] = value
                 with self.assertRaisesRegex(ValueError, "impossible toy journey"):
                     render_journey_chronicle(forged)
+
+    def test_partial_updates_are_valid_for_zero_residual_case_visits(self):
+        # The actual toy learner counts a parameter update only when an SGD
+        # step changes its values; not every case visit changes a parameter.
+        partial = deepcopy(self.report)
+        visit_count = (partial["cycles"][0]["training_case_count"]
+                       * partial["cycles"][0]["epochs"])
+        self.assertGreater(visit_count, 1)
+        partial["cycles"][0]["parameter_updates"] = visit_count - 1
+        # This fabricated adjustment is a legacy shape-validation fixture;
+        # leave the cryptographically committed real fixture untouched.
+        for field in ("ariadne_thread", "ariadne_thread_schema", "ariadne_thread_head_sha256"):
+            partial.pop(field, None)
+        self.assertIn("Cycle 1", render_journey_chronicle(partial))
+
+    def test_real_sgd_convergence_does_not_break_the_chronicle(self):
+        scope = TrainingScopeSpec(
+            objective_id="sgd-steps", domain="arithmetic",
+            skills=("arithmetic",), specificity=2, scale=1,
+            max_cycles=1, seed=0,
+        )
+        report = run_toy_journey(scope, epochs_by_cycle=(100,))
+        cycle = report["cycles"][0]
+        self.assertLess(cycle["parameter_updates"], cycle["training_case_count"] * cycle["epochs"])
+        self.assertIn("At the exit:", render_journey_chronicle(report))
 
     def test_cli_reads_existing_report_without_changing_it(self):
         with TemporaryDirectory() as tmp:
