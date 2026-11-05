@@ -31,6 +31,7 @@ from .runner import _source_state, load_json
 
 LEGACY_SCHEMA = "labyrinth.hf-lora-pilot.v2"
 SCHEMA = "labyrinth.hf-lora-pilot.v3"
+MEZO_SCHEMA = "labyrinth.hf-lora-pilot.v4"
 EVAL_SCHEMA = "labyrinth.hf-lora-reload-eval.v2"
 EVAL_SEED_XOR = 0x5C18A7
 # No quantization/CPU offload in v1: bound pre-existing weights to a small size.
@@ -53,6 +54,8 @@ class PilotConfig:
     lora_alpha: int = 8
     device: str = "cpu"
     answer_only: bool = False
+    optimizer: str = "adamw"
+    zo_epsilon: float = 0.001
 
 
 def _check_int(value: object, label: str, lower: int, upper: int) -> None:
@@ -132,6 +135,11 @@ def validate_config(config: PilotConfig, *, output_must_be_new: bool = True) -> 
         raise ValueError("device must be cpu or cuda")
     if type(config.answer_only) is not bool:
         raise ValueError("answer_only must be a boolean")
+    if config.optimizer not in ("adamw", "mezo") or type(config.optimizer) is not str:
+        raise ValueError("optimizer must be 'adamw' or 'mezo'")
+    if (type(config.zo_epsilon) is not float or not math.isfinite(config.zo_epsilon)
+            or not 1e-6 <= config.zo_epsilon <= 0.1):
+        raise ValueError("zo_epsilon must be a finite float in [1e-6, 0.1]")
     resolved = _paths(config, output_must_be_new=output_must_be_new)
     _metadata_digest(resolved[0])
     return resolved
@@ -403,33 +411,67 @@ def _train_steps(model: Any, tokenizer: Any, torch: Any, train: list[Challenge],
     torch.manual_seed(config.seed)
     if config.device == "cuda":
         torch.cuda.manual_seed_all(config.seed)
-    model.train()
-    optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
-                                  lr=config.learning_rate if learning_rate is None else learning_rate)
+    if config.optimizer == "mezo":
+        # Paired ZO loss evaluations require deterministic, dropout-free forwards.
+        # The frozen pretrained base remains frozen; only LoRA tensors are tuned.
+        model.eval()
+        from .mezo import mezo_step
+        optimizer = None
+    else:
+        model.train()
+        optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
+                                      lr=config.learning_rate if learning_rate is None else learning_rate)
     token_total = 0
     losses: list[float] = []
+    positive_losses: list[float] = []
+    negative_losses: list[float] = []
+    direction_seeds: list[int] = []
+    forward_evaluations = 0
     for step in range(config.steps):
         inputs, target = prepared[indices[step]]
         ids = torch.tensor([inputs], dtype=torch.long, device=config.device)
         targets = torch.tensor([target], dtype=torch.long, device=config.device)
-        optimizer.zero_grad(set_to_none=True)
-        loss = model(input_ids=ids, labels=targets).loss
-        if not bool(torch.isfinite(loss)):
-            raise RuntimeError("non-finite SFT loss")
-        loss.backward()
-        _clip_trainable_gradients(
-            torch, (p for p in model.parameters() if p.requires_grad)
-        )
-        optimizer.step()
+        if config.optimizer == "mezo":
+            direction_seed = config.seed + step
+            outcome = mezo_step(
+                model, torch,
+                lambda: model(input_ids=ids, labels=targets).loss,
+                epsilon=config.zo_epsilon,
+                learning_rate=config.learning_rate if learning_rate is None else learning_rate,
+                seed=direction_seed,
+            )
+            if type(outcome.get("forward_evaluations")) is not int or outcome["forward_evaluations"] != 2:
+                raise RuntimeError("MeZO optimizer did not confirm exactly two paired loss forwards")
+            forward_evaluations += outcome["forward_evaluations"]
+            direction_seeds.append(direction_seed)
+            value = float(outcome["loss"])
+            positive_losses.append(float(outcome["loss_plus"]))
+            negative_losses.append(float(outcome["loss_minus"]))
+        else:
+            optimizer.zero_grad(set_to_none=True)
+            loss = model(input_ids=ids, labels=targets).loss
+            if not bool(torch.isfinite(loss)):
+                raise RuntimeError("non-finite SFT loss")
+            loss.backward()
+            _clip_trainable_gradients(
+                torch, (p for p in model.parameters() if p.requires_grad)
+            )
+            optimizer.step()
+            value = float(loss.detach().cpu().item())
         for parameter in model.parameters():
             if parameter.requires_grad and not bool(torch.isfinite(parameter).all()):
                 raise RuntimeError("non-finite trained LoRA parameter")
-        value = float(loss.detach().cpu().item())
         losses.append(value)
         token_total += len(inputs)
-    return {"steps": config.steps, "example_visits": config.steps,
-            "visited_case_ids": [train[index].id for index in indices],
-            "input_tokens_seen": token_total, "losses": losses}
+    receipt = {"steps": config.steps, "example_visits": config.steps,
+               "visited_case_ids": [train[index].id for index in indices],
+               "input_tokens_seen": token_total, "losses": losses}
+    if config.optimizer == "mezo":
+        receipt.update({"forward_evaluations": forward_evaluations,
+                        "direction_seeds": direction_seeds,
+                        "positive_losses": positive_losses,
+                        "negative_losses": negative_losses})
+    return receipt
 
 
 def _deps(device: str) -> tuple[Any, Any, Any, Any, Any]:
@@ -472,6 +514,15 @@ def _load_base(model_path: Path, device: str, *, torch: Any,
     model.to(device)
     model.config.use_cache = False
     return model, tokenizer
+
+
+def _report_config(config: PilotConfig, model_path: Path, output_dir: Path) -> dict[str, Any]:
+    """Preserve the original exact v3 AdamW receipt keys for historical audits."""
+    payload = asdict(config)
+    if config.optimizer == "adamw":
+        payload.pop("optimizer")
+        payload.pop("zo_epsilon")
+    return {**payload, "model_path": str(model_path), "output_dir": str(output_dir)}
 
 
 def run_pilot(config: PilotConfig) -> dict[str, Any]:
@@ -590,11 +641,11 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     _assert_checkpoint_unchanged(model_path, weights, initial_manifest)
     candidate_adapter_manifest = _adapter_manifest(candidate_dir)
     result: dict[str, Any] = {
-        "schema": SCHEMA,
+        "schema": MEZO_SCHEMA if config.optimizer == "mezo" else SCHEMA,
         "adaptation_kind": "local HF causal-LM PEFT LoRA supervised parameter update",
         "source": _source_state(),
         "training_process_id": os.getpid(),
-        "config": {**asdict(config), "model_path": str(model_path), "output_dir": str(output_dir)},
+        "config": _report_config(config, model_path, output_dir),
         "base_weights_sha256": initial_manifest["weights"],
         "model_metadata_sha256": initial_manifest["metadata"],
         "runtime_versions": {"python": sys.version.split()[0], "torch": package_version("torch"),
@@ -627,6 +678,16 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
                         "Only the adapter was persisted; base weights remain unchanged.",
                         "Same-process scores do not qualify independent checkpoint reload."],
     }
+    if config.optimizer == "mezo":
+        result["control_data"].update({
+            "mezo_loss_forward_evaluations_per_arm": 2 * config.steps,
+            "mezo_snapshot_restoration": True,
+        })
+        result["limitations"].extend([
+            "MeZO tunes LoRA parameters only; this does not measure full-model MeZO memory savings.",
+            "Exact restoration uses a snapshot of trainable adapter tensors; peak memory includes this copy.",
+            "Two loss forwards per ZO step are not compute-matched to one AdamW forward/backward step.",
+        ])
     _save_new(output_dir / "pilot_report.json", result)
     return result
 
@@ -648,7 +709,7 @@ def reload_evaluate(run_dir: str | Path, report_path: str | Path) -> dict[str, A
     root = Path(run_dir).expanduser().resolve(strict=True)
     source = root / "pilot_report.json"
     report = load_json(source)
-    if report.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
+    if report.get("schema") not in (SCHEMA, LEGACY_SCHEMA, MEZO_SCHEMA):
         raise ValueError("unknown training pilot report schema")
     source_state = report.get("source")
     if not isinstance(source_state, dict) or source_state.get("source_tree_sha256") != _source_state()["source_tree_sha256"]:
@@ -722,6 +783,10 @@ def main(argv: list[str] | None = None) -> int:
     train.add_argument("--lora-rank", type=int, default=4)
     train.add_argument("--lora-alpha", type=int, default=8)
     train.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    train.add_argument("--optimizer", choices=("adamw", "mezo"), default="adamw",
+                       help="MeZO uses two forward-only loss queries per step on trainable LoRA tensors")
+    train.add_argument("--zo-epsilon", type=float, default=0.001,
+                       help="Two-sided MeZO perturbation scale (ignored for AdamW)")
     train.add_argument("--answer-only", action="store_true",
                        help="Pre-fill ANSWER: and supervise only numerical completion + EOS")
     evaluate = commands.add_parser("eval", help="Reload saved adapter in a new Python process")

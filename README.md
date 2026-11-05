@@ -73,6 +73,8 @@ The `train-hf` and `eval-hf` commands operate on an **already-local**, small Hug
 # Optional packages must already exist in your chosen isolated Python environment.
 # The model directory must contain local config/tokenizer/safetensors files, <= 1 GiB weights.
 python -m labyrinth train-hf --model-path LOCAL_HF_MODEL_DIR --output-dir NEW_EMPTY_PARENT/RUN_001 --device cpu --steps 2
+# Experimental forward-only MeZO-style optimization of LoRA tensors (not the frozen base):
+python -m labyrinth train-hf --model-path LOCAL_HF_MODEL_DIR --output-dir NEW_EMPTY_PARENT/MEZO_001 --device cpu --steps 2 --optimizer mezo --zo-epsilon 0.001
 # Invoke separately to qualify persistence; report path must not exist.
 python -m labyrinth eval-hf --run-dir NEW_EMPTY_PARENT/RUN_001 --report NEW_EMPTY_PARENT/reload.json
 # Offline check of a saved HF pilot report's internally reproducible fields:
@@ -94,6 +96,8 @@ means the model emitted a parseable numeric suffix after an operator-provided
 scaffold, not that the model independently learned output formatting. This
 separates numeric correctness from the trivial constant format token but does
 not make public finite arithmetic templates an independent reasoning exam.
+
+`--optimizer mezo` is an **experimental opt-in v4 receipt path**, preserving AdamW as the default v3 comparison. It evaluates the same supervised minibatch twice at symmetric seeded perturbations with dropout disabled, uses no backward pass or AdamW optimizer states, and updates **only trainable LoRA tensors**. Each correct-label, zero-rate sham and corrupted-label arm records its direction seeds, positive/negative losses, and `2 × steps` forward-loss evaluations; the offline auditor checks receipt consistency. The scalar loss in a MeZO report is the *mean of perturbed losses*, not an unperturbed objective. To guarantee bitwise rollback on exceptions and sham steps, this initial implementation snapshots all trainable adapter tensors, which costs adapter-sized memory; it is not equivalent to the original full-parameter MeZO memory benchmark. The sham and candidate have identical labels, but the deranged-label arm may have **different token counts** despite matching case visits and forward-query counts; each arm reports actual tokens seen. An equal-step comparison with AdamW is not equal computation. No 4 GB VRAM fit, speedup, or reasoning gain is established. See [MeZO research and protocol](docs/MEZO_RESEARCH_AND_PROTOCOL_2026-10-30.md).
 
 `audit-hf-report` is dependency-free and re-generates the declared train/eval case IDs, held-out prompt commitment, control metadata, training visit order, and reported evaluation metrics. It verifies file/tensor **digest receipt syntax**, but does not open or authenticate the checkpoint files. For responses whose entire text is recoverable from the stored 128-character preview, it independently rechecks the response digest and answer score. Longer responses whose hashes differ from their preview yield `INCOMPLETE`, never an unqualified `PASS`. Inconsistent records yield `FAIL`; the command exits nonzero for both. Source fingerprints must match the auditor checkout, so older reports should be audited at their source revision. All receipts and model-origin claims are self-reported: even `PASS` is **not proof** that training actually occurred or improved reasoning. The original run's full generated text was not always retained; future run schemas should save auditable full text in a separately controlled evidence artifact.
 
@@ -136,6 +140,7 @@ Important limitations:
 - `labyrinth/report_audit.py`: offline report consistency verifier; neither provenance authentication nor a learning claim
 - `labyrinth/toy_backend.py`: explicitly limited CPU parameter learning and checkpoint reload
 - `labyrinth/hf_pilot.py`: opt-in local HF/PEFT LoRA SFT and same-checkpoint controls; no default ML dependency
+- `labyrinth/mezo.py`: optional seeded, two-sided forward-only LoRA zeroth-order step with exact rollback snapshots
 - `labyrinth/hf_report_audit.py`: dependency-free self-consistency audit of HF pilot receipts and available predictions
 - `labyrinth/cli.py`: `run`, `experiment`, `audit-report`, `train-toy`, `toy-eval`, `train-hf`, and `eval-hf` commands
 
