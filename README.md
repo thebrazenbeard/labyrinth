@@ -44,6 +44,38 @@ Tier 1 uses arithmetic, tier 2 uses multi-operation reasoning, and tier 3 tests 
 
 The evaluator accepts only a complete `ANSWER: <integer>` line. Reports distinguish *answer accuracy* from *output-format adherence* and include challenge commitments, seeds, model identity, generation options when available, report schema, source-tree hash, and per-trial prompt/response hashes. Correct answers are never placed in public evaluation prompts or reported as explicit answer keys.
 
+### Optional fractal-inspired training-score forecast
+
+`labyrinth/multiscale_predictor.py` offers a dependency-free, read-only
+**causal** forecast of future *training* scores. Short/long dyadic windows
+(4/8/16/32 observations) are context-mixed using discounted prequential
+squared prediction errors; rare challenges shrink toward their level's
+historical scores. It also reports lag-based roughness and a **heuristic,
+uncalibrated** uncertainty score. These are multi-scale signals, **not** an
+estimated mathematical fractal dimension or proof of improved reasoning.
+
+```python
+from labyrinth.curriculum import TrainingObservation
+from labyrinth.multiscale_predictor import forecast_training_score, rank_training_challenges
+
+history = (
+    TrainingObservation("addition", 11, "basic", 0.25),
+    TrainingObservation("subtraction", 12, "basic", 0.75),
+)
+print(forecast_training_score(history, level="basic", challenge_id="addition"))
+print(rank_training_challenges(history, level="basic", challenge_ids=("addition", "subtraction")))
+```
+
+Only chronological `split="train"` observations are accepted. Supplying even
+one evaluation, placebo or control record fails closed, including records
+from a different level. Predictions never alter the default fair scheduler,
+promotion rule, HF optimizer, or independent evaluation gate. The max 256
+recent same-level training records form a bounded scoring context by default.
+This code adapts *predictions*, not model weights. Compare forecasts against
+fixed-mean/EMA and shuffled-order controls on precommitted fresh training
+sequences before using them to guide real training selection; actual model
+effects require separate held-out evaluations.
+
 ### Audit a saved report offline
 
 ```bash
@@ -132,6 +164,7 @@ Important limitations:
 - `labyrinth/evaluation.py`: strict, side-effect-free scoring
 - `labyrinth/adapters.py`: replay and local Ollama interface
 - `labyrinth/curriculum.py`: training-only progression state
+- `labyrinth/multiscale_predictor.py`: opt-in, training-only multi-scale forecast and roughness diagnostic; no automatic curriculum effects
 - `labyrinth/runner.py`: scored runs, artifacts, four-arm controls, JSON provenance
 - `labyrinth/report_audit.py`: offline report consistency verifier; neither provenance authentication nor a learning claim
 - `labyrinth/toy_backend.py`: explicitly limited CPU parameter learning and checkpoint reload
