@@ -12,7 +12,7 @@ oracle. Pure Python 3.10+ standard library; $0 dependencies, compute or API.
 ```bash
 python -m unittest discover -s tests -p 'test_sequential_boolean_compiler.py' -v
 python -m scripts.verify_sequential_boolean_compiler
-python verify.py --write artifact-xnor.json
+python -m scripts.verify_sequential_boolean_compiler --write NEW_ARTIFACT.json
 ```
 
 The demonstration compiles `XOR(a,b)` to 2→4→1, compiles `NOT(xor_bit)` to
@@ -46,4 +46,4 @@ not synthesize or enumerate a new combined function truth table.
 > safe untrusted execution. Hashes are not signatures.
 
 This complements, rather than replaces, the separate parallel neural-linker
-pilot. It can be adapted into `labyrinth` after independent code review.
+pilot. It is an experimental Labyrinth module pending independent review and runtime qualification; it is not deployed to Vera.
