@@ -120,7 +120,8 @@ def load_manifest(path: Path) -> NeuralArtifact:
     Hashes detect accidental modification, not malicious replacement of both
     artifact and hash. Production needs trusted signatures/authorization.
     """
-    raw = path.read_bytes()
+    with path.open("rb") as manifest_file:
+        raw = manifest_file.read(2_000_001)
     if len(raw) > 2_000_000:
         raise ValueError("unreasonably large Boolean neural manifest")
     payload = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
