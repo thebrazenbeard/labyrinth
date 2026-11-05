@@ -179,6 +179,13 @@ class SequentialNeuralCompilerTests(unittest.TestCase):
             self.assertEqual(json.loads(result.stdout),
                              {"sha": self.xnor_net.sha256(), "out": [1]})
 
+    def test_checked_in_xnor_weight_fixture_matches_fresh_compilation(self):
+        fixture = Path(__file__).resolve().parent / "fixtures" / "sequential_xnor_artifact.json"
+        restored = load(fixture)
+        self.assertEqual(restored.sha256(), self.xnor_net.sha256())
+        for bits in product((0, 1), repeat=2):
+            self.assertEqual(restored.evaluate(bits), (int(bits[0] == bits[1]),))
+
     def test_tamper_manifest_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "xnor.json"
