@@ -9,15 +9,21 @@ import tempfile
 import unittest
 
 from labyrinth.evaluation import score_response
-from labyrinth.hf_pilot import EVAL_SEED_XOR, LEGACY_SCHEMA, _prompt_commitment
+from labyrinth.hf_pilot import (
+    EVAL_SEED_XOR, LEGACY_SCHEMA, PilotConfig, _prompt_commitment,
+    training_cases,
+)
 from labyrinth.maze import generate_maze
 from labyrinth.runner import _source_state
 from labyrinth.hf_report_audit import audit_hf_report
 
 
-def pilot_fixture():
-    train = generate_maze(seed=13, count=2, tiers=(1,), split="train")
-    heldout = generate_maze(seed=13 ^ EVAL_SEED_XOR, count=2, tiers=(1,), split="eval")
+def pilot_fixture(*, seed=13, count=2):
+    train, heldout = training_cases(PilotConfig(
+        model_path="C:/fixture/base", output_dir="C:/fixture/run",
+        seed=seed, train_count=count, eval_count=count,
+        tiers=(1,), steps=2,
+    ))
     trials = []
     for challenge in heldout:
         response = "ANSWER: 0"
@@ -33,12 +39,12 @@ def pilot_fixture():
         "format_valid": len(trials), "format_rate": 1.0, "trials": trials,
     }
     visits = {"steps": 2, "example_visits": 2,
-              "visited_case_ids": [c.id for c in train],
+              "visited_case_ids": [c.id for c in train[:2]],
               "input_tokens_seen": 200, "losses": [2.5, 2.0]}
     return {
         "schema": LEGACY_SCHEMA, "source": _source_state(),
         "config": {"model_path": "C:/fixture/base", "output_dir": "C:/fixture/run",
-                   "seed": 13, "train_count": 2, "eval_count": 2,
+                   "seed": seed, "train_count": count, "eval_count": count,
                    "tiers": [1], "steps": 2, "max_tokens": 256,
                    "max_new_tokens": 16, "learning_rate": 0.0002,
                    "lora_rank": 4, "lora_alpha": 8, "device": "cpu"},
@@ -73,6 +79,17 @@ class HfReportAuditTests(unittest.TestCase):
         self.assertEqual(result["status"], "PASS")
         self.assertEqual(result["checked_trials"], 8)
         self.assertFalse(result["authenticated_model_execution"])
+
+    def test_rerolled_semantic_arithmetic_heldout_is_audited_against_actual_pilot_split(self):
+        report = pilot_fixture(seed=1073, count=32)
+        old_heldout = generate_maze(
+            seed=1073 ^ EVAL_SEED_XOR, count=32, tiers=(1,), split="eval",
+        )
+        self.assertNotEqual(report["heldout_case_ids"], [case.id for case in old_heldout])
+        checked = audit_hf_report(report)
+        self.assertEqual(checked["status"], "PASS", checked["failures"])
+        self.assertEqual(checked["checked_trials"], 128)
+        self.assertFalse(checked["authenticated_model_execution"])
 
     def test_forged_per_trial_score_and_summary_are_rejected(self):
         report = pilot_fixture()

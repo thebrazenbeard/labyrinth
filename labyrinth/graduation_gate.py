@@ -61,6 +61,8 @@ class GraduationPolicy:
         ):
             if type(getattr(self, field)) is not str:
                 raise ValueError(f"{field} must be a string")
+        if type(self.objective_kind) is not str:
+            raise ValueError("objective_kind must be an exact string")
         if type(self.required_slices) is not tuple:
             raise ValueError("required_slices must be an immutable tuple")
         if not _ID.fullmatch(self.objective_id):
@@ -213,7 +215,10 @@ def decide_graduation(
     or untrusted receipts never graduate or consume an authenticated attempt.
     """
 
-    if not isinstance(policy, GraduationPolicy) or not isinstance(state, GateState):
+    # The host-owned state and frozen criterion must be the exact validated
+    # records, not subclasses that can override field reads and manufacture
+    # a prior `graduated` flag or alter the policy branch without a receipt.
+    if type(policy) is not GraduationPolicy or type(state) is not GateState:
         raise TypeError("expected GraduationPolicy and trusted GateState")
     if (type(state.next_attempt) is not int or state.next_attempt < 1
             or type(state.consumed_run_ids) is not frozenset

@@ -15,6 +15,11 @@ python -m labyrinth experiment --seed 42 --train-count 3 --eval-count 3 --artifa
 python -m labyrinth experiment --seed 42 --eval-count 3 --artifact-in training.json --report rerun.json
 python -m labyrinth train-toy --seed 0 --train-count 64 --eval-count 64 --checkpoint-out toy-checkpoint.json --report toy-comparison.json
 python -m labyrinth toy-eval --seed 0 --eval-count 64 --checkpoint toy-checkpoint.json --report toy-reloaded.json
+python -m labyrinth journey-plan --scope examples/scopes/empathy_declaration.json --cycle 0 --report planned-maze.json
+python -m labyrinth journey-plan --objective-contract examples/objectives/empathy_observable_declaration.json
+python -m labyrinth journey-plan --scope examples/scopes/program_specificity5_declaration.json --materialize-training
+python -m labyrinth journey-toy --scope examples/scopes/arithmetic_toy_declaration.json --epochs-by-cycle 4,4,4 --report toy-journey.json
+python -m labyrinth journey-toy-controls --scope examples/scopes/arithmetic_toy_declaration.json --epochs-by-cycle 4,4,4
 python -m unittest discover -s tests -v
 ```
 
@@ -65,6 +70,24 @@ Training artifacts contain answer keys because their purpose is to preserve demo
 
 The seed-0 fixture with 64 training and 64 held-out cases yields **0/64 baseline, 64/64 trained, 0/64 zero-update, and 0/64 corrupted-label control**. These numbers establish only that this tiny, explicitly engineered parameterization learned a two-operator numerical mapping and retained it across processes. They are **not** evidence of neural-language-model fine-tuning, transfer to tier 4, or general reasoning improvement. Checkpoints preserve bounded coefficients and an integrity digest; neither proves the claimed training history authentic.
 
+## Regenerative, objective-conditioned Labyrinth (development prototype)
+
+Patrick's complete intended learner/maze/Minotaur behavior, including the empathy example and what it means to retain learning when a maze resets, is preserved in [REGENERATIVE_LABYRINTH_VISION_V1.md](docs/REGENERATIVE_LABYRINTH_VISION_V1.md). The architecture is **declare → generate → train → development-examine → regenerate or provisionally pass**. The independent, signed private graduation gate remains a separate authority.
+
+`journey-plan` parses a bounded, immutable JSON declaration with an objective, domain, specific skills, specificity, scale, a maximum cycle budget, and seed. It deterministically schedules training chambers for each skill. Failed-skill feedback can increase the next cycle's chamber allocation, and each regeneration changes room identities and seeds. A declaration is data; it is not evaluated as code. `--objective-contract` accepts an alternative declaration describing the intention, per-skill focus tags, observable behavioral targets, provisional rubric identifiers, thresholds and forbidden claims. These are not executable evaluators. `journey-plan` previews a maze but never trains a model.
+
+Opt-in `journey-plan --materialize-training` yields only trainee-visible training prompts, **not answers or private exams**. For an arithmetic-only scope a deterministic bounded Minotaur routing policy selects actual difficulty and *practice/contrast/word-problem* tactics. An operator-trusted adapter may propose alternative choices through `route_training_rooms`; two distinct adapter implementations have been tested, but this is not a trained general-purpose Minotaur. For a `program_reasoning` scope the approved training-only source restricts actual program structure by specificity: from mixed 3–4 step programs at level 1 to cross-register programs with modular wraparound on both registers at level 5. Other built-in skills retain ordinary training providers, and empathy remains unsupported for executable training. `--materialize-training` will reject unsupported skills.
+
+`journey-toy` demonstrates the bounded end-to-end control loop **with actual changes to a four-parameter arithmetic learner across maze resets**, fresh seeded development cases, a frozen zero-update baseline, and per-cycle checkpoint identities. `journey-toy-controls` runs fixed-cycle baseline, correct-label, zero-update and corrupted-label arms from identical starting values, with identical case visits and matched development problems. On one deterministic fixture the correct-label arm improves while controls do not; this is a narrow arithmetic result, not a model-generalization claim. Both commands accept only an arithmetic-only declaration and never produce pretrained-model checkpoints. Development scores and model hashes are local self-reports, not independent attestation. An exhausted budget is an expected, valid outcome, not a graduation failure to conceal. All three commands create output reports exclusively: existing report files are not overwritten.
+
+The optional `TrainingCorridorRunner` now actually generates one **arithmetic TRAIN** chamber at a time after the previous response has been scored. An `AdaptiveWalkState` shifts training emphasis after feedback; the persistent `MinotaurTrainingPolicy` learns bounded room difficulty/tactic preferences from approved TRAIN outcomes. A learner callback sees only a prompt-only `TraineeRoomView`. Every case must match a preapproved exact room/case/skill/tactic/difficulty/prompt commitment. The policy is bound to the entire declared scope fingerprint, and only a validated `JourneyState` containing prior train/development-exam seals can start a regenerated corridor. Policy registry or checkpoint-hash changes alone are **not** evidence of neural or semantic learning. This is an in-repo **tabular taskmasker**, not Minotaur's trained general-purpose neural model; empathy has no executable provider yet.
+
+`journey_qualification.py` provides a separate *identity-only* handoff from an internal developmental Minotaur pass to the existing signed private graduation gate. It does not expose private questions, provision an evaluator, or turn a trainer's self-reported progress into certified mastery. Independent evaluator custody and actual transfer performance must still be established.
+
+The `Minotaur` developmental examiner operates on untrusted score receipts and enforces per-skill, per-split coverage, paired improvement, absolute performance, and nonreused evidence commitments. Its optional model suggestion interface validates proposed tactics and difficulty, and the **opt-in arithmetic routing generator consumes those suggestions** to change training problems; it is **not** an autonomous trained Minotaur model and is not used by the toy training journey. Operator-installed Python adapters execute with caller permissions (no sandbox). Unsupported domains such as empathy can be declared and planned, but are not trainable until a validated challenge provider, rubric, learning backend, and adversarial evaluation are supplied.
+
+**Qualification gap:** structural specificity is implemented only for one program-reasoning family; it does not yet apply to arbitrary domains or individual intra-maze feedback. There is no checkpoint-resumed HF LoRA/MeZO path across journeys, no trained general Minotaur weights, no evidence of broad transfer or retained old competencies, and no independent private graduation result. The source implementation is a testable development slice toward the full vision, **not completion of that vision**.
+
 ## Optional real language-model LoRA pilot (unqualified runtime)
 
 The `train-hf` and `eval-hf` commands operate on an **already-local**, small Hugging Face causal-LM checkpoint in safetensors format. Unlike `experiment` and `train-toy`, this path loads optional PyTorch, Transformers and PEFT dependencies and attempts a genuine LoRA supervised update of **train-split answer tokens only**. It records trainable tensor changes, saves a separate adapter, compares same-base zero-update and corrupted-label controls, and supports reload/evaluation in a separately started Python process. Reports now count strict response **format validity separately from answer accuracy**, so becoming better at the required answer syntax cannot masquerade as improved mathematics.
@@ -73,6 +96,8 @@ The `train-hf` and `eval-hf` commands operate on an **already-local**, small Hug
 # Optional packages must already exist in your chosen isolated Python environment.
 # The model directory must contain local config/tokenizer/safetensors files, <= 1 GiB weights.
 python -m labyrinth train-hf --model-path LOCAL_HF_MODEL_DIR --output-dir NEW_EMPTY_PARENT/RUN_001 --device cpu --steps 2
+# Opt-in cycle 0 under a predeclared, arithmetic-only objective:
+python -m labyrinth train-hf --model-path LOCAL_HF_MODEL_DIR --output-dir NEW_EMPTY_PARENT/SCOPED_0 --device cpu --steps 8 --tiers 1 --scope-json examples/scopes/arithmetic_toy_declaration.json --cycle-index 0
 # Invoke separately to qualify persistence; report path must not exist.
 python -m labyrinth eval-hf --run-dir NEW_EMPTY_PARENT/RUN_001 --report NEW_EMPTY_PARENT/reload.json
 # Offline check of a saved HF pilot report's internally reproducible fields:
@@ -94,6 +119,22 @@ means the model emitted a parseable numeric suffix after an operator-provided
 scaffold, not that the model independently learned output formatting. This
 separates numeric correctness from the trivial constant format token but does
 not make public finite arithmetic templates an independent reasoning exam.
+
+The new opt-in scoped HF path accepts an immutable training declaration and materializes a deterministic TRAIN-only maze. After a first cycle, its `--predecessor-run-dir`, `--predecessor-report-sha256`, `--predecessor-lora-sha256`, `--resume-authority-ref`, `--cycle-index` and same `--scope-json` flags ask to continue **the verified prior LoRA tensor values**, with newly generated public training cases. The predecessor must be a locally preserved, matching v3 report and adapter; mismatched base/source/scope or skipped cycle indices fail closed. A previous unscoped v3 report needs an explicit `--allow-legacy-unscoped-predecessor` at cycle one, recorded as an operator-selected transfer, **not** evidence of prior same-objective learning. A scoped successor now **fails closed by default** at the `run_pilot` API and CLI: the signed and atomically reserved development-FAIL path is `run_exam_bound_successor`, while `--unauthenticated-research-resume` must be **explicitly** requested for an unsigned mechanical experiment and records `UNAUTHENTICATED_RESEARCH_ONLY`. The two-cycle `scripts/qualify_hf_regenerative.py` is such a research-only mechanical probe, **not** a Minotaur-authorized successor. The source-level, in-process guard does not defend against arbitrary trainer-code execution, prove external evaluator key custody, or durably prevent host event replay. The pilot records cumulative public training/diagnostic case commitments; it does **not** establish custody of independent Minotaur exam items. Each sham, candidate, and corrupted-label arm starts from identical retained LoRA values, but optimizer moments are *not* resumed. These interfaces have source-level/mock tests; no new multi-cycle pretrained host execution or qualified improvement is claimed.
+
+The opt-in `labyrinth.hf_development_event_journal` gives an operator-owned
+SQLite/WAL reservation callback for the separately signed development-FAIL
+successor entry point (`run_exam_bound_successor`): initialize a journal once
+with `initialize_development_event_journal`, then provide a callback that calls
+`reserve_development_event(path, event_id, state_key=host_secret)`. A successful
+reservation is atomically committed **before** successor training begins;
+subsequent calls, including after a simulated post-reservation crash, reject
+the same event. `inspect_development_event` and `reconcile_development_event`
+record at most one bounded **operator observation**, never a verified neural
+result, event release, or graduation. Host filesystem custody, off-trainee
+state-MAC key storage, whole-database rollback prevention, and real crash/host
+recovery still require external qualification. This does not automatically
+guard the separately exposed experimental `hf_pilot` entry point.
 
 `audit-hf-report` is dependency-free and re-generates the declared train/eval case IDs, held-out prompt commitment, control metadata, training visit order, and reported evaluation metrics. It verifies file/tensor **digest receipt syntax**, but does not open or authenticate the checkpoint files. For responses whose entire text is recoverable from the stored 128-character preview, it independently rechecks the response digest and answer score. Longer responses whose hashes differ from their preview yield `INCOMPLETE`, never an unqualified `PASS`. Inconsistent records yield `FAIL`; the command exits nonzero for both. Source fingerprints must match the auditor checkout, so older reports should be audited at their source revision. All receipts and model-origin claims are self-reported: even `PASS` is **not proof** that training actually occurred or improved reasoning. The original run's full generated text was not always retained; future run schemas should save auditable full text in a separately controlled evidence artifact.
 
@@ -135,7 +176,23 @@ Important limitations:
 - `labyrinth/runner.py`: scored runs, artifacts, four-arm controls, JSON provenance
 - `labyrinth/report_audit.py`: offline report consistency verifier; neither provenance authentication nor a learning claim
 - `labyrinth/toy_backend.py`: explicitly limited CPU parameter learning and checkpoint reload
+- `labyrinth/training_scope.py`: frozen, bounded declarations; no executable objective content
+- `labyrinth/objective_contract.py`: per-skill human-authored intent, focus and evaluation targets; no executable rubrics
+- `labyrinth/regenerative_maze.py`: deterministic per-cycle maze scheduling and weak-skill rebalancing
+- `labyrinth/journey_challenges.py`: strict, approved training-only challenge providers
+- `labyrinth/semantic_chambers.py`: bounded actual structural specificity for program training challenges
+- `labyrinth/journey.py`: regenerative state machine and checkpoint/holdout separation
+- `labyrinth/minotaur_exam.py`: development mastery decision, never final graduation
+- `labyrinth/minotaur_model.py`: bounded operator-trusted taskmaster suggestion interface
+- `labyrinth/taskmaster_routing.py`: opt-in arithmetic room generation driven by validated taskmaster suggestions
+- `labyrinth/journey_toy.py`: arithmetic toy-model journey with retained parameter updates
+- `labyrinth/journey_controls.py`: matched-exposure toy control arms across regenerated cycles
+- `labyrinth/adaptive_corridors.py`: TRAIN-only per-chamber feedback and prior development-exam exclusion
+- `labyrinth/minotaur_policy_learning.py`: persistent approved-TRAIN tabular taskmaster with exact-scope binding
+- `labyrinth/journey_policy_runner.py`: one-by-one arithmetic room generation from learned taskmaster feedback
+- `labyrinth/journey_qualification.py`: public identity handoff to independent signed graduation custody
 - `labyrinth/hf_pilot.py`: opt-in local HF/PEFT LoRA SFT and same-checkpoint controls; no default ML dependency
+- `labyrinth/hf_resume_bridge.py`: source- and tensor-pinned trainable PEFT continuation between scoped cycles
 - `labyrinth/hf_report_audit.py`: dependency-free self-consistency audit of HF pilot receipts and available predictions
 - `labyrinth/cli.py`: `run`, `experiment`, `audit-report`, `train-toy`, `toy-eval`, `train-hf`, and `eval-hf` commands
 

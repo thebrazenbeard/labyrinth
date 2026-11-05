@@ -1,0 +1,17 @@
+{
+  "schema": "labyrinth.training-scope.v1",
+  "objective_id": "vera-local-empathy-v1",
+  "domain": "empathy",
+  "skills": [
+    "cognitive_empathy",
+    "emotional_recognition",
+    "reactive_empathy",
+    "compassionate_empathy",
+    "boundary_recognition",
+    "empathic_reasoning"
+  ],
+  "specificity": 4,
+  "scale": 3,
+  "max_cycles": 3,
+  "seed": 20261030
+}

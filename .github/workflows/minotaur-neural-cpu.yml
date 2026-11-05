@@ -5,7 +5,124 @@ on:
     paths:
       - "labyrinth/minotaur_*.py"
       - "labyrinth/toy_backend.py"
+      - "labyrinth/runner.py"
+      - "labyrinth/training_scope.py"
+      - "labyrinth/evaluation.py"
+      - "labyrinth/maze.py"
+      - "labyrinth/regenerative_maze.py"
+      - "labyrinth/journey.py"
+      - "labyrinth/program_maze.py"
+      - "labyrinth/taskmaster_routing.py"
+      - "labyrinth/minotaur_model.py"
+      - "labyrinth/minotaur_policy_learning.py"
+      - "labyrinth/adaptive_corridors.py"
+      - "labyrinth/journey_policy_runner.py"
+      - "labyrinth/journey_challenges.py"
+      - "labyrinth/semantic_chambers.py"
+      - "labyrinth/hf_development_transition.py"
+      - "labyrinth/hf_resume_bridge.py"
+      - "labyrinth/hf_pilot.py"
+      - "labyrinth/neural_resume_checkpoint.py"
+      - "labyrinth/hf_report_audit.py"
+      - "labyrinth/objective_contract.py"
+      - "labyrinth/hf_development_event_journal.py"
+      - "labyrinth/recovery_composition.py"
+      - "labyrinth/frozen_base_binding.py"
+      - "labyrinth/blind_evaluation_custody.py"
+      - "labyrinth/blind_transition_bridge.py"
+      - "labyrinth/pretrained_model_provenance.py"
+      - "labyrinth/model_inference_custody.py"
+      - "labyrinth/signed_exam_lineage.py"
+      - "labyrinth/neural_run_binding.py"
+      - "labyrinth/retention_qualification.py"
+      - "labyrinth/measured_weakness_feedback.py"
+      - "labyrinth/atomic_artifact_publication.py"
+      - "labyrinth/preregistered_control_matrix.py"
+      - "labyrinth/arithmetic_semantic_case_key.py"
+      - "labyrinth/retention_family_registry.py"
+      - "labyrinth/retention_entrypoint_guard.py"
+      - "labyrinth/monotonic_anchor_protocol.py"
+      - "labyrinth/measured_corridor_handoff.py"
+      - "labyrinth/measured_taskmaster_transition.py"
+      - "labyrinth/minotaur_development_feedback.py"
+      - "labyrinth/authority_publication_service.py"
+      - "labyrinth/arithmetic_retention_admission.py"
+      - "labyrinth/development_event_reservation_service.py"
+      - "labyrinth/measured_sentiment_corridors.py"
+      - "labyrinth/minilm_optimizer_state_resume.py"
+      - "labyrinth/sealed_semantic_exam_protocol.py"
+      - "labyrinth/external_monotonic_authority_contract.py"
+      - "labyrinth/measured_neural_batch_binding.py"
+      - "labyrinth/train_exposure_attestation.py"
+      - "labyrinth/maze_crash_resume_journal.py"
+      - "labyrinth/pinned_model_inference_receipt.py"
+      - "scripts/qualify_hf_regenerative.py"
+      - "scripts/qualify_maze_conditioned_minilm_cpu.py"
+      - "scripts/qualify_maze_multiseed_protocol_cpu.py"
+      - "scripts/qualify_neural_journey_e2e_cpu.py"
+      - "scripts/qualify_taskmaster_counterfactual_cpu.py"
+      - "scripts/qualify_minilm*.py"
+      - "scripts/qualify_model_bytes_provenance.py"
+      - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_adaptive_corridors.py"
+      - "tests/test_journey_policy_runner.py"
+      - "tests/test_journey_challenges.py"
+      - "tests/test_semantic_chambers.py"
+      - "tests/test_hf_development_transition.py"
+      - "tests/test_hf_resume_bridge.py"
+      - "tests/test_hf_regenerative_harness.py"
+      - "tests/test_hf_pilot.py"
+      - "tests/test_neural_resume_checkpoint.py"
+      - "tests/test_hf_event_recovery.py"
+      - "tests/test_recovery_composition.py"
+      - "tests/test_frozen_base_binding.py"
+      - "tests/test_blind_*.py"
+      - "tests/test_pretrained_model_provenance.py"
+      - "tests/test_provenance_runner_integration.py"
+      - "tests/test_qualify_minilm*.py"
+      - "tests/test_model_inference_custody.py"
+      - "tests/test_signed_exam_lineage.py"
+      - "tests/test_neural_run_binding.py"
+      - "tests/test_minotaur_policy_effectiveness_l8.py"
+      - "tests/test_retention_qualification.py"
+      - "tests/test_measured_weakness_feedback.py"
+      - "tests/test_atomic_artifact_publication.py"
+      - "tests/test_preregistered_control_matrix.py"
+      - "tests/test_arithmetic_semantic_case_key.py"
+      - "tests/test_retention_family_registry.py"
+      - "tests/test_retention_entrypoint_guard.py"
+      - "tests/test_monotonic_anchor_protocol.py"
+      - "tests/test_measured_corridor_handoff.py"
+      - "tests/test_measured_taskmaster_transition.py"
+      - "tests/test_minotaur_development_feedback.py"
+      - "tests/test_authority_publication_service.py"
+      - "tests/test_arithmetic_retention_admission.py"
+      - "tests/test_development_event_reservation_service.py"
+      - "tests/test_measured_sentiment_corridors.py"
+      - "tests/test_minilm_optimizer_state_resume.py"
+      - "tests/test_sealed_semantic_exam_protocol.py"
+      - "tests/test_external_monotonic_authority_contract.py"
+      - "tests/test_measured_neural_batch_binding.py"
+      - "tests/test_minilm_runner_optimizer_optin.py"
+      - "tests/test_train_exposure_attestation.py"
+      - "tests/test_maze_crash_resume_journal.py"
+      - "tests/test_minilm_measured_batches_optin.py"
+      - "tests/test_signed_minotaur_tactic_neural_selection.py"
+      - "tests/test_pinned_model_inference_receipt.py"
+      - "tests/test_qualify_maze_measured_tactics_cpu.py"
+      - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
+      - "tests/test_qualify_maze_prereg_controls_cpu.py"
+      - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
+      - "tests/test_qualify_neural_journey_e2e_cpu.py"
+      - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
+      - "tests/test_qualify_minotaur_neural_taskmaster_cpu.py"
+      - "tests/test_hf_report_audit.py"
+      - "tests/test_hf_journey_resume_integration.py"
+      - "tests/test_hf_scoped_report_audit.py"
+      - "tests/test_hf_program_scope.py"
+      - "tests/test_objective_contract.py"
+      - "tests/test_reserved_structural_transfer.py"
       - "tests/minotaur_required_tests.txt"
       - "tests/test_ci_membership.py"
       - "scripts/minotaur_ci.py"
@@ -16,7 +133,124 @@ on:
     paths:
       - "labyrinth/minotaur_*.py"
       - "labyrinth/toy_backend.py"
+      - "labyrinth/runner.py"
+      - "labyrinth/training_scope.py"
+      - "labyrinth/evaluation.py"
+      - "labyrinth/maze.py"
+      - "labyrinth/regenerative_maze.py"
+      - "labyrinth/journey.py"
+      - "labyrinth/program_maze.py"
+      - "labyrinth/taskmaster_routing.py"
+      - "labyrinth/minotaur_model.py"
+      - "labyrinth/minotaur_policy_learning.py"
+      - "labyrinth/adaptive_corridors.py"
+      - "labyrinth/journey_policy_runner.py"
+      - "labyrinth/journey_challenges.py"
+      - "labyrinth/semantic_chambers.py"
+      - "labyrinth/hf_development_transition.py"
+      - "labyrinth/hf_resume_bridge.py"
+      - "labyrinth/hf_pilot.py"
+      - "labyrinth/neural_resume_checkpoint.py"
+      - "labyrinth/hf_report_audit.py"
+      - "labyrinth/objective_contract.py"
+      - "labyrinth/hf_development_event_journal.py"
+      - "labyrinth/recovery_composition.py"
+      - "labyrinth/frozen_base_binding.py"
+      - "labyrinth/blind_evaluation_custody.py"
+      - "labyrinth/blind_transition_bridge.py"
+      - "labyrinth/pretrained_model_provenance.py"
+      - "labyrinth/model_inference_custody.py"
+      - "labyrinth/signed_exam_lineage.py"
+      - "labyrinth/neural_run_binding.py"
+      - "labyrinth/retention_qualification.py"
+      - "labyrinth/measured_weakness_feedback.py"
+      - "labyrinth/atomic_artifact_publication.py"
+      - "labyrinth/preregistered_control_matrix.py"
+      - "labyrinth/arithmetic_semantic_case_key.py"
+      - "labyrinth/retention_family_registry.py"
+      - "labyrinth/retention_entrypoint_guard.py"
+      - "labyrinth/monotonic_anchor_protocol.py"
+      - "labyrinth/measured_corridor_handoff.py"
+      - "labyrinth/measured_taskmaster_transition.py"
+      - "labyrinth/minotaur_development_feedback.py"
+      - "labyrinth/authority_publication_service.py"
+      - "labyrinth/arithmetic_retention_admission.py"
+      - "labyrinth/development_event_reservation_service.py"
+      - "labyrinth/measured_sentiment_corridors.py"
+      - "labyrinth/minilm_optimizer_state_resume.py"
+      - "labyrinth/sealed_semantic_exam_protocol.py"
+      - "labyrinth/external_monotonic_authority_contract.py"
+      - "labyrinth/measured_neural_batch_binding.py"
+      - "labyrinth/train_exposure_attestation.py"
+      - "labyrinth/maze_crash_resume_journal.py"
+      - "labyrinth/pinned_model_inference_receipt.py"
+      - "scripts/qualify_hf_regenerative.py"
+      - "scripts/qualify_maze_conditioned_minilm_cpu.py"
+      - "scripts/qualify_maze_multiseed_protocol_cpu.py"
+      - "scripts/qualify_neural_journey_e2e_cpu.py"
+      - "scripts/qualify_taskmaster_counterfactual_cpu.py"
+      - "scripts/qualify_minilm*.py"
+      - "scripts/qualify_model_bytes_provenance.py"
+      - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_adaptive_corridors.py"
+      - "tests/test_journey_policy_runner.py"
+      - "tests/test_journey_challenges.py"
+      - "tests/test_semantic_chambers.py"
+      - "tests/test_hf_development_transition.py"
+      - "tests/test_hf_resume_bridge.py"
+      - "tests/test_hf_regenerative_harness.py"
+      - "tests/test_hf_pilot.py"
+      - "tests/test_neural_resume_checkpoint.py"
+      - "tests/test_hf_event_recovery.py"
+      - "tests/test_recovery_composition.py"
+      - "tests/test_frozen_base_binding.py"
+      - "tests/test_blind_*.py"
+      - "tests/test_pretrained_model_provenance.py"
+      - "tests/test_provenance_runner_integration.py"
+      - "tests/test_qualify_minilm*.py"
+      - "tests/test_model_inference_custody.py"
+      - "tests/test_signed_exam_lineage.py"
+      - "tests/test_neural_run_binding.py"
+      - "tests/test_minotaur_policy_effectiveness_l8.py"
+      - "tests/test_retention_qualification.py"
+      - "tests/test_measured_weakness_feedback.py"
+      - "tests/test_atomic_artifact_publication.py"
+      - "tests/test_preregistered_control_matrix.py"
+      - "tests/test_arithmetic_semantic_case_key.py"
+      - "tests/test_retention_family_registry.py"
+      - "tests/test_retention_entrypoint_guard.py"
+      - "tests/test_monotonic_anchor_protocol.py"
+      - "tests/test_measured_corridor_handoff.py"
+      - "tests/test_measured_taskmaster_transition.py"
+      - "tests/test_minotaur_development_feedback.py"
+      - "tests/test_authority_publication_service.py"
+      - "tests/test_arithmetic_retention_admission.py"
+      - "tests/test_development_event_reservation_service.py"
+      - "tests/test_measured_sentiment_corridors.py"
+      - "tests/test_minilm_optimizer_state_resume.py"
+      - "tests/test_sealed_semantic_exam_protocol.py"
+      - "tests/test_external_monotonic_authority_contract.py"
+      - "tests/test_measured_neural_batch_binding.py"
+      - "tests/test_minilm_runner_optimizer_optin.py"
+      - "tests/test_train_exposure_attestation.py"
+      - "tests/test_maze_crash_resume_journal.py"
+      - "tests/test_minilm_measured_batches_optin.py"
+      - "tests/test_signed_minotaur_tactic_neural_selection.py"
+      - "tests/test_pinned_model_inference_receipt.py"
+      - "tests/test_qualify_maze_measured_tactics_cpu.py"
+      - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
+      - "tests/test_qualify_maze_prereg_controls_cpu.py"
+      - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
+      - "tests/test_qualify_neural_journey_e2e_cpu.py"
+      - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
+      - "tests/test_qualify_minotaur_neural_taskmaster_cpu.py"
+      - "tests/test_hf_report_audit.py"
+      - "tests/test_hf_journey_resume_integration.py"
+      - "tests/test_hf_scoped_report_audit.py"
+      - "tests/test_hf_program_scope.py"
+      - "tests/test_objective_contract.py"
+      - "tests/test_reserved_structural_transfer.py"
       - "tests/minotaur_required_tests.txt"
       - "tests/test_ci_membership.py"
       - "scripts/minotaur_ci.py"
@@ -54,15 +288,17 @@ jobs:
           python-version: "3.12"
       - name: Install pinned CPU neural dependencies
         run: |
-          python -m pip install --disable-pip-version-check -e . "numpy==2.5.4" "safetensors==0.8.0"
+          python -m pip install --disable-pip-version-check -e . "numpy==2.5.4" "safetensors==0.8.0" "cryptography==50.0.2"
           python -m pip install --disable-pip-version-check --extra-index-url https://download.pytorch.org/whl/cpu "torch==2.5.1+cpu"
       - name: Require CPU PyTorch and pinned versions
         run: |
           python - <<'PY'
+          import cryptography
           import numpy
           import safetensors
           import torch
 
+          assert cryptography.__version__ == "50.0.2", cryptography.__version__
           assert numpy.__version__ == "2.5.4", numpy.__version__
           assert safetensors.__version__ == "0.8.0", safetensors.__version__
           assert torch.__version__ == "2.5.1+cpu", torch.__version__
@@ -72,3 +308,75 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_ci_membership.py' -v
           python -m scripts.minotaur_ci
+          python -m unittest tests.test_adaptive_corridors tests.test_journey_policy_runner tests.test_journey_challenges tests.test_semantic_chambers tests.test_minotaur_exam -v
+          python -m unittest tests.test_hf_development_transition tests.test_hf_resume_bridge tests.test_hf_regenerative_harness -v
+          python -m unittest tests.test_hf_pilot tests.test_hf_report_audit tests.test_hf_journey_resume_integration -v
+          # Full-state optimizer recovery and measured frozen-base binding
+          # are required CPU tests, never optional/skip-allowed smoke checks.
+          python - <<'PY'
+          import unittest
+
+          recovery = unittest.defaultTestLoader.loadTestsFromName(
+              "tests.test_neural_resume_checkpoint")
+          recovery_result = unittest.TextTestRunner(verbosity=2).run(recovery)
+          if (recovery_result.testsRun < 8 or not recovery_result.wasSuccessful()
+                  or recovery_result.skipped):
+              raise SystemExit("required full-state recovery CPU tests failed or skipped")
+
+          base = unittest.defaultTestLoader.loadTestsFromName(
+              "tests.test_frozen_base_binding")
+          base_result = unittest.TextTestRunner(verbosity=2).run(base)
+          if (base_result.testsRun < 9 or not base_result.wasSuccessful()
+                  or base_result.skipped):
+              raise SystemExit("required frozen-base CPU tests failed or skipped")
+
+          taskmaster = unittest.defaultTestLoader.loadTestsFromName(
+              "tests.test_qualify_minotaur_neural_taskmaster_cpu")
+          taskmaster_result = unittest.TextTestRunner(verbosity=2).run(taskmaster)
+          if (taskmaster_result.testsRun < 7 or not taskmaster_result.wasSuccessful()
+                  or taskmaster_result.skipped):
+              raise SystemExit("required neural taskmaster CPU tests failed or skipped")
+
+          # This checks deterministic source and custody boundaries under the
+          # pinned dependency-present runner. It is NOT a physical pretrained
+          # training run or an independent private final examination.
+          new_required = (
+              ("tests.test_monotonic_anchor_protocol", 10),
+              ("tests.test_retention_family_registry", 8),
+              ("tests.test_retention_entrypoint_guard", 9),
+              ("tests.test_qualify_maze_conditioned_minilm_cpu", 12),
+              ("tests.test_qualify_neural_journey_e2e_cpu", 13),
+              ("tests.test_qualify_taskmaster_counterfactual_cpu", 11),
+              ("tests.test_measured_weakness_feedback", 7),
+              ("tests.test_atomic_artifact_publication", 10),
+              ("tests.test_preregistered_control_matrix", 18),
+              ("tests.test_arithmetic_semantic_case_key", 7),
+              ("tests.test_measured_corridor_handoff", 5),
+              ("tests.test_measured_taskmaster_transition", 5),
+              ("tests.test_minotaur_development_feedback", 7),
+              ("tests.test_authority_publication_service", 10),
+              ("tests.test_arithmetic_retention_admission", 8),
+              ("tests.test_development_event_reservation_service", 15),
+              ("tests.test_measured_sentiment_corridors", 5),
+              ("tests.test_minilm_optimizer_state_resume", 15),
+              ("tests.test_sealed_semantic_exam_protocol", 17),
+              ("tests.test_external_monotonic_authority_contract", 13),
+              ("tests.test_measured_neural_batch_binding", 6),
+              ("tests.test_minilm_runner_optimizer_optin", 5),
+              ("tests.test_train_exposure_attestation", 10),
+              ("tests.test_maze_crash_resume_journal", 13),
+              ("tests.test_minilm_measured_batches_optin", 7),
+              ("tests.test_signed_minotaur_tactic_neural_selection", 2),
+              ("tests.test_pinned_model_inference_receipt", 12),
+              ("tests.test_qualify_maze_measured_tactics_cpu", 4),
+              ("tests.test_qualify_maze_multiseed_protocol_cpu", 21),
+              ("tests.test_qualify_maze_prereg_controls_cpu", 5),
+          )
+          for module_name, min_count in new_required:
+              suite = unittest.defaultTestLoader.loadTestsFromName(module_name)
+              result = unittest.TextTestRunner(verbosity=2).run(suite)
+              if (result.testsRun < min_count or not result.wasSuccessful()
+                      or result.skipped):
+                  raise SystemExit(f"required CPU source/custody tests failed or skipped: {module_name}")
+          PY
+          python -m unittest tests.test_hf_scoped_report_audit tests.test_hf_program_scope tests.test_objective_contract tests.test_reserved_structural_transfer -v

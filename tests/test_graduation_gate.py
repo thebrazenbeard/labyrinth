@@ -144,6 +144,36 @@ class MinotaurGraduationTests(unittest.TestCase):
                 self.assertEqual(result.disposition, "BLOCKED")
                 self.assertEqual(result.state, GateState())
 
+    def test_subclassed_trusted_state_cannot_claim_graduation_without_evidence(self):
+        # A user-controlled subclass once impersonated a previously bound,
+        # graduated host state via __getattribute__, despite its actual stored
+        # fields remaining an unbound never-graduated GateState.
+        from labyrinth.graduation_gate import _policy_fingerprint
+
+        class ForgedState(GateState):
+            def __getattribute__(self, name):
+                if name == "policy_fingerprint":
+                    return _policy_fingerprint(POLICY)
+                if name == "graduated":
+                    return True
+                return object.__getattribute__(self, name)
+
+        self.assertIsNone(object.__getattribute__(ForgedState(), "policy_fingerprint"))
+        self.assertIs(object.__getattribute__(ForgedState(), "graduated"), False)
+        with self.assertRaises(TypeError):
+            decide_graduation(POLICY, ForgedState(), None, None,
+                              independent_evaluator_key=None)
+
+        class ForgedPolicy(GraduationPolicy):
+            def __getattribute__(self, name):
+                if name == "objective_kind":
+                    return "skill_mastery"
+                return object.__getattribute__(self, name)
+
+        with self.assertRaises(TypeError):
+            decide_graduation(ForgedPolicy(**POLICY.__dict__), GateState(), None, None,
+                              independent_evaluator_key=None)
+
     def test_tamper_binding_subject_session_run_and_attempt(self):
         for field, value in (
             ("objective_id", "other"), ("trainee_sha256", "d" * 64),
@@ -236,6 +266,31 @@ class MinotaurGraduationTests(unittest.TestCase):
         graduated = decision(evidence, policy=mastery_policy)
         self.assertEqual(decide_graduation(POLICY, graduated.state, None, None,
                          independent_evaluator_key=None).disposition, "BLOCKED")
+
+    def test_forged_objective_kind_cannot_recast_training_effect_as_mastery(self):
+        # A malicious equality operator previously made an invalid policy
+        # pass the allowlist, then compare equal to skill_mastery at the gate.
+        evidence = evaluated_receipt(controls_correct=True)
+        self.assertEqual(decision(evidence).disposition, "STAY")
+
+        class GhostKind(str):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class ProxyKind:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        for invalid in (GhostKind("not-an-approved-kind"), ProxyKind()):
+            with self.subTest(kind=type(invalid).__name__):
+                with self.assertRaises(ValueError):
+                    replace(POLICY, objective_kind=invalid)
 
     def test_sample_threshold_alone_does_not_prove_skill_mastery(self):
         evidence = evaluated_receipt(controls_correct=True)

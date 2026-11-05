@@ -1,0 +1,10 @@
+{
+  "schema": "labyrinth.training-scope.v1",
+  "objective_id": "toy-arithmetic-journey-v1",
+  "domain": "reasoning",
+  "skills": ["arithmetic"],
+  "specificity": 3,
+  "scale": 3,
+  "max_cycles": 3,
+  "seed": 20261030
+}
