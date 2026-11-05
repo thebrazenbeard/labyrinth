@@ -6,6 +6,28 @@ It is a working **prototype**, not evidence of generalized reasoning improvement
 
 ## Run it
 
+### Ungraded, deterministic training visits
+
+For an external, source-reviewed training corpus (for example, role-conditioned
+coding responses), Labyrinth can select case **IDs** without inventing a
+grade or advancing a mastery level:
+
+```python
+from labyrinth.curriculum import CurriculumSpec, schedule_training_cases
+
+spec = CurriculumSpec(levels=("persona",), distinct_challenges_required=3)
+visits = schedule_training_cases(
+    spec, {"persona": ("one-001", "one-002", "one-003", "one-004")},
+    run_seed=74413, steps=4,
+)
+```
+
+This accepts **one training level only**; it does not read answers, train a
+model, score personality adherence, read holdouts, or promote a curriculum.
+Callers must supply exclusively reviewed training IDs and bind the resulting
+order/seeds to their own data and model receipts. For graded progression, keep
+using `next_training_case` plus externally scored `record_training_result`.
+
 Requires Python 3.10+; core functionality uses the standard library.
 
 ```bash

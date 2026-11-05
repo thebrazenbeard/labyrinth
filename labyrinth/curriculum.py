@@ -110,6 +110,58 @@ def _digest_int(*parts: object) -> int:
     return int.from_bytes(hashlib.sha256(encoded).digest()[:8], "big")
 
 
+def _case_at_visit(level: str, ids: Sequence[str], *, run_seed: int, visit: int) -> TrainingCase:
+    """Select a deterministic training-only case without reading grade state."""
+    ordered = sorted(ids)
+    cycle, slot = divmod(visit, len(ordered))
+    permutation = sorted(
+        ordered,
+        key=lambda item: (_digest_int("permutation", run_seed, level, cycle, item), item),
+    )
+    challenge_id = permutation[slot]
+    # Adapters share a signed-31-bit-safe seed contract (including Ollama).
+    seed = _digest_int("case", run_seed, level, cycle, challenge_id) % (2**31)
+    return TrainingCase(level, challenge_id, seed)
+
+
+def schedule_training_cases(
+    spec: CurriculumSpec,
+    challenge_ids_by_level: Mapping[str, Sequence[str]],
+    *,
+    run_seed: int,
+    steps: int,
+) -> tuple[TrainingCase, ...]:
+    """Build a bounded, ungraded training-only visitation schedule.
+
+    A single explicitly named training level is required: moving between
+    levels needs real externally scored observations and therefore belongs to
+    ``record_training_result``. This function neither accepts scores nor
+    creates ``CurriculumState`` and does not promote or evaluate anything.
+
+    Catalog values are identifiers, not prompts, answers or holdout cases.
+    The caller must admit only training IDs into this catalog.
+    """
+    if not isinstance(spec, CurriculumSpec) or len(spec.levels) != 1:
+        raise ValueError("ungraded scheduling requires a single-level CurriculumSpec")
+    if type(run_seed) is not int or run_seed < 0:
+        raise ValueError("run_seed must be a nonnegative integer")
+    if type(steps) is not int or not 1 <= steps <= 128:
+        raise ValueError("steps must be an integer in [1, 128]")
+    level = spec.levels[0]
+    if not isinstance(challenge_ids_by_level, Mapping) or set(challenge_ids_by_level) != {level}:
+        raise ValueError("catalog must contain only the named training level")
+    ids = challenge_ids_by_level[level]
+    if (
+        isinstance(ids, (str, bytes))
+        or not isinstance(ids, Sequence)
+        or len(ids) < spec.distinct_challenges_required
+        or any(type(item) is not str or not item for item in ids)
+        or len(set(ids)) != len(ids)
+    ):
+        raise ValueError("training level requires enough distinct nonempty challenge IDs")
+    return tuple(_case_at_visit(level, ids, run_seed=run_seed, visit=i) for i in range(steps))
+
+
 def _validate_state(spec: CurriculumSpec, state: CurriculumState) -> None:
     """Replay progression to reject contaminated or forged restored states."""
     if not 0 <= state.level_index < len(spec.levels):
@@ -164,14 +216,8 @@ def next_training_case(
         or len(ids) < spec.distinct_challenges_required
     ):
         raise ValueError(f"level {level!r} requires enough unique nonempty challenge ids")
-    ordered = sorted(ids)
     prior_at_level = sum(o.level == level for o in state.observations)
-    cycle, slot = divmod(prior_at_level, len(ordered))
-    permutation = sorted(ordered, key=lambda item: (_digest_int("permutation", run_seed, level, cycle, item), item))
-    challenge_id = permutation[slot]
-    # Adapters share a signed-31-bit-safe seed contract (including Ollama).
-    seed = _digest_int("case", run_seed, level, cycle, challenge_id) % (2**31)
-    return TrainingCase(level, challenge_id, seed)
+    return _case_at_visit(level, ids, run_seed=run_seed, visit=prior_at_level)
 
 
 def record_training_result(
