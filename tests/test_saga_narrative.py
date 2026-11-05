@@ -13,6 +13,7 @@ from labyrinth.cli import main
 from labyrinth.journey_toy import run_toy_journey
 from labyrinth.runner import save_json_new
 from labyrinth.saga_narrative import render_journey_chronicle
+from labyrinth.journey import DEVELOPMENT_PASSED_PENDING_PRIVATE_QUALIFICATION
 from labyrinth.training_scope import TrainingScopeSpec
 
 
@@ -31,7 +32,8 @@ class SagaNarrativeTests(unittest.TestCase):
         self.assertIn("THE LABYRINTH — saga-arithmetic", story)
         self.assertIn("Ariadne's thread", story)
         self.assertIn("Minotaur:", story)
-        self.assertIn("reported checkpoint digests", story)
+        self.assertIn("reported in-memory model digests", story)
+        self.assertIn("no saved checkpoint is established", story)
         self.assertIn("no graduation", story.lower())
         self.assertNotIn(self.report["cycles"][0]["exam_case_ids"][0], story)
         self.assertEqual(story.count("Cycle "), len(self.report["cycles"]))
@@ -53,6 +55,54 @@ class SagaNarrativeTests(unittest.TestCase):
         forged["cycles"][0]["checkpoint_before_sha256"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "broken or unchanged"):
             render_journey_chronicle(forged)
+
+    def test_development_pass_is_not_formal_graduation(self):
+        synthetic = deepcopy(self.report)
+        # Legacy reports without an event chain remain displayable; a rewritten
+        # chain-bearing report must pass the separate Ariadne replay check.
+        for field in ("ariadne_thread", "ariadne_thread_schema", "ariadne_thread_head_sha256"):
+            synthetic.pop(field, None)
+        synthetic["cycles"][-1]["exam_status"] = "PASS"
+        synthetic["cycles"][-1]["weak_skills"] = []
+        synthetic["final_phase"] = DEVELOPMENT_PASSED_PENDING_PRIVATE_QUALIFICATION
+        rendered = render_journey_chronicle(synthetic)
+        self.assertIn("Development criteria passed", rendered)
+        self.assertIn("graduation remains unestablished", rendered)
+        synthetic["cycles"][-1]["exam_status"] = "FAIL"
+        with self.assertRaisesRegex(ValueError, "contradicts"):
+            render_journey_chronicle(synthetic)
+
+    def test_chronicle_checks_ariadne_chain_if_present(self):
+        self.assertIn("local event chain verified internally", render_journey_chronicle(self.report))
+        forged = deepcopy(self.report)
+        forged["ariadne_thread"][1]["status"] = "TRAINING"
+        with self.assertRaisesRegex(ValueError, "Ariadne event chain/content mismatch"):
+            render_journey_chronicle(forged)
+
+        partial = deepcopy(self.report)
+        partial.pop("ariadne_thread_head_sha256")
+        with self.assertRaisesRegex(ValueError, "Ariadne thread head mismatch"):
+            render_journey_chronicle(partial)
+
+    def test_nonterminal_pass_cannot_regenerate_a_new_cycle(self):
+        self.assertGreaterEqual(len(self.report["cycles"]), 2)
+        forged = deepcopy(self.report)
+        forged["cycles"][0]["exam_status"] = "PASS"
+        with self.assertRaisesRegex(ValueError, "only a failed development exam"):
+            render_journey_chronicle(forged)
+
+    def test_rejects_impossible_toy_producer_counters(self):
+        for field, value in (
+            ("training_case_count", 1_000_000),
+            ("parameter_updates", 1_000_000),
+            ("exam_case_count", 1_000_000),
+            ("epochs", 1_001),
+        ):
+            with self.subTest(field=field):
+                forged = deepcopy(self.report)
+                forged["cycles"][0][field] = value
+                with self.assertRaisesRegex(ValueError, "impossible toy journey"):
+                    render_journey_chronicle(forged)
 
     def test_cli_reads_existing_report_without_changing_it(self):
         with TemporaryDirectory() as tmp:
