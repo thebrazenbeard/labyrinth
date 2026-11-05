@@ -1,0 +1,133 @@
+{
+  "artifact": {
+    "layer_dimensions": [
+      3,
+      16,
+      2
+    ],
+    "manifest_semantic_sha256": "c042e5d1af77f27f9cb6238cbb3fce55a0ae4243897b31066c4a618a3788e64b",
+    "numeric_representation": "exact Python integers, not FP tensors",
+    "pretty_json_artifact_bytes": 1522,
+    "pretty_json_artifact_sha256": "2acfe3cae0520862463e8a614112a9a695963e51eecb111cd4ea16d571b947b6",
+    "scalar_parameters_nonzero": 66,
+    "scalar_parameters_total": 98,
+    "source_package_bytes_excluded": true
+  },
+  "benchmark": "boolean_relu_v1_exhaustive_cpu_python",
+  "domain": {
+    "agreement": true,
+    "exhaustive_inputs": 8,
+    "gradients_used": false,
+    "input_abi": [
+      "a",
+      "b",
+      "carry_in"
+    ],
+    "output_abi": [
+      "sum_bit",
+      "carry_out"
+    ],
+    "training_steps": 0
+  },
+  "evidence_class": "LOCAL_PROCESS_BENCHMARK_ONLY",
+  "interpretation_limits": [
+    "Pure-Python exact-integer ReLU interpretation, not GPU-optimized tensor inference.",
+    "Timing includes Python ABI validation/loops; tiny benchmark is overhead-sensitive.",
+    "8 test inputs prove only exact behavior on this finite 3-bit domain.",
+    "Larger Boolean domains have exponentially growing truth-table compiler output.",
+    "No inference of LLM capabilities, GGUF compatibility or production speed from these data.",
+    "Host-reported physical RAM may refer to host rather than container allocation."
+  ],
+  "machine": {
+    "gpu": "not_detected_by_stdlib; no GPU inference measured",
+    "machine": "x86_64",
+    "os_reported_logical_cpu_count": 9,
+    "physical_ram_bytes_os_reported": 10451427328,
+    "platform": "Linux-6.18.57-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "python": "3.12.14",
+    "python_implementation": "CPython"
+  },
+  "process_cpu_time": {
+    "clock": "time.process_time_ns",
+    "compiled_relu_weights": {
+      "max_ns": 128164006,
+      "median_ns": 122149680,
+      "median_ns_per_evaluation": 10179.14,
+      "min_ns": 119752449,
+      "samples_ns": [
+        128164006,
+        123325360,
+        122149680,
+        119752449,
+        121391630
+      ]
+    },
+    "direct_python": {
+      "max_ns": 1543960,
+      "median_ns": 1329740,
+      "median_ns_per_evaluation": 110.81166666666667,
+      "min_ns": 1317553,
+      "samples_ns": [
+        1524971,
+        1326365,
+        1317553,
+        1329740,
+        1543960
+      ]
+    },
+    "median_compiled_over_direct_ratio": 91.85982222088529
+  },
+  "protocol": {
+    "interleaved_alternating_order": true,
+    "timed_evaluations_per_sample": 12000,
+    "timed_full_domain_passes_per_sample": 1500,
+    "timing_samples_each": 5,
+    "tracing_full_domain_passes_each_separate_from_timing": 250,
+    "warmup_full_domain_passes_each": 100
+  },
+  "timing": {
+    "compiled_relu_weights": {
+      "max_ns": 128166679,
+      "median_ns": 122168998,
+      "median_ns_per_evaluation": 10180.749833333333,
+      "min_ns": 119754075,
+      "samples_ns": [
+        128166679,
+        123326981,
+        122168998,
+        119754075,
+        121393541
+      ]
+    },
+    "direct_python": {
+      "max_ns": 1545016,
+      "median_ns": 1330297,
+      "median_ns_per_evaluation": 110.85808333333334,
+      "min_ns": 1318160,
+      "samples_ns": [
+        1535891,
+        1326902,
+        1318160,
+        1330297,
+        1545016
+      ]
+    },
+    "median_compiled_over_direct_ratio": 91.83588176174193,
+    "result_checksum_each_timed_sample": 18000,
+    "wall_clock": "time.perf_counter_ns"
+  },
+  "tracemalloc": {
+    "caveat": "Tracks Python allocations, NOT total process RSS, native library/GPU allocations, interpreter baseline, or maximum model-serving footprint. Tracing was run separately from timing.",
+    "observations": {
+      "compiled_relu_weights": {
+        "current_bytes": 0,
+        "peak_bytes": 1568
+      },
+      "direct_python": {
+        "current_bytes": 0,
+        "peak_bytes": 152
+      }
+    }
+  }
+}
