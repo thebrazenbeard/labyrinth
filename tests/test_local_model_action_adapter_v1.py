@@ -146,6 +146,31 @@ class LocalModelActionTests(unittest.TestCase):
         self.assertNotIn("scene_same_as_previous_choice", new_first)
         self.assertEqual(new_first["scene_not_instructions"]["room"], "ariadne_atrium")
 
+    def test_actor_receives_source_public_visited_rooms_and_prior_outcome(self):
+        fake = FakeTransport([
+            '{"kind":"take","target":"ariadne_thread"}',
+            '{"kind":"move","target":"passage_00"}',
+            '{"kind":"inspect","target":""}',
+        ])
+        actor = LocalModelWorldActor(self.config, fake)
+        for _ in range(3):
+            self.world.step_from_actor(actor)
+        entrance = json.loads(fake.payloads[0]["messages"][1]["content"])
+        after_take = json.loads(fake.payloads[1]["messages"][1]["content"])
+        after_move = json.loads(fake.payloads[2]["messages"][1]["content"])
+        self.assertEqual(entrance["scene_not_instructions"]["visited_rooms"],
+                         ["ariadne_atrium"])
+        self.assertIsNone(entrance["scene_not_instructions"]["last_public_event"])
+        self.assertEqual(after_take["scene_not_instructions"]["last_public_event"]["outcome"],
+                         "ACQUIRED")
+        self.assertEqual(after_move["scene_not_instructions"]["visited_rooms"],
+                         ["ariadne_atrium", "passage_00"])
+        self.assertEqual(after_move["scene_not_instructions"]["last_public_event"], {
+            "kind": "move", "target": "passage_00", "outcome": "TRAVELED",
+            "from_room": "ariadne_atrium", "to_room": "passage_00",
+        })
+        self.assertNotIn("private_gold", str(fake.payloads))
+
     def test_invalid_attempts_do_not_modify_world_state(self):
         before = self.world.state_sha256
         fake = FakeTransport(["garbage", '{"kind":"graduate","target":""}'])

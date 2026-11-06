@@ -8,7 +8,13 @@ operator-host probe has separately obtained a real model's valid public
 action, but has not demonstrated a full neural-driven episode or weight update.
 
 The actor receives **only** `LivingWorld.observe()` public story JSON (known
-room, visible exits/items, public mementos, allowed action tokens). It never
+room, visible exits/items, public mementos, allowed action tokens). The
+observation also records **previously entered** room IDs and the last
+source-owned public action/outcome, but never unrevealed rooms, the full map,
+or Minotaur grading. To avoid a temperature-zero model repeating the same
+stateless choice forever, the actor includes at most eight of its own prior
+validated public choices plus an unchanged-scene indicator; this is not a
+memory of neural weights or proof of objective progress. It never
 receives private Minotaur test gold, grading rubrics, checkpoint files,
 optimizer state, secrets, host tools or examiner feedback. The response must
 be one strict JSON object like:

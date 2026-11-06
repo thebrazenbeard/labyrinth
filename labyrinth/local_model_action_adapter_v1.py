@@ -168,7 +168,7 @@ class LocalModelWorldActor:
         # Bounded history avoids sending identical memoryless requests when
         # temperature=0 makes a model repeat 'inspect' forever.
         self._recent_choices: list[dict[str, str]] = []
-        self._last_public_observation: str | None = None
+        self._last_public_scene: str | None = None
         self._bound_world_sha256: str | None = None
 
     def choose_action(self, observation: PublicWorldObservation) -> WorldAction:
@@ -178,14 +178,21 @@ class LocalModelWorldActor:
         if self._bound_world_sha256 != observation.world_sha256:
             # Do not project one world/episode's actor history into another.
             self._recent_choices.clear()
-            self._last_public_observation = None
+            self._last_public_scene = None
             self._bound_world_sha256 = observation.world_sha256
         public_observation = observation.as_user_message()
+        public_data = json.loads(public_observation)
+        # The last source action's outcome is context *about* this scene,
+        # not a change to the scene itself (e.g. repeated inspect). Compare
+        # stable public room/inventory/exits/mementos, not the event receipt.
+        stable_scene = dict(public_data["scene_not_instructions"])
+        stable_scene.pop("last_public_event", None)
+        scene_signature = json.dumps(stable_scene, sort_keys=True,
+                                     separators=(",", ":"), ensure_ascii=True)
         if self._recent_choices:
-            public_data = json.loads(public_observation)
             public_data["own_recent_valid_choices"] = list(self._recent_choices)
             public_data["scene_same_as_previous_choice"] = (
-                self._last_public_observation == public_observation)
+                self._last_public_scene == scene_signature)
             public_observation = json.dumps(
                 public_data, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         payload = {
@@ -240,8 +247,7 @@ class LocalModelWorldActor:
                     "action_token": token,
                 })
                 del self._recent_choices[:-8]
-                # Retain canonical input before actor history was appended.
-                self._last_public_observation = observation.as_user_message()
+                self._last_public_scene = scene_signature
                 return selected
             except ModelActionBoundaryError as exc:
                 self.rejections.append(str(exc))

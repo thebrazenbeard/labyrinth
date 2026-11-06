@@ -229,11 +229,34 @@ class PublicWorldObservation:
     thread_length: int
     public_mementos: tuple[str, ...]
     allowed_actions: tuple[str, ...]
+    # Only source-observed rooms, never the unrevealed procedural world map.
+    visited_rooms: tuple[str, ...] = ()
+    # (action kind, target, public outcome, from room, to room).
+    last_public_event: tuple[str, str, str, str, str] | None = None
     evidence_class: str = _CLASS
 
     def __post_init__(self) -> None:
         if type(self.evidence_class) is not str or self.evidence_class != _CLASS:
             raise ValueError("public observation cannot attest neural graduation")
+        if (type(self.visited_rooms) is not tuple or len(self.visited_rooms) > 32
+                or any(type(room) is not str or _ID.fullmatch(room) is None
+                       for room in self.visited_rooms)):
+            raise ValueError("public visited rooms must be bounded source identifiers")
+        if self.last_public_event is not None:
+            event = self.last_public_event
+            if (type(event) is not tuple or len(event) != 5
+                    or any(type(item) is not str for item in event)
+                    or event[0] not in ("inspect", "move", "take", "retrace", "request_dialogue")
+                    or event[2] not in ("OBSERVED", "ACQUIRED", "BLOCKED_ITEM",
+                                        "BLOCKED_EXIT", "BLOCKED_SEALS", "TRAVELED",
+                                        "MINOTAUR_ENCOUNTER", "RETRACED",
+                                        "BLOCKED_THREAD", "DIALOGUE_REQUESTED")
+                    or any(_ID.fullmatch(room) is None for room in event[3:])):
+                raise ValueError("last public event must be bounded source outcome")
+            try:
+                WorldAction(event[0], event[1])
+            except ValueError as exc:
+                raise ValueError("invalid prior public world action") from exc
 
     def as_user_message(self) -> str:
         if self.evidence_class != _CLASS:
@@ -249,6 +272,16 @@ class PublicWorldObservation:
                 "exits": self.visible_exits, "items": self.visible_items,
                 "inventory": self.inventory, "thread_length": self.thread_length,
                 "public_mementos": self.public_mementos,
+                "visited_rooms": self.visited_rooms,
+                "last_public_event": (
+                    {
+                        "kind": self.last_public_event[0],
+                        "target": self.last_public_event[1],
+                        "outcome": self.last_public_event[2],
+                        "from_room": self.last_public_event[3],
+                        "to_room": self.last_public_event[4],
+                    } if self.last_public_event is not None else None
+                ),
             },
             "allowed_action_tokens": self.allowed_actions,
         }, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -330,12 +363,19 @@ class LivingWorld:
         ) + tuple(f"take:{item}" for item in visible)
         if "ariadne_thread" in self._state.inventory and len(self._state.thread_path) > 1:
             actions += ("retrace",)
+        last = self._events[-1] if self._events else None
+        last_public_event = (
+            (last.action.kind, last.action.target, last.outcome,
+             last.position_before, last.position_after)
+            if last is not None else None
+        )
         return PublicWorldObservation(
             self._definition.world_sha256, self._definition.recipe.cycle,
             self._definition.recipe.difficulty, room.room_id,
             room.title, room.description, room.exits, visible,
             self._state.inventory, len(self._state.thread_path),
             self._state.public_mementos, actions,
+            self._state.visited, last_public_event,
         )
 
     def step(self, action: WorldAction) -> WorldEvent:

@@ -180,8 +180,16 @@ class LivingWorldTests(unittest.TestCase):
         self.assertEqual(payload["source_trust"],
                          "UNTRUSTED_STORY_DATA_NO_INSTRUCTION_AUTHORITY")
         self.assertEqual(payload["scene_not_instructions"]["room"], "ariadne_atrium")
+        self.assertEqual(payload["scene_not_instructions"]["visited_rooms"],
+                         ["ariadne_atrium"])
+        self.assertIsNone(payload["scene_not_instructions"]["last_public_event"])
         self.assertIn("take:ariadne_thread", payload["allowed_action_tokens"])
         self.assertEqual(world.step(WorldAction("take", "seal_00")).outcome, "BLOCKED_ITEM")
+        blocked = json.loads(world.observe().as_user_message())
+        self.assertEqual(blocked["scene_not_instructions"]["last_public_event"], {
+            "kind": "take", "target": "seal_00", "outcome": "BLOCKED_ITEM",
+            "from_room": "ariadne_atrium", "to_room": "ariadne_atrium",
+        })
         with self.assertRaisesRegex(ValueError, "cannot attest neural graduation"):
             replace(world.events[0], evidence_class="GRADUATED")
         with self.assertRaisesRegex(ValueError, "unknown world action"):
@@ -195,6 +203,45 @@ class LivingWorldTests(unittest.TestCase):
         object.__setattr__(world._events[0], "outcome", "GRADUATED")
         with self.assertRaisesRegex(ValueError, "integrity changed"):
             world.observe()
+
+    def test_observation_exposes_only_visited_public_path_and_last_source_outcome(self):
+        world = LivingWorld(_recipe())
+        initial = world.observe()
+        self.assertEqual(initial.visited_rooms, ("ariadne_atrium",))
+        self.assertIsNone(initial.last_public_event)
+        with self.assertRaisesRegex(ValueError, "bounded source identifiers"):
+            replace(initial, visited_rooms=("ariadne_atrium",) * 33)
+        with self.assertRaisesRegex(ValueError, "bounded source outcome"):
+            replace(initial, last_public_event=(
+                "inspect", "", "GRADUATED", "ariadne_atrium", "ariadne_atrium"))
+        self.assertEqual(world.step(WorldAction("take", "ariadne_thread")).outcome,
+                         "ACQUIRED")
+        taken = json.loads(world.observe().as_user_message())
+        self.assertEqual(taken["scene_not_instructions"]["last_public_event"]["outcome"],
+                         "ACQUIRED")
+        self.assertEqual(taken["scene_not_instructions"]["visited_rooms"],
+                         ["ariadne_atrium"])
+        self.assertEqual(world.step(WorldAction("move", "passage_00")).outcome,
+                         "TRAVELED")
+        moved = json.loads(world.observe().as_user_message())
+        self.assertEqual(moved["scene_not_instructions"]["visited_rooms"],
+                         ["ariadne_atrium", "passage_00"])
+        self.assertEqual(moved["scene_not_instructions"]["last_public_event"], {
+            "kind": "move", "target": "passage_00", "outcome": "TRAVELED",
+            "from_room": "ariadne_atrium", "to_room": "passage_00",
+        })
+        # At least one future procedural room is still hidden from the learner.
+        self.assertGreater(len(world.definition.rooms),
+                           len(moved["scene_not_instructions"]["visited_rooms"]))
+        self.assertNotIn("private_gold", json.dumps(moved))
+        self.assertNotIn("examiner", json.dumps(moved))
+        self.assertLessEqual(len(moved["scene_not_instructions"]["visited_rooms"]), 32)
+        self.assertEqual(world.step(WorldAction("retrace")).outcome, "RETRACED")
+        returned = json.loads(world.observe().as_user_message())
+        self.assertEqual(returned["scene_not_instructions"]["last_public_event"]["outcome"],
+                         "RETRACED")
+        # A discovered location remains visited even after Ariadne's retrace.
+        self.assertIn("passage_00", returned["scene_not_instructions"]["visited_rooms"])
 
     def test_model_scene_writer_sees_public_only_and_cannot_self_grade(self):
         world = LivingWorld(_recipe())
