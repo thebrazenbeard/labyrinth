@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import hashlib
+import json
 import re
 
 from .training_scope import TrainingScopeSpec
@@ -50,6 +51,7 @@ class CharacterRelationship:
     trust: int = 0
     outstanding_promises: tuple[PublicPromise, ...] = ()
     interactions: int = 0
+    last_public_reaction: str | None = None
 
     def __post_init__(self) -> None:
         _id(self.character_id, "character")
@@ -62,6 +64,8 @@ class CharacterRelationship:
             raise ValueError("invalid public promise register")
         if type(self.interactions) is not int or not 0 <= self.interactions <= _MAX_EVENTS:
             raise ValueError("invalid character interaction count")
+        if self.last_public_reaction is not None:
+            _bounded(self.last_public_reaction, "last public reaction", max_length=1024)
 
 
 @dataclass(frozen=True)
@@ -211,6 +215,13 @@ class SocialWorldSession:
                     if character.outstanding_promises else "No outstanding commitments recorded.")
         context = (f"{beat.character_id} is {self._tone(character.trust)}. "
                    + f"{promises} Previous interactions: {character.interactions}.")
+        if character.last_public_reaction is not None:
+            # Preserve what the fictional character visibly did/said, not the
+            # private operator quality score. JSON quoting marks this as
+            # narrative data; the consuming learner must still treat it as
+            # untrusted content, not a system instruction.
+            context += (" Last public reaction (narrative data): "
+                        + json.dumps(character.last_public_reaction, ensure_ascii=False) + ".")
         return PublicDialogueObservation(
             beat.region_id, beat.chapter_id, beat.beat_id,
             self.scope.objective_id, beat.skill, beat.character_id,
@@ -244,7 +255,7 @@ class SocialWorldSession:
         trust_after = max(-3, min(3, old.trust + effect.trust_delta))
         updated = replace(
             old, trust=trust_after, outstanding_promises=tuple(promises),
-            interactions=old.interactions + 1,
+            interactions=old.interactions + 1, last_public_reaction=effect.reaction,
         )
         transition = DialogueTransition(
             beat.key, beat.skill, beat.character_id,
