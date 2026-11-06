@@ -129,6 +129,11 @@ def prepare_two_model_packets(
     if len({canonical_digest({"runner": r["runner_build"], "decoding": r["decoding"]})
             for r in trials}) != 1:
         raise ValueError("matched runtime and decoding required")
+    template_by_model: dict[str, set[str]] = defaultdict(set)
+    for row in trials:
+        template_by_model[row["model_sha256"]].add(row["chat_template_sha256"])
+    if any(len(templates) != 1 for templates in template_by_model.values()):
+        raise ValueError("model chat-template drift across bank")
 
     order = [r for group in sorted(groups) for r in groups[group]]
     random.Random(seed).shuffle(order)
@@ -161,9 +166,15 @@ def prepare_two_model_packets(
 
 
 def adjudicate_two_model_dev(
-    packets: dict[str, Any], custody: dict[str, Any], grades: dict[str, Any]
+    packets: dict[str, Any], custody: dict[str, Any], grades: dict[str, Any],
+    *, bank: dict[str, str]
 ) -> dict[str, Any]:
-    """Descriptive score only. No editable JSON can admit a model to Vera."""
+    """Descriptive score only. Caller-held public bank is required as a trust anchor.
+
+    Caller must independently hold this exact bank, not copy it from the operator
+    packet. Editable JSON cannot authenticate model inference or admit to Vera.
+    """
+    _cases(bank)
     if (type(packets) is not dict or set(packets) != {"schema", "bank", "bank_sha256", "packets"}
             or packets["schema"] != "labyrinth.two_model_tournament.packets.dev.v1"
             or packets["bank"] != "PUBLIC_DEV_ONLY"):
@@ -173,6 +184,8 @@ def adjudicate_two_model_dev(
             or custody["bank"] != "PUBLIC_DEV_ONLY"):
         raise ValueError("invalid operator key")
     _sha(packets["bank_sha256"])
+    if packets["bank_sha256"] != canonical_digest(bank):
+        raise ValueError("trusted public bank mismatch")
     if custody["packet_manifest_sha256"] != canonical_digest(packets):
         raise ValueError("packet/custody commitment mismatch")
     if type(grades) is not dict or set(grades) != {"packet_manifest_sha256", "reviewer", "scores"}:
@@ -191,10 +204,15 @@ def adjudicate_two_model_dev(
             or not 4 <= len(ps) <= MAX_TRIALS):
         raise ValueError("invalid paired materials")
     ids = [p.get("packet_id") for p in ps if type(p) is dict]
-    if (len(ids) != len(ps) or len(set(ids)) != len(ps)
+    if (len(ids) != len(ps) or any(type(pid) is not str or not pid for pid in ids)
+            or len(set(ids)) != len(ps)
             or set(ids) != set(ks) or set(ids) != set(scores)):
         raise ValueError("unpaired packets/key/grades")
     by_pair: dict[tuple[str, int], set[str]] = defaultdict(set)
+    pair_inputs: dict[tuple[str, int], set[str]] = defaultdict(set)
+    repeat_schedule: dict[str, set[int]] = defaultdict(set)
+    runtime_claims: set[tuple[str, str]] = set()
+    template_by_model: dict[str, set[str]] = defaultdict(set)
     by_model: dict[str, list[int]] = defaultdict(list)
     any_synthetic = False
     for p in ps:
@@ -204,6 +222,8 @@ def adjudicate_two_model_dev(
                 or type(p["system"]) is not str
                 or type(p["response"]) is not str or not 1 <= len(p["response"]) <= MAX_TEXT):
             raise ValueError("malformed reviewer packet")
+        if p["case_id"] not in bank or p["prompt"] != bank[p["case_id"]]:
+            raise ValueError("trusted public bank mismatch")
         meta = ks[p["packet_id"]]
         if (type(meta) is not dict or set(meta) != {
                 "model_sha256", "chat_template_sha256", "response_sha256", "case_id", "repeat",
@@ -217,16 +237,31 @@ def adjudicate_two_model_dev(
         if meta["input_sha256"] != canonical_digest({"system": p["system"], "prompt": p["prompt"]}):
             raise ValueError("prompt/system binding mismatch")
         if (type(meta["actual_model_generated"]) is not bool
-                or type(meta["runner_build"]) is not str):
+                or type(meta["runner_build"]) is not str
+                or not 1 <= len(meta["runner_build"]) <= 128):
             raise ValueError("invalid generation/runner claim")
         grade = scores[p["packet_id"]]
         if type(grade) is not int or not 0 <= grade <= 4:
             raise ValueError("invalid grade")
         any_synthetic |= not meta["actual_model_generated"]
         by_pair[(p["case_id"], p["repeat"])].add(meta["model_sha256"])
+        pair_inputs[(p["case_id"], p["repeat"])].add(meta["input_sha256"])
+        repeat_schedule[p["case_id"]].add(p["repeat"])
+        runtime_claims.add((meta["runner_build"], meta["decoding_sha256"]))
+        template_by_model[meta["model_sha256"]].add(meta["chat_template_sha256"])
         by_model[meta["model_sha256"]].append(grade)
     if len(by_model) != 2 or any(len(models) != 2 for models in by_pair.values()) or len(ps) != len(by_pair) * 2:
         raise ValueError("unpaired models in custody")
+    if any(len(inputs) != 1 for inputs in pair_inputs.values()):
+        raise ValueError("paired prompt/system drift")
+    if len(runtime_claims) != 1:
+        raise ValueError("runner/decoding drift across bank")
+    if len({tuple(sorted(repeats)) for repeats in repeat_schedule.values()}) != 1:
+        raise ValueError("unbalanced case repeats")
+    if set(repeat_schedule) != set(bank):
+        raise ValueError("trusted public bank mismatch")
+    if any(len(templates) != 1 for templates in template_by_model.values()):
+        raise ValueError("model chat-template drift across bank")
     means = {model: sum(values) / len(values) for model, values in by_model.items()}
     ordered_models = sorted(by_model)
     model_by_packet = {pid: meta["model_sha256"] for pid, meta in ks.items()}
