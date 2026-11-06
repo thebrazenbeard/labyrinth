@@ -5,6 +5,8 @@ the maze's existing MINOTAUR_ENCOUNTER milestone, the wrapper requires one
 open-ended Kobayashi proposal before the explorer can resume Ariadne's path.
 Ordinary local catastrophe never marks the entire maze failed. Unverified
 novel mechanisms remain review candidates, never fabricated wins or losses.
+Callers can also require a host-bound final Minotaur appeal before resuming;
+this strict mode is not automatically installed in other maze runtimes.
 
 All execution, argument and appeal receipts here are SOURCE_ONLY_UNATTESTED;
 they neither train weights nor certify an external Minotaur's independence.
@@ -61,11 +63,14 @@ class KobayashiMazeLifecycle:
     """
 
     def __init__(self, maze: LivingWorld, *, variant_seed: int = 0,
-                 max_argument_rounds: int = 4) -> None:
+                 max_argument_rounds: int = 4,
+                 require_final_appeal: bool = False) -> None:
         if type(maze) is not LivingWorld:
             raise EncounterLifecycleError("exact existing LivingWorld required")
         if type(max_argument_rounds) is not int or not 1 <= max_argument_rounds <= 8:
             raise EncounterLifecycleError("bounded Minotaur argument rounds required")
+        if type(require_final_appeal) is not bool:
+            raise EncounterLifecycleError("require_final_appeal must be a boolean")
         state = maze.state
         if state.completed:
             raise EncounterLifecycleError("attach before maze completion to enforce encounter")
@@ -80,6 +85,7 @@ class KobayashiMazeLifecycle:
         self._minotaur = None
         self._final_verdict = None
         self._max_argument_rounds = max_argument_rounds
+        self._require_final_appeal = require_final_appeal
 
     def _verify(self) -> None:
         if (self._maze.definition.world_sha256 != self._world_sha256
@@ -116,6 +122,10 @@ class KobayashiMazeLifecycle:
         if self._phase == "AWAITING_PROPOSAL":
             raise EncounterLifecycleError(
                 "one required open Kobayashi proposal before more maze steps")
+        if (self._require_final_appeal and self._result is not None
+                and self._final_verdict is None):
+            raise EncounterLifecycleError(
+                "host-bound Minotaur final appeal required before more maze steps")
         event = self._maze.step(action)
         state = self._maze.state
         self._expected_state_sha256 = self._maze.state_sha256
@@ -223,6 +233,8 @@ class KobayashiMazeLifecycle:
                 or any(type(item) is not str or _SHA.fullmatch(item) is None
                        for item in evidence_hashes)):
             raise EncounterLifecycleError("bounded evidence digests required")
+        if self._require_final_appeal and self._minotaur is None:
+            raise EncounterLifecycleError("a bound Minotaur is required for strict appeals")
         for prior in self._arguments:
             if (prior["argument_text"] == text
                     and prior["evidence_hashes"] == evidence_hashes):
@@ -289,6 +301,7 @@ class KobayashiMazeLifecycle:
             "minotaur_argument_rounds": len(self._arguments),
             "minotaur_arguments": tuple(self._arguments),
             "appeal_final": self._final_verdict is not None,
+            "minotaur_appeal_required": self._require_final_appeal,
             "minotaur_verdict_status": (
                 getattr(self._final_verdict, "status", None)
                 if self._final_verdict is not None else None

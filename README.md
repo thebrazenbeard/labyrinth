@@ -71,6 +71,28 @@ python -m labyrinth.local_model_world_runner_v1 --allow-local-inference \
   --json-mode --max-completion-tokens 128 --max-actions 48
 ```
 
+**Important routing distinction:** the local-model command above uses the
+**legacy guided `LivingWorld` runner**. It does **not** execute a Kobayashi
+Maru, send a proposal to Minotaur, or exercise the new source-only wrapper.
+The Kobayashi path currently exposes a Python API,
+`run_local_model_kobayashi(...)`, rather than an installed command-line
+entry point. That wrapper requires one encounter *proposal* for a completed
+wrapped maze, but the subsequent `bind_minotaur()`, `submit_argument()`, and
+`finalize_appeal()` operations remain optional and host-supplied. In
+particular, **one proposal is not yet the mandatory adversarial argument to
+a final Minotaur judge** specified for every Labyrinth maze.
+
+To exercise the implemented Kobayashi contracts **without a model server**:
+
+```bash
+python -m unittest -q tests.test_kobayashi_canon_v1 \
+  tests.test_kobayashi_proposals_v1 tests.test_kobayashi_minotaur_v1 \
+  tests.test_kobayashi_encounter_v1 tests.test_local_model_kobayashi_runner_v1
+```
+
+These use source-only cases and fake transports; their success is not a
+runtime model inference, trained-judge, or learning result.
+
 The separate [host broker dry-run](docs/TRAININGDAY_OWNER_BROKER_DRYRUN_V1.md)
 checks a possible owner-bound local launch protocol but explicitly does not
 grant physical GPU training. The two-cycle fixture actor is a deterministic

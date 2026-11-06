@@ -541,6 +541,29 @@ class KobayashiMinotaurTests(unittest.TestCase):
                 later.persist(destination)
             self.assertEqual(destination.read_bytes(), canonical_bytes)
 
+    def test_corpus_loader_rejects_ambiguous_duplicate_json_keys(self) -> None:
+        corpus = KobayashiCorpus("canonical", (_case(_claim()),))
+        with TemporaryDirectory() as directory:
+            destination = Path(directory) / "corpus.json"
+            corpus.persist(destination)
+            original = destination.read_text(encoding="ascii")
+            ambiguous = original.replace(
+                '"corpus_id": "canonical",',
+                '"corpus_id": "attacker",\n  "corpus_id": "canonical",', 1,
+            )
+            self.assertNotEqual(ambiguous, original)
+            destination.write_text(ambiguous, encoding="ascii")
+            with self.assertRaisesRegex(KobayashiError, "duplicate"):
+                KobayashiCorpus.load(destination)
+
+    def test_corpus_loader_limits_untrusted_file_size_before_json_parsing(self) -> None:
+        with TemporaryDirectory() as directory:
+            destination = Path(directory) / "oversized.json"
+            with destination.open("wb") as output:
+                output.truncate(16 * 1024 * 1024 + 1)
+            with self.assertRaisesRegex(KobayashiError, "byte limit"):
+                KobayashiCorpus.load(destination)
+
     def test_corpus_concurrent_publisher_wins_without_overwrite(self) -> None:
         first = KobayashiCorpus("canonical", (_case(_claim()),))
         competing = first.append_revision((_case(_claim(action=_h(889))),))

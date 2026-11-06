@@ -58,6 +58,50 @@ def _resume_to_atrium(lifecycle: KobayashiMazeLifecycle):
 
 
 class KobayashiEncounterTests(unittest.TestCase):
+    def test_strict_host_judged_mode_cannot_bypass_minotaur_final_appeal(self):
+        """A proposal alone is not a completed adversarial examination."""
+        lifecycle = KobayashiMazeLifecycle(_maze(), require_final_appeal=True)
+        _trigger(lifecycle)
+        raw = "I turn the cobalt valve once."
+        result = lifecycle.submit_proposal(raw)
+        before = lifecycle.snapshot()["maze_state_sha256"]
+        with self.assertRaisesRegex(EncounterLifecycleError, "Minotaur.*final"):
+            lifecycle.step(WorldAction("retrace"))
+        self.assertEqual(lifecycle.snapshot()["maze_state_sha256"], before)
+        with self.assertRaisesRegex(EncounterLifecycleError, "bound Minotaur"):
+            lifecycle.submit_argument("I think the valve is safe")
+
+        observation = lifecycle._challenge.observe()
+        claim = BoundClaim(observation.sha256, lifecycle._challenge.graph_sha256,
+                           result["action_sha256"], raw)
+        corpus = KobayashiCorpus("strict-exam", ())
+
+        def checker(bound, case, arguments, dialogue_hash):
+            return EvidenceAssessment(
+                bound.scenario_sha256, bound.world_sha256, bound.claim_sha256,
+                None, dialogue_hash, "INDETERMINATE", None,
+                "No independent evidence establishes a physical counterexample.",
+                "fixture-reviewer",
+            )
+
+        dialogue = MinotaurDialogue(corpus, claim, evidence_checker=checker,
+                                    min_rounds=2, max_rounds=2)
+        lifecycle.bind_minotaur(dialogue)
+        with self.assertRaisesRegex(EncounterLifecycleError, "Minotaur.*final"):
+            lifecycle.step(WorldAction("retrace"))
+        lifecycle.submit_argument("I accept my conclusion remains unproven.")
+        with self.assertRaisesRegex(EncounterLifecycleError, "Minotaur.*final"):
+            lifecycle.step(WorldAction("retrace"))
+        lifecycle.submit_argument("I would seek an independent physical measurement.")
+        verdict = lifecycle.finalize_appeal()
+        self.assertEqual(verdict.status, "UNKNOWN")
+        _resume_to_atrium(lifecycle)
+        snapshot = lifecycle.snapshot()
+        self.assertTrue(snapshot["maze_completed"])
+        self.assertTrue(snapshot["minotaur_appeal_required"])
+        self.assertTrue(snapshot["appeal_final"])
+        self.assertFalse(snapshot["maze_failed_due_to_local_loss"])
+
     def test_known_catastrophe_is_local_and_full_maze_continues(self):
         lifecycle = KobayashiMazeLifecycle(_maze(), variant_seed=1)
         self.assertEqual(lifecycle.phase, "SEEK_MINOTAUR")

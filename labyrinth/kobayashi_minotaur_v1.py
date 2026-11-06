@@ -33,6 +33,7 @@ _NOVELTY = frozenset({"SPECIFIC_FALSIFIABLE", "UNSPECIFIED"})
 _SEMANTIC = frozenset({"UNASSESSED", "CLAIM_REFUTED", "CLAIM_SUPPORTED"})
 _VERDICTS = frozenset({"REFUTED", "SURVIVES", "UNKNOWN", "NOVEL_CANDIDATE"})
 _SCHEMA = "labyrinth.kobayashi-minotaur.v1"
+_MAX_CORPUS_BYTES = 16 * 1024 * 1024
 
 
 class KobayashiError(ValueError):
@@ -300,7 +301,26 @@ class KobayashiCorpus:
         with os.fdopen(descriptor, "r", encoding="ascii") as handle:
             if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
                 raise KobayashiError("corpus source must be a regular file")
-            content = json.load(handle)
+            if not 0 < os.fstat(handle.fileno()).st_size <= _MAX_CORPUS_BYTES:
+                raise KobayashiError("corpus source exceeds byte limit")
+            # Bound the read too: another writer could grow the open file after
+            # fstat, and json.load() would otherwise read it without a limit.
+            try:
+                encoded = handle.read(_MAX_CORPUS_BYTES + 1)
+                if len(encoded) > _MAX_CORPUS_BYTES:
+                    raise KobayashiError("corpus source exceeds byte limit")
+
+                def unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
+                    result: dict[str, object] = {}
+                    for key, value in pairs:
+                        if key in result:
+                            raise KobayashiError("duplicate corpus JSON key")
+                        result[key] = value
+                    return result
+
+                content = json.loads(encoded, object_pairs_hook=unique)
+            except (UnicodeError, json.JSONDecodeError) as exc:
+                raise KobayashiError("invalid corpus JSON") from exc
         if type(content) is not dict or set(content) != {
             "schema", "corpus_id", "cases", "parent_corpus_sha256", "corpus_sha256",
         }:
