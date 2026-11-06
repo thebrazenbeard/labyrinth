@@ -12,7 +12,7 @@ SagaSession until an authorized conversation provider composes the contracts.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 import hashlib
 import json
 import re
@@ -92,6 +92,16 @@ class DialogueBeat:
         return (self.region_id, self.chapter_id, self.beat_id)
 
 
+def beat_fingerprint(beat: DialogueBeat) -> str:
+    """Bind an approved scene to its *entire* public wording and difficulty."""
+    if type(beat) is not DialogueBeat:
+        raise ValueError("exact dialogue beat required")
+    DialogueBeat.__post_init__(beat)
+    record = tuple(getattr(beat, field.name) for field in fields(DialogueBeat))
+    return hashlib.sha256(json.dumps(record, separators=(",", ":"),
+                                     ensure_ascii=True).encode("ascii")).hexdigest()
+
+
 @dataclass(frozen=True)
 class OperatorDialogueEffect:
     """A development-only observation supplied by a trusted operator.
@@ -150,7 +160,14 @@ class DialogueTransition:
     reaction: str
     promise_operation: str
     outstanding_promise_ids: tuple[str, ...]
+    beat_digest_sha256: str
     evidence_class: str = "OPERATOR_DEVELOPMENT_ONLY"
+
+
+def _transition_snapshot(event: DialogueTransition) -> tuple[object, ...]:
+    if type(event) is not DialogueTransition:
+        raise ValueError("exact world transition required")
+    return tuple(getattr(event, field.name) for field in fields(DialogueTransition))
 
 
 class SocialWorldSession:
@@ -174,6 +191,7 @@ class SocialWorldSession:
         self._characters = {c.character_id: c for c in characters}
         self._seen: set[tuple[str, str, str]] = set()
         self._events: list[DialogueTransition] = []
+        self._event_snapshots: list[tuple[object, ...]] = []
 
     @property
     def characters(self) -> tuple[CharacterRelationship, ...]:
@@ -181,7 +199,19 @@ class SocialWorldSession:
 
     @property
     def events(self) -> tuple[DialogueTransition, ...]:
+        self._assert_event_integrity()
         return tuple(self._events)
+
+    def _assert_event_integrity(self) -> None:
+        if (len(self._events) != len(self._event_snapshots)
+                or any(_transition_snapshot(event) != snapshot
+                       for event, snapshot in zip(self._events, self._event_snapshots))):
+            raise ValueError("world event integrity changed after operator observation")
+
+    def is_verified_transition(self, event: DialogueTransition) -> bool:
+        self._assert_event_integrity()
+        return bool(self._events and self._events[-1] is event
+                    and _transition_snapshot(event) == self._event_snapshots[-1])
 
     @staticmethod
     def _tone(trust: int) -> str:
@@ -197,6 +227,7 @@ class SocialWorldSession:
 
     def preview(self, beat: DialogueBeat) -> PublicDialogueObservation:
         """Give the learner only public context altered by past consequences."""
+        self._assert_event_integrity()
         if type(beat) is not DialogueBeat:
             raise ValueError("expected exact TRAIN dialogue beat")
         DialogueBeat.__post_init__(beat)
@@ -258,9 +289,11 @@ class SocialWorldSession:
             hashlib.sha256(model_response.encode("utf-8")).hexdigest(),
             old.trust, trust_after, effect.quality_score, effect.reaction,
             effect.promise_operation, tuple(p.promise_id for p in promises),
+            beat_fingerprint(beat),
         )
         self._characters[beat.character_id] = updated
         self._events.append(transition)
+        self._event_snapshots.append(_transition_snapshot(transition))
         self._seen.add(beat.key)
         return transition
 
@@ -268,5 +301,5 @@ class SocialWorldSession:
 __all__ = [
     "PublicPromise", "CharacterRelationship", "DialogueBeat",
     "OperatorDialogueEffect", "PublicDialogueObservation", "DialogueTransition",
-    "SocialWorldSession",
+    "SocialWorldSession", "beat_fingerprint",
 ]

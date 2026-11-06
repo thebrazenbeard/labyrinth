@@ -8,12 +8,12 @@ Neither model inference nor neural learning is proven by the interface itself.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 from typing import Protocol
 
 from .social_world_consequence_v1 import (
-    DialogueBeat, DialogueTransition, SocialWorldSession,
+    DialogueBeat, DialogueTransition, SocialWorldSession, beat_fingerprint,
 )
 
 
@@ -111,16 +111,17 @@ class DaedalusSocialPlanner:
         # Source-world validation checks scene novelty, skill scope, known
         # character and TRAIN split without committing any new effect.
         self.world.preview(scene)
-        self.pending = scene
-        return scene
+        self.pending = replace(scene)
+        return replace(scene)
 
     def record_completed(self, effect: DialogueTransition) -> None:
         if self.pending is None:
             raise ValueError("no pending dialogue scene")
-        if (type(effect) is not DialogueTransition or not self.world.events
-                or self.world.events[-1] is not effect
+        if (type(effect) is not DialogueTransition
+                or not self.world.is_verified_transition(effect)
                 or effect.beat_key != self.pending.key
-                or effect.skill != self.pending.skill):
+                or effect.skill != self.pending.skill
+                or effect.beat_digest_sha256 != beat_fingerprint(self.pending)):
             raise ValueError("exact world transition required before chapter continuation")
         self._prior.append((effect.skill, effect.quality_score))
         self.completed_scenes += 1
