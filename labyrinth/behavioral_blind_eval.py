@@ -194,22 +194,83 @@ def adjudicate_dev_scores(packets: dict[str, Any], custody: dict[str, Any], grad
     """
     if type(packets) is not dict or type(custody) is not dict or type(grades) is not dict:
         raise ValueError("invalid materials")
-    if packets.get("schema") != "labyrinth.behavioral_blind_packets.dev.v1" or packets.get("bank") != "PUBLIC_DEV_ONLY":
+    if (set(packets) != {"schema", "bank", "packets"}
+            or packets.get("schema") != "labyrinth.behavioral_blind_packets.dev.v1"
+            or packets.get("bank") != "PUBLIC_DEV_ONLY"):
         raise ValueError("wrong public packet schema")
-    if custody.get("schema") != "labyrinth.behavioral_blind_key.dev.v1" or custody.get("bank") != "PUBLIC_DEV_ONLY":
+    if (set(custody) != {"schema", "bank", "packet_manifest_sha256", "blinding_seed", "key"}
+            or custody.get("schema") != "labyrinth.behavioral_blind_key.dev.v1"
+            or custody.get("bank") != "PUBLIC_DEV_ONLY"
+            or type(custody.get("blinding_seed")) is not int
+            or not 0 <= custody["blinding_seed"] < 2**31):
         raise ValueError("wrong operator key schema")
     blinded = packets.get("packets")
     keys = custody.get("key")
-    if type(blinded) is not list or type(keys) is not dict or len(blinded) != len(keys):
+    if (type(blinded) is not list or type(keys) is not dict
+            or not 3 * len(DEV_CASES) <= len(blinded) <= MAX_TRIALS
+            or len(blinded) != len(keys)):
         raise ValueError("unpaired blinded packet/key")
+    expected_packet = {"packet_id", "case_id", "facet", "repeat", "prompt", "response"}
+    expected_key = {"arm", "case_id", "repeat", "response_sha256", "model_sha256",
+                    "runner_build", "full_input_sha256", "route_sha256",
+                    "source_heads_asserted", "donor_kind", "actual_model_generated"}
+    bank = {case.case_id: case for case in DEV_CASES}
+    seen_packet_ids: set[str] = set()
+    seen_triplets: set[tuple[str, int, str]] = set()
+    per_case: dict[str, set[int]] = defaultdict(set)
     for packet in blinded:
-        if type(packet) is not dict or type(packet.get("packet_id")) is not str:
+        if (type(packet) is not dict or set(packet) != expected_packet
+                or type(packet.get("packet_id")) is not str
+                or packet["packet_id"] in seen_packet_ids
+                or type(packet.get("case_id")) is not str
+                or packet["case_id"] not in bank
+                or type(packet.get("repeat")) is not int
+                or not 0 <= packet["repeat"] < 16
+                or packet.get("facet") != bank[packet["case_id"]].facet
+                or packet.get("prompt") != bank[packet["case_id"]].prompt
+                or type(packet.get("response")) is not str
+                or not 1 <= len(packet["response"]) <= MAX_TEXT):
             raise ValueError("malformed blinded packet")
+        seen_packet_ids.add(packet["packet_id"])
         meta = keys.get(packet["packet_id"])
-        if type(meta) is not dict or meta.get("case_id") != packet.get("case_id") or meta.get("repeat") != packet.get("repeat"):
+        if type(meta) is not dict or set(meta) != expected_key:
+            raise ValueError("invalid custody metadata schema")
+        if type(meta.get("arm")) is not str or meta["arm"] not in ARMS:
+            raise ValueError("invalid comparison arm in custody")
+        if type(meta.get("case_id")) is not str or type(meta.get("repeat")) is not int:
+            raise ValueError("invalid custody case/repeat")
+        if meta["case_id"] != packet["case_id"] or meta["repeat"] != packet["repeat"]:
             raise ValueError("wrong packet mapping")
+        if (type(meta["actual_model_generated"]) is not bool
+                or type(meta["donor_kind"]) is not str
+                or meta["donor_kind"] not in ("none", "synthetic_source_telemetry", "utterance_derived")):
+            raise ValueError("invalid custody generation/donor evidence")
+        if (meta["arm"] == "source_conditioned" and meta["donor_kind"] == "none"
+                or meta["arm"] != "source_conditioned" and meta["donor_kind"] != "none"):
+            raise ValueError("invalid custody arm/donor pairing")
+        for digest in ("response_sha256", "model_sha256", "full_input_sha256", "route_sha256"):
+            _exact_sha(meta[digest])
+        if (type(meta["runner_build"]) is not str or not 1 <= len(meta["runner_build"]) <= 128
+                or type(meta["source_heads_asserted"]) is not dict
+                or len(meta["source_heads_asserted"]) > 32
+                or any(type(name) is not str or type(head) is not str or len(head) != 40
+                       or any(ch not in "0123456789abcdef" for ch in head)
+                       for name, head in meta["source_heads_asserted"].items())):
+            raise ValueError("invalid custody source/runner metadata")
         if meta.get("response_sha256") != _canonical_digest(packet.get("response")):
             raise ValueError("response binding mismatch")
+        triplet = (packet["case_id"], packet["repeat"], meta["arm"])
+        if triplet in seen_triplets:
+            raise ValueError("unbalanced arms: duplicate case/repeat/arm custody")
+        seen_triplets.add(triplet)
+        per_case[packet["case_id"]].add(packet["repeat"])
+    if set(keys) != seen_packet_ids:
+        raise ValueError("unpaired packet IDs")
+    if set(per_case) != set(bank) or len({tuple(sorted(repeats)) for repeats in per_case.values()}) != 1:
+        raise ValueError("unbalanced cases/repetitions in custody")
+    if any((case, repeat, arm) not in seen_triplets
+           for case, repeats in per_case.items() for repeat in repeats for arm in ARMS):
+        raise ValueError("unbalanced arms in custody")
     if custody.get("packet_manifest_sha256") != _canonical_digest(packets):
         raise ValueError("blinded packet commitments differ")
     if grades.get("packet_manifest_sha256") != custody["packet_manifest_sha256"]:
@@ -250,11 +311,15 @@ def adjudicate_dev_scores(packets: dict[str, Any], custody: dict[str, Any], grad
     elif any(item["donor_kind"] == "synthetic_source_telemetry" for item in custody["key"].values()):
         decision = "HOLD_SYNTHETIC_DONOR_CAUSALITY"
     else:
-        decision = "PROMISING_DEV_SIGNAL_NOT_GRADUATION"
+        # The operator key is freely editable JSON. It cannot attest to model
+        # generation, genuine callable donor effects or an authenticated host.
+        # Positive scores may guide iteration but cannot be promoted based on
+        # self-declared ``actual_model_generated`` or ``donor_kind``.
+        decision = "HOLD_UNVERIFIED_HOST_CUSTODY"
     return {"schema": "labyrinth.minotaur_behavior_dev.v1", "decision": decision,
             "means": means, "facet_means": per_facet, "paired_min_margin": margin,
             "reviewer_evidence_class": reviewer["evidence_class"],
-            "limitations": ["PUBLIC_DEV_BANK", "UNAUTHENTICATED_REVIEWER_IDENTITY",
+            "limitations": ["PUBLIC_DEV_BANK", "UNAUTHENTICATED_OPERATOR_KEY_AND_REVIEWER_IDENTITY",
                             "NOT_RELEASE_AUTHORITY", "PROMPT_AND_DONOR_CONFOUND_UNTESTED"]}
 
 
