@@ -158,6 +158,65 @@ class BlindEvaluationTests(unittest.TestCase):
         self.assertEqual(result["decision"], "HOLD_SYNTHETIC_DONOR_CAUSALITY")
         self.assertEqual(len(result["facet_means"]), 6)
 
+    def test_self_asserted_custody_flags_cannot_launder_positive_dev_result(self):
+        packets, key = prepare_blind_packets(records(actually_generated=False), seed=17, actual_required=False)
+        grades = {"reviewer": {"identity": "hypothetical-human", "evidence_class": "HUMAN_REVIEW"},
+                  "packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "grades": {pid: (4 if metadata["arm"] == "source_conditioned" else 2)
+                             for pid, metadata in key["key"].items()}}
+        original = adjudicate_dev_scores(packets, key, grades)
+        self.assertEqual(original["decision"], "HOLD_SYNTHETIC_OR_UNVERIFIED_GENERATION")
+        forged = deepcopy(key)
+        for metadata in forged["key"].values():
+            metadata["actual_model_generated"] = True
+            if metadata["arm"] == "source_conditioned":
+                metadata["donor_kind"] = "utterance_derived"
+        result = adjudicate_dev_scores(packets, forged, grades)
+        self.assertNotEqual(result["decision"], "PROMISING_DEV_SIGNAL_NOT_GRADUATION")
+        self.assertEqual(result["decision"], "HOLD_UNVERIFIED_HOST_CUSTODY")
+
+    def test_invalid_operator_arm_fails_closed_before_scoring(self):
+        packets, key = prepare_blind_packets(records(), seed=17)
+        grades = {"reviewer": {"identity": "hypothetical-human", "evidence_class": "HUMAN_REVIEW"},
+                  "packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "grades": {pid: 2 for pid in key["key"]}}
+        invalid = deepcopy(key)
+        next(iter(invalid["key"].values()))["arm"] = "UNEXPECTED_ARM"
+        with self.assertRaisesRegex(ValueError, "invalid comparison arm"):
+            adjudicate_dev_scores(packets, invalid, grades)
+        invalid = deepcopy(key)
+        for metadata in invalid["key"].values():
+            if metadata["arm"] == "source_conditioned":
+                metadata["arm"] = "UNEXPECTED_ARM"
+        with self.assertRaisesRegex(ValueError, "invalid comparison arm"):
+            adjudicate_dev_scores(packets, invalid, grades)
+
+    def test_operator_key_must_have_full_exact_bank_balance_and_packet_fields(self):
+        packets, key = prepare_blind_packets(records(), seed=17)
+        grades = {"reviewer": {"identity": "hypothetical-human", "evidence_class": "HUMAN_REVIEW"},
+                  "packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "grades": {pid: 2 for pid in key["key"]}}
+        cases = [
+            ("unbalanced arms", lambda k: next(iter(k["key"].values())).__setitem__("arm", "baseline")),
+            ("invalid custody", lambda k: next(iter(k["key"].values())).__setitem__("actual_model_generated", 1)),
+            ("invalid custody", lambda k: next(iter(k["key"].values())).__setitem__("extra", "unknown")),
+            ("invalid custody", lambda k: next(iter(k["key"].values())).__setitem__("donor_kind", "surprise")),
+        ]
+        for diagnostic, mutate in cases:
+            with self.subTest(diagnostic=diagnostic):
+                altered = deepcopy(key)
+                mutate(altered)
+                with self.assertRaises(ValueError):
+                    adjudicate_dev_scores(packets, altered, grades)
+        altered_packets = deepcopy(packets)
+        altered_packets["packets"][0]["facet"] = "misleading"
+        altered_key = deepcopy(key)
+        altered_key["packet_manifest_sha256"] = _canonical_digest(altered_packets)
+        altered_grades = deepcopy(grades)
+        altered_grades["packet_manifest_sha256"] = altered_key["packet_manifest_sha256"]
+        with self.assertRaisesRegex(ValueError, "malformed blinded packet"):
+            adjudicate_dev_scores(altered_packets, altered_key, altered_grades)
+
     def test_untrusted_json_strict_and_write_once(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / "fixed.json"
