@@ -21,6 +21,7 @@ DECIMAL_GB = 1_000_000_000
 GIB = 1024 ** 3
 MAX_ROWS = 64
 MAX_VALUE_BITS = 64
+MAX_DENSE_CELL_STEPS = 2_000_000
 
 
 class OneHotDeltaRAM:
@@ -81,6 +82,15 @@ def micro_ram_control(seed: int = 20261106, *, rows: int = 16,
     if (type(seed) is not int or not 0 <= seed < 2**64
             or type(transactions) is not int or not 1 <= transactions <= 4096):
         raise ValueError("bounded deterministic micro-RAM trial required")
+    if (type(rows) is not int or type(width) is not int
+            or not 1 <= rows <= MAX_ROWS or not 1 <= width <= MAX_VALUE_BITS):
+        raise ValueError("micro-RAM shape exceeds strict CPU fixture bounds")
+    # Each transaction computes rows*width projection products for the write,
+    # rows*width cell updates, and rows^2*width read products when all addresses
+    # are checked. Reject before constructing any state or executing the loop.
+    estimated_dense_cell_steps = transactions * width * (rows * rows + 2 * rows)
+    if estimated_dense_cell_steps > MAX_DENSE_CELL_STEPS:
+        raise ValueError("micro-RAM trial exceeds dense-cell work budget")
     ram = OneHotDeltaRAM(rows, width)
     oracle = {address: (0,) * width for address in range(rows)}
     rng = random.Random(seed)
@@ -105,6 +115,9 @@ def micro_ram_control(seed: int = 20261106, *, rows: int = 16,
         "value_bits": width,
         "transactions": transactions,
         "independent_oracle_row_comparisons": comparisons,
+        "statistically_independent_trials": False,
+        "estimated_dense_cell_steps": estimated_dense_cell_steps,
+        "max_dense_cell_steps": MAX_DENSE_CELL_STEPS,
         "all_matched": True,
         "qwenputer_ir_blob_audited": QWENPUTER_IR_BLOB,
         "actual_qwen_model_or_gpu_run": False,
@@ -112,12 +125,14 @@ def micro_ram_control(seed: int = 20261106, *, rows: int = 16,
 
 
 def qwenputer_stock_footprint_floor() -> dict:
-    """Compute transparent *idealized* storage floors from author size counts.
+    """Compute conditional dense-format scenario sizes from author counts.
 
     Upstream states ~6.421B parameters for its optimized text-only variant,
     with ~1.558B in added analytic chip layers. These are rounded metadata,
-    not locally hashed safetensors. These floors exclude scales, metadata,
-    runtime code, activations, KV/state cache and quantization accuracy loss.
+    not locally hashed safetensors. These are *not* universal compression lower
+    bounds: Q2, Q3, sparse or different architectures may use fewer bytes.
+    The scenarios exclude scales, metadata, runtime code, activations,
+    KV/state cache and quantization accuracy loss.
     """
     text_params = 6_421_000_000
     chip_params = 1_558_000_000
@@ -138,6 +153,8 @@ def qwenputer_stock_footprint_floor() -> dict:
         "author_chip_parameter_count_approx": chip_params,
         "ideal_all_q4_textonly_bytes_excluding_overhead": ideal_all_q4,
         "hypothetical_bf16_chip_q4_other_bytes_excluding_overhead": mixed_bf16_chip_q4_other,
+        "conditional_on_dense_q4_format": True,
+        "universal_compression_lower_bound_claimed": False,
         "ideal_all_q4_exceeds_3_decimal_gb": ideal_all_q4 > 3 * DECIMAL_GB,
         "ideal_all_q4_exceeds_3_gib_before_overhead": ideal_all_q4 > 3 * GIB,
         "mixed_bf16_chip_q4_other_exceeds_3_gib": mixed_bf16_chip_q4_other > 3 * GIB,

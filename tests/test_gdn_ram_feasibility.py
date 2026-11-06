@@ -1,6 +1,7 @@
 """CPU-only negative controls for one-hot GDN memory and footprint bounds."""
 
 import unittest
+from unittest.mock import patch
 
 from labyrinth.gdn_ram_feasibility import (
     OneHotDeltaRAM,
@@ -52,14 +53,33 @@ class GatedDeltaFeasibilityTests(unittest.TestCase):
         report = micro_ram_control(seed=20261106, rows=16, width=8, transactions=128)
         self.assertIs(report["all_matched"], True)
         self.assertEqual(report["independent_oracle_row_comparisons"], 2048)
+        self.assertIs(report["statistically_independent_trials"], False)
+        self.assertEqual(report["estimated_dense_cell_steps"], 294_912)
+        self.assertEqual(report["max_dense_cell_steps"], 2_000_000)
         self.assertIs(report["actual_qwen_model_or_gpu_run"], False)
         self.assertEqual(report, micro_ram_control(seed=20261106, rows=16,
                                                    width=8, transactions=128))
 
+    def test_dense_work_budget_rejects_billion_step_case_before_allocating(self):
+        # A naive permitted shape and transaction count would require over
+        # one billion repeated Python cell contributions. Rejection happens
+        # *before* state allocation or a potentially expensive loop.
+        with patch("labyrinth.gdn_ram_feasibility.OneHotDeltaRAM",
+                   side_effect=AssertionError("must not construct RAM")):
+            with self.assertRaisesRegex(ValueError, "work budget"):
+                micro_ram_control(rows=64, width=64, transactions=4096)
+            with self.assertRaisesRegex(ValueError, "work budget"):
+                micro_ram_control(rows=64, width=64, transactions=10)
+        # A tiny bounded probe still executes normally.
+        report = micro_ram_control(rows=1, width=1, transactions=1)
+        self.assertEqual(report["independent_oracle_row_comparisons"], 1)
+        self.assertEqual(report["estimated_dense_cell_steps"], 3)
+
     def test_author_parameter_counts_show_three_gb_is_not_qualified(self):
         report = qwenputer_stock_footprint_floor()
-        # The absolute best-case ideal 4-bit *all* text-only weights is about
-        # 3.21 decimal GB, with no quant metadata or runtime working memory.
+        # Conditional on a dense 4-bit format, all text-only parameters would
+        # be about 3.21 decimal GB, excluding metadata/runtime; this is NOT a
+        # lower bound for Q2/Q3, sparse or different architectures.
         self.assertEqual(report["ideal_all_q4_textonly_bytes_excluding_overhead"],
                          3_210_500_000)
         self.assertIs(report["ideal_all_q4_exceeds_3_decimal_gb"], True)
@@ -71,6 +91,8 @@ class GatedDeltaFeasibilityTests(unittest.TestCase):
                          5_547_500_000)
         self.assertIs(report["mixed_bf16_chip_q4_other_exceeds_3_gib"], True)
         self.assertIs(report["quantized_chip_exactness_qualified"], False)
+        self.assertIs(report["conditional_on_dense_q4_format"], True)
+        self.assertIs(report["universal_compression_lower_bound_claimed"], False)
         self.assertIs(report["resident_memory_or_lappy_probe_performed"], False)
 
 

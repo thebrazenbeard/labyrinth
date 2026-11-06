@@ -24,7 +24,9 @@ The independent `labyrinth/gdn_ram_feasibility.py` fixture uses 0/1 integer keys
 S' = S + \beta k (v-k^\mathsf{T}S)^\mathsf{T}, \qquad \mathrm{read}(q)=q^\mathsf{T}S.
 \]
 
-For a one-hot row key and beta 1, a write overwrites only the selected row; beta 0 retains state. The fixture computes the full dense equation rather than assigning a Python row directly. `micro_ram_control()` runs 128 seeded writes to a 16-address by 8-bit store and compares **every** read to an independent dictionary-memory oracle after **every** write: 2,048 comparisons. Input and CPU bounds are explicit; multi-hot keys, malformed values and non-binary beta are rejected. The test is deterministic and needs only Python stdlib.
+For a one-hot row key and beta 1, a write overwrites only the selected row; beta 0 retains state. The fixture computes the full dense equation rather than assigning a Python row directly. `micro_ram_control()` runs 128 seeded writes to a 16-address by 8-bit store and compares **every** read to an independent dictionary-memory oracle after **every** write: 2,048 correlated row comparisons (not 2,048 statistically independent trials). Input and CPU bounds are explicit; multi-hot keys, malformed values and non-binary beta are rejected. The test is deterministic and needs only Python stdlib.
+
+**Work-amplification falsifier:** initial argument bounds also admitted 64 rows × 64 bits × 4,096 transactions, producing an estimated 1,107,296,256 dense cell contributions from exhaustive readback alone plus write work. The reviewed version now computes `transactions * width * (rows² + 2*rows)` **before allocation**, rejects estimates above 2,000,000 cell steps, and tests that the hostile oversized configuration is rejected before constructing RAM. Default control estimates 294,912 bounded cell steps. The limit measures this implementation's work shape, not a hardware instruction-count guarantee.
 
 It intentionally omits the *actual* Qwen3.5 GDN sequence, finiteness/rounding behavior, RMSNorm, SwiGLU, attention, tokenizer, hidden-state routing, and generation. Passing here cannot prove Qwenputer's activation precision, macros, transformer integration, or semantic competence. To falsify this fixture further, mutate any unaddressed state row, make beta partially overwrite, or change key validation and observe disagreement or negative-control failure.
 
@@ -32,15 +34,15 @@ It intentionally omits the *actual* Qwen3.5 GDN sequence, finiteness/rounding be
 
 Qwenputer upstream reports its stock/pretrained 4B base ~9.34 decimal GB BF16; original overlay 7.577B params / 15.15 GB BF16; optimized 12-layer overlay 6.756B params / 13.53 GB BF16; optimized *text-only* overlay **6.421B params / 12.86 GB BF16**. Added chip layers alone contribute approximately **1.558B dense parameters**, ~3.116 GB BF16, although only ~0.8 million are nonzero. Sparse zeros compress transfer/storage, but do not disappear from the stock dense runtime representation.
 
-Using upstream rounded counts, *idealized* lower bounds excluding all quantization metadata, scales, tokenizer, executable, activations, KV/GDN state and accuracy effects:
+Using upstream rounded counts, the following are **conditional dense-format size scenarios**, not universal compression lower bounds. Each excludes all quantization metadata, scales, tokenizer, executable, activations, KV/GDN state and accuracy effects:
 
 | Configuration | Decimal bytes minimum | 3 GB decimal target | 3 GiB binary target |
 | --- | ---: | --- | --- |
-| 6.421B text-only parameters, every scalar ideal 4-bit | 3,210,500,000 | Fails by 210.5 MB | Under by only ~10.7 MB **before any overhead** |
+| 6.421B text-only parameters, every scalar in a *dense 4-bit format* | 3,210,500,000 | Fails by 210.5 MB | Under by only ~10.7 MB **before any overhead** |
 | 1.558B exact BF16 chip layer + remaining 4.863B ideal 4-bit | 5,547,500,000 | Fails | Fails |
 | Dense stock optimized text-only BF16 (upstream observed) | ~12,860,000,000 | Fails | Fails |
 
-There is no demonstrated 3 GB GGUF export or exact-preserving quantization of generated chip layers in this audit. An all-4-bit lower bound **does not prove executable fit or function preservation**: chip exactness may fail when zero/ballast/routing terms are quantized. A 32 GB system RAM target and 4 GB VRAM are separate constraints; no inference memory, GPU allocation, throughput or Lappy host measurement was taken. Upstream's transfer-compression figure is not resident RAM. Stock 13.53 GB is the author-optimized overlay, not the stale 15.15 GB original.
+There is no demonstrated 3 GB GGUF export or exact-preserving quantization of generated chip layers in this audit. A *dense-Q4 scenario* **does not rule out** Q2, Q3, compressed sparse tensors, different architectures, or hybrid symbolic routes—nor does it prove executable fit or function preservation: chip exactness may fail when zero/ballast/routing terms are quantized. A 32 GB system RAM target and 4 GB VRAM are separate constraints; no inference memory, GPU allocation, throughput or Lappy host measurement was taken. Upstream's transfer-compression figure is not resident RAM. Stock 13.53 GB is the author-optimized overlay, not the stale 15.15 GB original.
 
 ## Comparisons and a useful next falsifier
 
