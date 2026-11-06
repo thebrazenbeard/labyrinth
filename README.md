@@ -39,6 +39,12 @@ now records the resulting source-owned actions, states, and trace SHA-256.
 An operator-loopback smoke probe obtained **one valid action from a real local
 model**; an entire neural-driven episode and the loaded model's artifact
 identity are **not yet attested**. The
+[open causal Labyrinth experiment](docs/OPEN_CAUSAL_LABYRINTH_V1.md)
+separately fixes a hidden toy mechanism graph **before** inference, accepts
+one free-text physical proposal rather than an `allowed_action_json` menu,
+and separates physical outcome from ex-ante reasoning and Minotaur appeals.
+This is a small, source-only logic fixture with an opt-in local-model actor,
+not demonstrated reasoning transfer or independently witnessed judgment. The
 [conversation quality screen](docs/VERA_GGUF_CONVERSATION_QUALITY_V1.md)
 compares public Vera dialogue with an unchanged control, without requiring
 outside reviewers for development. A runnable
