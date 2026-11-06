@@ -158,6 +158,127 @@ class FixedWeightBranchTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 supervisor.run_steps(count)
 
+    def test_branch_loop_snapshot_roundtrip_and_continuation(self):
+        words = ((0, 0, 1, 1), (1, 0, 0, 0), (0, 1, 0, 0), (1, 0, 0, 0))
+        program = BranchProgram("loop-recovery", words)
+        original = BranchSupervisor.start(self.alu, self.branch, program)
+        self.assertEqual(original.run_steps(19), (3, (0, 0)))
+        receipt = original.snapshot()
+        self.assertEqual(receipt["steps"], 19)
+        self.assertEqual(receipt["program_sha256"], program.sha256())
+        with (patch("labyrinth.fixed_weight_branch.branch_reference", side_effect=AssertionError("branch compiler called")),
+              patch("labyrinth.fixed_weight_alu.opcode_reference", side_effect=AssertionError("ALU compiler called"))):
+            restored = BranchSupervisor.restore(self.alu, self.branch, program, receipt)
+            self.assertEqual(restored.snapshot(), receipt)
+            self.assertEqual(restored.run_steps(17), original.run_steps(17))
+            self.assertEqual(restored.snapshot(), original.snapshot())
+
+    def test_snapshot_hostile_tampering_and_swapped_dependencies(self):
+        program = BranchProgram("snapshot", ((0, 0, 1, 1), (1, 0, 0, 0),
+                                              (0, 1, 0, 0), (1, 0, 0, 0)))
+        session = BranchSupervisor.start(self.alu, self.branch, program)
+        session.run_steps(7)
+        good = session.snapshot()
+        cases = (({"pc": (good["pc"] + 1) % 4}, "replay"),
+                 ({"state": [1 - good["state"][0], good["state"][1]]}, "replay"),
+                 ({"steps": good["steps"] + 1}, "replay"),
+                 ({"steps": True}, "bound"),
+                 ({"steps": 4097}, "bound"),
+                 ({"steps": -1}, "bound"),
+                 ({"pc": True}, "PC"),
+                 ({"schema": "forged"}, "schema"),
+                 ({"branch_sha256": "0" * 64}, "provenance"),
+                 ({"alu_sha256": "0" * 64}, "provenance"),
+                 ({"execution_sha256": "0" * 64}, "semantics"),
+                 ({"program_sha256": "0" * 64}, "provenance"))
+        for change, expected in cases:
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, expected):
+                BranchSupervisor.restore(self.alu, self.branch, program, dict(good, **change))
+        with self.assertRaisesRegex(ValueError, "fields"):
+            BranchSupervisor.restore(self.alu, self.branch, program, dict(good, secret="x"))
+        with self.assertRaisesRegex(ValueError, "dependencies"):
+            BranchSupervisor.restore(self.alu, object(), program, good)
+        swapped = BranchProgram("snapshot-other", program.words, program.initial_state)
+        with self.assertRaisesRegex(ValueError, "provenance"):
+            BranchSupervisor.restore(self.alu, self.branch, swapped, good)
+        # Same branch architecture but a legitimately distinct numerical edit.
+        edited_rows = [list(row) for row in self.branch.w2]
+        edited_rows[0][0] = 1 - edited_rows[0][0]
+        edited = NeuralBranchCircuit(self.branch.w1, self.branch.b1,
+                                     tuple(tuple(row) for row in edited_rows), self.branch.b2)
+        with self.assertRaisesRegex(ValueError, "provenance"):
+            BranchSupervisor.restore(self.alu, edited, program, good)
+
+    def test_recovery_rejects_runtime_forward_code_drift_on_future_path(self):
+        program = BranchProgram("future-drift", ((0, 0, 0, 0), (1, 0, 0, 0),
+                                                 (0, 0, 0, 0), (0, 0, 0, 0)))
+        session = BranchSupervisor.start(self.alu, self.branch, program)
+        session.step()  # Snapshot pre-drift branch step is entirely unchanged.
+        receipt = session.snapshot()
+        original = NeuralBranchCircuit.forward
+
+        def drift_on_future_path(circuit, bits):
+            output = original(circuit, bits)
+            return (0, 1) if bits == (1, 0, 0, 1, 0) else output
+
+        with patch.object(NeuralBranchCircuit, "forward", drift_on_future_path):
+            # Prior step can replay normally, but the *next* one would diverge.
+            with self.assertRaisesRegex(ValueError, "execution semantics"):
+                BranchSupervisor.restore(self.alu, self.branch, program, receipt)
+        self.assertEqual(BranchSupervisor.restore(self.alu, self.branch,
+                                                  program, receipt).snapshot(), receipt)
+
+    def test_branch_snapshot_recovery_in_fresh_process(self):
+        program = BranchProgram("fresh-recovery", ((0, 0, 1, 1), (1, 0, 0, 0),
+                                                    (0, 1, 0, 0), (1, 0, 0, 0)))
+        current = BranchSupervisor.start(self.alu, self.branch, program)
+        current.run_steps(11)
+        receipt = current.snapshot()
+        with tempfile.TemporaryDirectory() as directory:
+            branch_path = Path(directory) / "branch.json"
+            alu_path = Path(directory) / "alu.json"
+            self.branch.save(branch_path)
+            self.alu.save(alu_path)
+            script = ("import json,sys; from pathlib import Path; "
+                      "from labyrinth.fixed_weight_branch import BranchSupervisor,BranchProgram,load_branch; "
+                      "from labyrinth.fixed_weight_alu import load_stepper; "
+                      "p=BranchProgram('fresh-recovery',((0,0,1,1),(1,0,0,0),(0,1,0,0),(1,0,0,0))); "
+                      "s=BranchSupervisor.restore(load_stepper(Path(sys.argv[1])),"
+                      "load_branch(Path(sys.argv[2])),p,json.loads(sys.argv[3])); "
+                      "s.run_steps(20); print(json.dumps(s.snapshot(),sort_keys=True))")
+            child = subprocess.run((sys.executable, "-c", script, str(alu_path),
+                                    str(branch_path), json.dumps(receipt)),
+                                   cwd=str(Path(__file__).resolve().parents[1]),
+                                   text=True, capture_output=True, check=True)
+            current.run_steps(20)
+            self.assertEqual(json.loads(child.stdout), current.snapshot())
+
+    def test_randomized_branch_replay_boundary_and_future_equivalence(self):
+        rng = random.Random(20261106)
+        allowed_alu = ((0, 0, 0), (0, 1, 1), (1, 0, 0), (1, 0, 1))
+        for number in range(80):
+            words = tuple((rng.randrange(2), *rng.choice(allowed_alu)) for _ in range(4))
+            program = BranchProgram(f"heldout-recovery-{number}", words,
+                                    (rng.randrange(2), rng.randrange(2)))
+            session = BranchSupervisor.start(self.alu, self.branch, program)
+            prefix = rng.randrange(0, 70)
+            suffix = rng.randrange(0, 70)
+            session.run_steps(prefix)
+            receipt = session.snapshot()
+            recovered = BranchSupervisor.restore(self.alu, self.branch, program, receipt)
+            self.assertEqual(recovered.snapshot(), receipt)
+            self.assertEqual(recovered.run_steps(suffix), session.run_steps(suffix))
+            self.assertEqual(recovered.snapshot(), session.snapshot())
+
+    def test_recovery_horizon_is_explicit_and_not_resettable_by_snapshot(self):
+        program = BranchProgram("long-ring", ((0, 0, 0, 0),) * 4)
+        session = BranchSupervisor.start(self.alu, self.branch, program)
+        session.run_steps(4096)
+        self.assertEqual(session.snapshot()["steps"], 4096)
+        session.step()
+        with self.assertRaisesRegex(ValueError, "horizon"):
+            session.snapshot()
+
 
 if __name__ == "__main__":
     unittest.main()
