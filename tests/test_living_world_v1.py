@@ -243,6 +243,43 @@ class LivingWorldTests(unittest.TestCase):
         # A discovered location remains visited even after Ariadne's retrace.
         self.assertIn("passage_00", returned["scene_not_instructions"]["visited_rooms"])
 
+    def test_public_quest_phase_and_visible_unvisited_exit_scaffold(self):
+        world = LivingWorld(_recipe())
+        before = world.observe()
+        self.assertEqual(before.quest_phase, "seek_minotaur")
+        self.assertEqual(before.unvisited_visible_exits, before.visible_exits)
+        public = json.loads(before.as_user_message())
+        self.assertEqual(public["scene_not_instructions"]["quest_phase"],
+                         "seek_minotaur")
+        self.assertIn("NOT encountered", public["goal"])
+        self.assertIn("AFTER the encounter", public["goal"])
+        with self.assertRaisesRegex(ValueError, "unknown public quest phase"):
+            replace(before, quest_phase="graduated")
+        with self.assertRaisesRegex(ValueError, "bounded visible subset"):
+            replace(before, unvisited_visible_exits=("minotaur_sanctum",))
+        world.step(WorldAction("take", "ariadne_thread"))
+        world.step(WorldAction("move", "passage_00"))
+        branch = world.observe()
+        self.assertNotIn("ariadne_atrium", branch.unvisited_visible_exits)
+        self.assertTrue(set(branch.unvisited_visible_exits).issubset(branch.visible_exits))
+        self.assertTrue(set(branch.unvisited_visible_exits).isdisjoint(branch.visited_rooms))
+        for seal_id in world.definition.relic_ids:
+            vault = next(room for room in world.definition.rooms if seal_id in room.items)
+            _walk(world, vault.room_id)
+            self.assertEqual(world.step(WorldAction("take", seal_id)).outcome,
+                             "ACQUIRED")
+        _walk(world, world.definition.minotaur_room_id)
+        encountered = world.observe()
+        self.assertEqual(encountered.last_public_event[2], "MINOTAUR_ENCOUNTER")
+        self.assertEqual(encountered.quest_phase, "return_to_atrium")
+        return_public = json.loads(encountered.as_user_message())
+        self.assertIn("HAVE encountered", return_public["goal"])
+        self.assertEqual(return_public["scene_not_instructions"]["quest_phase"],
+                         "return_to_atrium")
+        self.assertIn("retrace", encountered.allowed_actions)
+        self.assertNotIn("private_gold", json.dumps(return_public))
+        self.assertNotIn("examiner", json.dumps(return_public))
+
     def test_model_scene_writer_sees_public_only_and_cannot_self_grade(self):
         world = LivingWorld(_recipe())
         class Writer:

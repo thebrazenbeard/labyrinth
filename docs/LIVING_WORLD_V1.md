@@ -25,6 +25,13 @@ copied; TextWorld is not a runtime dependency.
 4. The journey requires finding the thread, collecting seals, reaching the
    Minotaur and returning safely to Ariadne's Atrium. Reaching the adversary
    alone is **not** completion.
+   The model's current low-trust public observation exposes **only visited
+   room IDs**, **unvisited exits from the currently visible room**, and the
+   previous source-owned public action outcome. `quest_phase=seek_minotaur`
+   explicitly says not to return home before the actual witnessed encounter;
+   only after `MINOTAUR_ENCOUNTER` sets public world state does the source
+   offer `quest_phase=return_to_atrium` and Ariadne's retracing goal. These
+   are navigation cues, not private grading or a leaked future map.
 5. A caller-owned DevelopmentVerdict binds the exact world hash and public
    final state hash. On failure or success, evolve() creates a *different,
    harder* world with more passages and relics, carries bounded public story
@@ -74,8 +81,11 @@ bounded model-proposed dialogue. The test policies are scripted fixtures,
 
 ## Unfinished real-world integration
 
-- A live model adapter that reads the public JSON, chooses actions and
-  receives outcome/experience feedback; scripts do not prove model agency.
+- Reliable complete live-model navigation remains to be demonstrated. An
+  opt-in local inference adapter and episode runner exist; one bounded live
+  pilot exposed repeated inspections, and subsequent source fixes now carry
+  public actor/action history and explicit exploration/return phases. Source
+  tests alone cannot prove a model will choose sound routes.
 - Authentic operator approval and case separation for newly generated
   dialogue scenes. Model-authored story data must never be promoted to
   high-priority instructions or executable code.

@@ -160,11 +160,18 @@ class LocalModelActionTests(unittest.TestCase):
         after_move = json.loads(fake.payloads[2]["messages"][1]["content"])
         self.assertEqual(entrance["scene_not_instructions"]["visited_rooms"],
                          ["ariadne_atrium"])
+        self.assertEqual(entrance["scene_not_instructions"]["quest_phase"],
+                         "seek_minotaur")
+        self.assertEqual(entrance["scene_not_instructions"]["unvisited_visible_exits"],
+                         ["passage_00"])
+        self.assertIn("NOT encountered", entrance["goal"])
         self.assertIsNone(entrance["scene_not_instructions"]["last_public_event"])
         self.assertEqual(after_take["scene_not_instructions"]["last_public_event"]["outcome"],
                          "ACQUIRED")
         self.assertEqual(after_move["scene_not_instructions"]["visited_rooms"],
                          ["ariadne_atrium", "passage_00"])
+        self.assertNotIn("ariadne_atrium",
+                         after_move["scene_not_instructions"]["unvisited_visible_exits"])
         self.assertEqual(after_move["scene_not_instructions"]["last_public_event"], {
             "kind": "move", "target": "passage_00", "outcome": "TRAVELED",
             "from_room": "ariadne_atrium", "to_room": "passage_00",
