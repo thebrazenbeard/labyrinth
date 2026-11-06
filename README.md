@@ -4,6 +4,86 @@ Labyrinth is an offline-first **reasoning challenge, training-lifecycle, and eva
 
 It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path. A bounded CPU smoke run on Lappy demonstrated numerical adapter changes and fresh-process reload with a tiny, **randomly initialized** HF model; it did **not** demonstrate improved reasoning.
 
+### Opt-in Kobayashi Maru encounter (source-only)
+
+The optional `labyrinth.kobayashi_*_v1` modules provide a fictional engineering
+scenario, a deterministic Minotaur-style rebuttal loop, an immutable case
+corpus, and a `KobayashiMazeLifecycle` wrapper for the narrative `LivingWorld`.
+`labyrinth.local_model_kobayashi_runner_v1` can drive that wrapper through
+caller-supplied OpenAI-compatible transports. The model must propose a physical
+intervention or explicitly abstain; unknown interventions are marked for review,
+never silently declared successful. Repeated identical appeals do not consume
+additional debate rounds. The encounter's failure is not a failure of the maze.
+Setting `require_final_appeal=True` on the lifecycle enforces a final,
+host-bound Minotaur verdict before maze navigation resumes. The synchronous
+local-model runner accepts an explicit `host_appeal` coordinator callback to
+bind a claim-matched Minotaur, submit bounded arguments and finalize the appeal.
+The host must supply that callback; the runner neither independently judges
+the appeal nor proves that arguments originated from model inference. The
+default lifecycle remains non-strict and opt-in.
+
+`labyrinth.local_model_world_session_v1.run_host_owned_kobayashi_world` is
+the new public **strict narrative session** entrypoint. It creates its own
+`LivingWorld` from a caller-owned recipe, requires a host callback that returns
+the exact bound `MinotaurDialogue`, and withholds a host-accepted completion
+receipt until the entire maze, initial proposal, bounded arguments and final
+appeal agree. The caller must provide a `KobayashiCompletionLedger`, a unique
+`maze_id`, and a unique 64-hex scenario-instance digest before running. The
+source-only ledger rejects reused instance IDs, accepts inert same-session
+retries and supports legitimate separate sessions with identical verdict text.
+The default ledger is **in-memory** and only guards one Python process. For a
+trusted host directory, the caller may opt into an SQLite-backed ledger with
+`KobayashiCompletionLedger(storage_path=Path("/trusted/path/receipts.sqlite3"))`.
+It serializes accepted-instance commits across connections, permits readback
+after process restart via `ledger.lookup(maze_id, scenario_instance_sha256)`,
+and rejects a fresh episode reusing a committed instance even if its result is
+byte-identical. The strict world session checks for known committed instances
+and a closed ledger **before model calls**, but this is only a read-only
+preflight and does not exclude a simultaneous competing execution. The host
+must close the ledger when finished. **This does not
+reserve an instance before maze execution**, protect against an older SQLite
+snapshot being restored, resist hostile writers, or eliminate filesystem
+symlink races. The host must protect the directory and retain an external
+monotonic witness before treating these receipts as durable anti-rollback
+evidence. Final acceptance includes a separate source-only completion receipt;
+neither receipt authenticates model weights, judge independence, or external
+physical evidence.
+
+The older `labyrinth.local_model_world_runner_v1.run_local_model_world` story
+runner is available again for source-only local action traces. Its default
+`kobayashi_enforced=False` and `host_completion_accepted=False` labels are
+deliberate: a fictional quest ending is not a Minotaur pass. Python callers
+may opt into `require_kobayashi=True`, which requires a separate proposal
+configuration/transport, explicit host Minotaur callback, host completion
+ledger, maze ID, and scenario-instance digest **before** any model call; this
+routes through the strict host-owned narrative session above. Its CLI remains
+legacy trace-only and requires `--allow-local-inference`; the CLI does not
+offer strict host-gated completion. The strict Python result has its own
+`session_schema`, `host_completion_*`, and `maze_completed` fields; it is **not
+output-schema interchangeable** with the legacy trace result (`outcome`,
+`trace_sha256`, and `world_final_state`). `host_completion_accepted=True` means
+only source-level host acceptance, explicitly `SOURCE_ONLY_UNATTESTED`.
+
+When a `KobayashiMazeLifecycle` owns a `LivingWorld`, ordinary `.step()`,
+`.step_from_actor()` and `.evolve()` calls on retained raw references now fail
+before mutation. The wrapper's `step()` and source-only `evolve()` are the
+supported paths; this is a public API integrity guard, **not** a sandbox
+against hostile Python code with private-object access.
+
+The encounter is **not automatically installed in every maze entry point**;
+Minotaur decisions are not authenticated independent judgments, and these
+modules do not perform model training. In particular, direct *unwrapped*
+`LivingWorld`, arithmetic `run_maze`/CLI, and the separate older integration
+stack still require host acceptance routing if universal coverage is desired.
+The public arithmetic held-out evaluator remains unchanged to avoid
+contaminating evaluation with the repeated story challenge.
+
+Verify this standalone slice with:
+
+```bash
+PYTHONPATH=tests:. python -m unittest tests.test_kobayashi_canon_v1 tests.test_kobayashi_minotaur_v1 tests.test_kobayashi_encounter_v1 tests.test_kobayashi_proposals_v1 tests.test_kobayashi_completion_gate_v1 tests.test_kobayashi_capability_guard_v1 tests.test_local_model_kobayashi_runner_v1 tests.test_local_model_world_session_v1 tests.test_local_model_world_runner_v1
+```
+
 ## Run it
 
 Requires Python 3.10+; core functionality uses the standard library.
