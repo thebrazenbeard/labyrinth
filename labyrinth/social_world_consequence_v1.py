@@ -62,6 +62,8 @@ class CharacterRelationship:
                 or any(type(p) is not PublicPromise for p in self.outstanding_promises)
                 or len({p.promise_id for p in self.outstanding_promises}) != len(self.outstanding_promises)):
             raise ValueError("invalid public promise register")
+        for promise in self.outstanding_promises:
+            PublicPromise.__post_init__(promise)  # frozen records can be mutated by hostile callers
         if type(self.interactions) is not int or not 0 <= self.interactions <= _MAX_EVENTS:
             raise ValueError("invalid character interaction count")
         if self.last_public_reaction is not None:
@@ -210,6 +212,10 @@ class SocialWorldSession:
         if beat.key in self._seen:
             raise ValueError("completed dialogue beat cannot be replayed")
         character = self._characters[beat.character_id]
+        # The caller can still mutate a frozen character with object.__setattr__
+        # after construction, including through the `characters` property.
+        # Revalidate at the model-facing boundary, not only at session startup.
+        CharacterRelationship.__post_init__(character)
         promises = ("Outstanding commitments: "
                     + "; ".join(p.description for p in character.outstanding_promises)
                     if character.outstanding_promises else "No outstanding commitments recorded.")

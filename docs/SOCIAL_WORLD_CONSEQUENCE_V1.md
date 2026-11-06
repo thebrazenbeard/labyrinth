@@ -35,6 +35,10 @@ characters. It does not inject the operator-only `quality_score` or claim
 long-term autobiographical memory. The reaction text is fictional, untrusted
 narrative data; quotation is a formatting boundary, not prompt-injection
 immunity. A model-facing caller must maintain role and authority isolation.
+Because frozen dataclass fields can still be changed via `object.__setattr__`,
+the model-facing `preview()` revalidates each character and its nested public
+promises immediately before rendering; stale post-construction mutations fail
+closed instead of exposing unbounded reaction/commitment text.
 
 ```python
 from labyrinth.social_world_consequence_v1 import (
@@ -99,6 +103,10 @@ the next chapter, is superseded by the next one, never crosses character
 boundaries, does not automatically disclose operator score metadata, and is
 unchanged after a rejected promise operation. The three extra tests are
 synthetic protocol checks, not evidence of real Vera voice or empathy.
+Independent hostile review also found that a caller could mutate a frozen
+character **after** it had been passed into `SocialWorldSession`, bypassing
+constructor-time checks. Two additional tests reproduce and reject that
+post-construction reaction/promise mutation at the public prompt boundary.
 
 > **Hostile challenge:** The current operator can claim a reply increased
 > trust or deserved quality 2 without independent evidence. A model could

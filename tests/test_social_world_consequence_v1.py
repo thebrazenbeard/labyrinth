@@ -115,6 +115,23 @@ class SocialWorldTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "last public reaction"):
             SocialWorldSession(self.scope, (corrupted,))
 
+    def test_post_construction_reaction_mutation_fails_before_public_prompt(self):
+        seed = CharacterRelationship("miren")
+        world = SocialWorldSession(self.scope, (seed,))
+        object.__setattr__(seed, "last_public_reaction", "ATTACK-" + "x" * 2020)
+        with self.assertRaisesRegex(ValueError, "last public reaction"):
+            world.preview(beat())
+        self.assertEqual(world.events, ())
+
+    def test_post_construction_nested_promise_mutation_fails_closed(self):
+        promise = PublicPromise("old-word", "Be there at noon")
+        character = CharacterRelationship("miren", outstanding_promises=(promise,))
+        world = SocialWorldSession(self.scope, (character,))
+        object.__setattr__(promise, "description", "x" * 2048)
+        with self.assertRaisesRegex(ValueError, "promise description"):
+            world.preview(beat())
+        self.assertEqual(world.events, ())
+
     def test_counterfactual_model_answers_have_different_world_consequences(self):
         first = beat()
         better = SocialWorldSession(self.scope, (CharacterRelationship("miren"),))
