@@ -2,6 +2,83 @@
 
 Labyrinth is an offline-first **reasoning challenge, training-lifecycle, and evaluation harness**. It generates seeded tasks, scores strictly formatted answers, compares in-context controls, and includes a deliberately small CPU-only parameter-learning demonstration.
 
+### The evolving Labyrinth saga (new source-only integration)
+
+The model is the traveler, not a passive worksheet respondent. An original
+[living world](docs/LIVING_WORLD_V1.md) supports seeded branching rooms,
+model-selected actions, recoverable public consequences, Ariadne's literal
+thread and a relic-gated Minotaur encounter. A
+[dynamic-scene authority](docs/DYNAMIC_SCENE_AUTHORIZATION_V1.md) separately
+lets a model *write* new fictional TRAIN encounters, subject to exact public
+scope, one-use operator approval, physical ancestry checks and write-ahead
+TRAIN intent; it cannot author its own score or private examination.
+
+At the entrance, [Ariadne](docs/ARIADNE_RECOVERY_V1.md) hashes the entire
+**W0 model/training state**, not just the inference prompt. The
+[campaign orchestrator](docs/CAMPAIGN_ORCHESTRATOR_V1.md) physically tracks
+successor checkpoints, while Minotaur compares sibling candidates against
+an unchanged control using separately supplied development metrics. A
+no-winner verdict preserves the actual selected weights but returns the
+traveler to a new, more demanding witnessed world. A winner selects a
+physical child and advances model ancestry. These are distinct events.
+
+In addition to gradient/LoRA training, bounded
+[weight-space sparks](docs/WEIGHT_SPACE_SPARK_V1.md) create directly edited
+F32 weight candidates without overwriting W0, then feed
+[Ariadne's candidate bridge](docs/WEIGHT_SPACE_CAMPAIGN_BRIDGE_V1.md).
+An optional [local public inference probe](docs/LOCAL_FULL_STATE_PROBE_V1.md)
+can compare identical prompts on W0, unchanged control and candidate states
+through a user-operated KoboldCPP/llama.cpp-compatible loopback service.
+The [read-only GGUF entrance](docs/GGUF_ENTRANCE_FINGERPRINT_V1.md) and
+[dual-track W0 inspector](docs/DUAL_TRACK_W0_ENTRANCE_V1.md) keep runtime
+quantized model files distinct from a trainable HF checkpoint. An
+[opt-in local model actor](docs/LOCAL_MODEL_ACTION_ADAPTER_V1.md) can ask a
+user-managed loopback server to choose a strictly bounded public world action;
+an [opt-in public-world episode runner](docs/LOCAL_MODEL_WORLD_RUNNER_V1.md)
+now records the resulting source-owned actions, states, and trace SHA-256.
+An operator-loopback smoke probe obtained **one valid action from a real local
+model**; an entire neural-driven episode and the loaded model's artifact
+identity are **not yet attested**. The
+[open causal Labyrinth experiment](docs/OPEN_CAUSAL_LABYRINTH_V1.md)
+separately fixes a hidden toy mechanism graph **before** inference, accepts
+one free-text physical proposal rather than an `allowed_action_json` menu,
+and separates physical outcome from ex-ante reasoning and Minotaur appeals.
+This is a small, source-only logic fixture with an opt-in local-model actor,
+not demonstrated reasoning transfer or independently witnessed judgment. The
+[Kobayashi Maru encounter contract](docs/KOBAYASHI_MARU_V1.md) requires one
+near-constant, believed-unwinnable adversarial test within each maze. An
+**opt-in source-level wrapper** now implements the encounter for wrapped
+`LivingWorld` mazes; legacy runners are not automatically migrated. A separate
+opt-in local-model runner can traverse the public maze and request one
+free-text Kobayashi intervention through a configured model transport, but
+its presence does not attest real host inference. The encounter's local loss
+does **not** fail the larger Labyrinth; Minotaur may refute known proposals,
+while unfamiliar proposals remain open to evidence-based challenge. No
+trained Minotaur weights, real model learning, or general-world impossibility
+are established. The
+[conversation quality screen](docs/VERA_GGUF_CONVERSATION_QUALITY_V1.md)
+compares public Vera dialogue with an unchanged control, without requiring
+outside reviewers for development. A runnable
+[two-cycle saga fixture](docs/SOURCE_ONLY_LIVING_SAGA_DEMO_V1.md) now has a
+[reverified human-readable chronicle and discovered-route maps](docs/SAGA_REPLAY_V1.md):
+
+```bash
+python -m labyrinth.source_only_saga_demo_v1
+python -m labyrinth.saga_replay_v1
+# On the machine hosting your already-running OpenAI-compatible local model:
+python -m labyrinth.local_model_world_runner_v1 --allow-local-inference \
+  --model YOUR_LOCAL_MODEL --port 11434 --reasoning-effort none \
+  --json-mode --max-completion-tokens 128 --max-actions 48
+```
+
+The separate [host broker dry-run](docs/TRAININGDAY_OWNER_BROKER_DRYRUN_V1.md)
+checks a possible owner-bound local launch protocol but explicitly does not
+grant physical GPU training. The two-cycle fixture actor is a deterministic
+planner, its dialogue writer a template, its tensor edits toy bytes, and its
+examiner metrics fabricated. No live Vera/Qwen learning improvement,
+loaded-model attestation, private Minotaur qualification, VN1 installation
+or protected promotion has been established.
+
 It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path. A bounded CPU smoke run on Lappy demonstrated numerical adapter changes and fresh-process reload with a tiny, **randomly initialized** HF model; it did **not** demonstrate improved reasoning.
 
 ## Run it

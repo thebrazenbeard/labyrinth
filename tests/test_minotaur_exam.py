@@ -50,7 +50,9 @@ class MinotaurExamTests(unittest.TestCase):
         decision = evaluate_minotaur(make_scope(), make_receipt())
         self.assertEqual(decision.status, "PASS")
         self.assertEqual(decision.weak_skills, ())
-        self.assertIn("independent attestation required", decision.reason)
+        self.assertIn("internal development threshold met", decision.reason)
+        self.assertIn("no graduation or external approval conferred", decision.reason)
+        self.assertNotIn("independent attestation required", decision.reason)
         self.assertEqual(dict(decision.mean_accuracy_by_skill)["cognitive_empathy"], 1)
 
     def test_targeted_skill_failure_for_next_maze(self):

@@ -93,6 +93,34 @@ class FreshCheckpointPredictorTests(unittest.TestCase):
         self.assertEqual(report["wt"]["correct"], 0)
         self.assertEqual(report["development_status"], "NO_PUBLIC_PROBE_GAIN")
 
+    def test_child_predictor_receives_prompts_but_never_expected_gold(self):
+        """The scorer alone knows expected answers, even for public DEV probes."""
+        from labyrinth import checkpoint_predictor_verification as verifier
+
+        real_worker = verifier._run_worker
+        child_probes = []
+
+        def inspect_child_payload(payload, **kwargs):
+            child_probes.extend(payload["public_probes"])
+            if any("expected" in probe for probe in payload["public_probes"]):
+                raise AssertionError("predictor child received scorer answer key")
+            return real_worker(payload, **kwargs)
+
+        with patch.object(verifier, "_run_worker", side_effect=inspect_child_payload):
+            report = self._compare()
+        self.assertEqual(len(child_probes), 2 * len(self.probes))
+        self.assertTrue(all("prompt" in item and "prompt_sha256" in item
+                            for item in child_probes))
+        self.assertEqual(report["wt"]["correct"], 2)
+
+        # Even if a caller bypasses the parent comparison and invokes the
+        # worker directly, an answer key cannot be added to inference input.
+        from labyrinth.checkpoint_predictor_worker import _prompt_only_probes
+        with self.assertRaisesRegex(ValueError, "never expected gold"):
+            _prompt_only_probes([{**child_probes[0], "expected": "7"}])
+        with self.assertRaisesRegex(ValueError, "never expected gold"):
+            _prompt_only_probes([{**child_probes[0], "prompt_sha256": "f" * 64}])
+
     def test_forged_or_stale_checkpoint_identity_refused(self):
         with self.assertRaisesRegex(ValueError, "successor .*digest"):
             self._compare(expected_successor_sha256="f" * 64)

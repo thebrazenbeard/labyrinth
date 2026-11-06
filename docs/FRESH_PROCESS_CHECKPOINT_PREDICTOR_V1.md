@@ -30,6 +30,13 @@ provenance and later fresh transfer are still needed. In particular, a
 counterexample test loads two different checkpoint byte strings, returns only
 their SHA as a predictor output, and correctly reports **zero skill gain**.
 
+The parent scorer retains the `expected` answer values. The predictor
+subprocess receives only development case identity, skill, prompt and prompt
+hash; it explicitly rejects score/gold fields even if called directly. This
+separation prevents accidental answer-key exposure through the fresh-process
+inference seam. It is **not** an independent blinded examiner: these remain
+public developmental probes and parent/worker source are controlled locally.
+
 ## Explicit predictor modes
 
 | Mode | Uses genuine local checkpoint bytes? | Claim boundary |

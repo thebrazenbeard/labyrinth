@@ -101,8 +101,15 @@ def _run_worker(payload: dict[str, Any], *, timeout_seconds: float) -> dict[str,
 
 def _validate_worker(
     output: dict[str, Any], *, payload: dict[str, Any],
-    independent_pid: int | None,
+    independent_pid: int | None, scoring_probes: list[dict[str, str]],
 ) -> dict[str, Any]:
+    # The subprocess is an inference surface, never a holder of the scorer's
+    # expected values. Retain the answer key in this parent process only.
+    if payload["public_probes"] != [
+        {key: probe[key] for key in ("case_id", "skill", "prompt", "prompt_sha256")}
+        for probe in scoring_probes
+    ]:
+        raise ValueError("predictor payload differs from prompt-only score cohort")
     if (set(output) != {"schema", "nonce", "pid", "loaded_state_sha256",
                         "worker_source_sha256", "runtime_binding", "predictions"}
             or output["schema"] != "labyrinth.checkpoint-predictor-worker.v1"
@@ -136,7 +143,7 @@ def _validate_worker(
         raise ValueError("worker mode and actual runtime binding disagree")
     correct = 0
     details = []
-    for probe, prediction in zip(payload["public_probes"], output["predictions"], strict=True):
+    for probe, prediction in zip(scoring_probes, output["predictions"], strict=True):
         match = _OUTPUT.fullmatch(prediction)
         scored = match is not None and match[1] == probe["expected"]
         correct += int(scored)
@@ -171,6 +178,10 @@ def compare_fresh_process_checkpoints(
     elif localhost_endpoint is not None:
         raise ValueError("file predictor cannot use localhost service endpoint")
     checked = _probes(public_probes)
+    prompt_only_probes = [
+        {key: probe[key] for key in ("case_id", "skill", "prompt", "prompt_sha256")}
+        for probe in checked
+    ]
     verify_entrance_state(entrance_path)
     entrance = json.loads(entrance_path.read_bytes())
     if entrance.get("schema") != ENTRANCE_SCHEMA or entrance.get("adapter") is None:
@@ -200,7 +211,7 @@ def compare_fresh_process_checkpoints(
             "schema": "labyrinth.checkpoint-predictor-request.v1",
             "nonce": nonce, "predictor": predictor, "base": base,
             "adapter": adapter, "loaded_state_sha256": state_sha,
-            "public_probes": checked, "localhost_endpoint": localhost_endpoint,
+            "public_probes": prompt_only_probes, "localhost_endpoint": localhost_endpoint,
             "worker_source_sha256": worker_source_sha256,
         }
         raw_result = _run_worker(payload, timeout_seconds=float(timeout_seconds))
@@ -211,6 +222,7 @@ def compare_fresh_process_checkpoints(
         observed.append(_validate_worker(
             raw_result, payload=payload,
             independent_pid=observed[0]["pid"] if observed else None,
+            scoring_probes=checked,
         ))
     w0, wt = observed
     status = ("UNQUALIFIED_LOCALHOST_SERVICE_SELF_REPORT"

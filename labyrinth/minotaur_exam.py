@@ -122,9 +122,12 @@ class ExamDecision:
 def evaluate_minotaur(scope: TrainingScopeSpec, receipt: MinotaurExamReceipt) -> ExamDecision:
     """Evaluate coverage and paired gains; do not use this for formal exit.
 
-    A PASS means *provisionally sufficient*, pending independently signed
-    graduation.  This function neither observes a model nor trusts a claimed
-    pass verdict supplied by a trainee.  Exam cases must never enter training.
+    A PASS means *sufficient for this local development threshold only*.  It
+    does not request third-party review, permit promotion, or authorize use of
+    exposed cases as a private final exam.  Separate qualification claims
+    need their own evidence; new development experiments do not.
+    This function neither observes a model nor trusts a claimed pass verdict
+    supplied by a trainee. Exam cases must never enter training.
     """
     if type(scope) is not TrainingScopeSpec or type(receipt) is not MinotaurExamReceipt:
         raise ValueError("expected TrainingScopeSpec and MinotaurExamReceipt")
@@ -187,6 +190,7 @@ def evaluate_minotaur(scope: TrainingScopeSpec, receipt: MinotaurExamReceipt) ->
             receipt.exam_id, tuple(accuracy), tuple(gains),
         )
     return ExamDecision(
-        "PASS", (), "internal development threshold met; independent attestation required",
+        "PASS", (),
+        "internal development threshold met; no graduation or external approval conferred",
         receipt.exam_id, tuple(accuracy), tuple(gains),
     )
