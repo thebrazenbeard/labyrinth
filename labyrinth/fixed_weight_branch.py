@@ -7,12 +7,15 @@ still owns instruction memory, the PC register, and execution scheduling.
 
 from __future__ import annotations
 
+import builtins
 from dataclasses import dataclass
 from hashlib import sha256
 from itertools import product
 import json
 from pathlib import Path
+from types import CodeType
 
+from labyrinth import fixed_weight_alu as alu_module
 from labyrinth.fixed_weight_alu import (
     NeuralStepper, UnsupportedInstructionError,
     _assert_bits, _canonical, _reject_duplicate_keys,
@@ -23,6 +26,12 @@ INPUT_ABI = ("skip_if_zero", "reg_lo", "reg_hi", "pc_lo", "pc_hi")
 OUTPUT_ABI = ("next_pc_lo", "next_pc_hi")
 CANONICAL_SHA256 = "bc81ed5e7b9d8bd5a02b312ac6296848c6e3f103f1ab17dc1072be31822220db"
 MAX_ABS_COEFFICIENT = 1024
+SNAPSHOT_SCHEMA = "neural-branch-supervisor-snapshot-v1"
+MAX_RECOVERY_STEPS = 4096
+EXECUTION_ABI = "cpython-neural-branch-execution-bytecode-v1"
+_EXECUTION_BUILTINS = ("max", "sum", "zip", "tuple", "any", "len", "type", "int",
+                       "range", "str", "isinstance", "enumerate")
+_BASELINE_BUILTINS = {name: getattr(builtins, name) for name in _EXECUTION_BUILTINS}
 
 
 def branch_reference(bits: tuple[int, ...]) -> tuple[int, int]:
@@ -148,6 +157,11 @@ class BranchProgram:
             _assert_bits(word, 4, "branch word")
         _assert_bits(self.initial_state, 2, "initial register")
 
+    def sha256(self) -> str:
+        return sha256(_canonical({"format": "neural-branch-program-v1", "name": self.name,
+                                   "words": [list(word) for word in self.words],
+                                   "initial_state": list(self.initial_state)})).hexdigest()
+
 
 @dataclass
 class BranchSupervisor:
@@ -158,18 +172,24 @@ class BranchSupervisor:
     program: BranchProgram
     pc: int = 0
     state: tuple[int, int] = (0, 0)
+    steps: int = 0
 
     @classmethod
     def start(cls, alu: NeuralStepper, branch: NeuralBranchCircuit,
               program: BranchProgram) -> BranchSupervisor:
-        return cls(alu, branch, program, 0, program.initial_state)
+        return cls(alu, branch, program, 0, program.initial_state, 0)
 
-    def step(self) -> tuple[int, tuple[int, int]]:
+    def _validate(self) -> None:
         if type(self.alu) is not NeuralStepper or type(self.branch) is not NeuralBranchCircuit or type(self.program) is not BranchProgram:
             raise ValueError("invalid branch execution dependencies")
         if type(self.pc) is not int or not 0 <= self.pc < 4:
             raise ValueError("branch PC outside four slots")
         _assert_bits(self.state, 2, "branch supervisor register")
+        if type(self.steps) is not int or self.steps < 0:
+            raise ValueError("invalid branch execution count")
+
+    def step(self) -> tuple[int, tuple[int, int]]:
+        self._validate()
         skip, *instruction = self.program.words[self.pc]
         # Branch reads the register BEFORE this instruction. PC stays in host.
         old_state = self.state
@@ -180,6 +200,7 @@ class BranchSupervisor:
             raise UnsupportedInstructionError(f"neural ALU rejected opcode at pc={self.pc}")
         self.state = (next_lo, next_hi)
         self.pc = next_pc_lo | (next_pc_hi << 1)
+        self.steps += 1
         return self.pc, self.state
 
     def run_steps(self, count: int) -> tuple[int, tuple[int, int]]:
@@ -188,3 +209,93 @@ class BranchSupervisor:
         for _ in range(count):
             self.step()
         return self.pc, self.state
+
+    def snapshot(self) -> dict:
+        """A replay-verifiable host-state receipt, not a cryptographic signature."""
+        self._validate()
+        if self.steps > MAX_RECOVERY_STEPS:
+            raise ValueError("branch state exceeds bounded recovery horizon")
+        return {"schema": SNAPSHOT_SCHEMA, "program_sha256": self.program.sha256(),
+                "alu_sha256": self.alu.sha256(), "branch_sha256": self.branch.sha256(),
+                "execution_sha256": execution_semantics_sha256(),
+                "steps": self.steps, "pc": self.pc, "state": list(self.state)}
+
+    @classmethod
+    def restore(cls, alu: NeuralStepper, branch: NeuralBranchCircuit,
+                program: BranchProgram, receipt: dict) -> BranchSupervisor:
+        """Replay numeric transitions and reject impossible or swapped state."""
+        if type(alu) is not NeuralStepper or type(branch) is not NeuralBranchCircuit or type(program) is not BranchProgram:
+            raise ValueError("invalid branch recovery dependencies")
+        expected = {"schema", "program_sha256", "alu_sha256", "branch_sha256",
+                    "execution_sha256", "steps", "pc", "state"}
+        if type(receipt) is not dict or set(receipt) != expected:
+            raise ValueError("invalid branch snapshot fields")
+        if receipt["schema"] != SNAPSHOT_SCHEMA:
+            raise ValueError("branch snapshot schema mismatch")
+        if receipt["execution_sha256"] != execution_semantics_sha256():
+            raise ValueError("branch execution semantics changed since snapshot")
+        if (receipt["program_sha256"] != program.sha256() or
+            receipt["alu_sha256"] != alu.sha256() or
+            receipt["branch_sha256"] != branch.sha256()):
+            raise ValueError("branch snapshot provenance mismatch")
+        if (type(receipt["steps"]) is not int or
+            not 0 <= receipt["steps"] <= MAX_RECOVERY_STEPS):
+            raise ValueError("branch snapshot recovery bound invalid")
+        if type(receipt["pc"]) is not int or not 0 <= receipt["pc"] < 4:
+            raise ValueError("branch snapshot PC invalid")
+        state = _assert_bits(receipt["state"], 2, "branch snapshot register")
+        recovered = cls.start(alu, branch, program)
+        recovered.run_steps(receipt["steps"])
+        if recovered.pc != receipt["pc"] or recovered.state != state:
+            raise ValueError("branch snapshot state disagrees with numeric replay")
+        return recovered
+
+
+def _code_identity(code: CodeType) -> dict:
+    """Represent executed CPython code without path/line-number artifacts."""
+    return {"bytecode": code.co_code.hex(),
+            "exceptions": getattr(code, "co_exceptiontable", b"").hex(),
+            "argcount": code.co_argcount, "posonlyargcount": code.co_posonlyargcount,
+            "kwonlyargcount": code.co_kwonlyargcount, "flags": code.co_flags,
+            "names": list(code.co_names), "varnames": list(code.co_varnames),
+            "freevars": list(code.co_freevars), "cellvars": list(code.co_cellvars),
+            "consts": [{"code": _code_identity(value)} if isinstance(value, CodeType)
+                       else {"literal": repr(value)} for value in code.co_consts]}
+
+
+def execution_semantics_sha256() -> str:
+    """Detect common in-process code drift; NOT authenticated execution.
+
+    The receipt is intentionally interpreter-bytecode-version-specific.
+    Runtime monkeypatches of any listed function change this fingerprint.
+    This is advisory custody, not a defense against hostile process control.
+    """
+    # Code-object hashes alone miss shadows of Python builtins: for example,
+    # changing this module's `max` global changes future hidden activations
+    # without changing NeuralBranchCircuit.forward.__code__. Fail closed when
+    # critical primitive lookups change relative to this process's import.
+    for module_globals in (globals(), alu_module.__dict__):
+        for name, expected in _BASELINE_BUILTINS.items():
+            resolved = module_globals.get(name, getattr(builtins, name))
+            if resolved is not expected:
+                raise ValueError(f"branch execution primitive binding changed: {name}")
+    watched = {
+        "branch.forward": NeuralBranchCircuit.forward,
+        "alu.forward": NeuralStepper.forward,
+        "supervisor.step": BranchSupervisor.step,
+        "supervisor.run_steps": BranchSupervisor.run_steps,
+        "supervisor.start": BranchSupervisor.start.__func__,
+        "supervisor.validate": BranchSupervisor._validate,
+        "branch.bit_validation": _assert_bits,
+        "alu.bit_validation": alu_module._assert_bits,
+        "alu.dot": alu_module._dot,
+    }
+    functions = {}
+    for label, func in watched.items():
+        code = getattr(func, "__code__", None)
+        if not isinstance(code, CodeType):
+            raise ValueError(f"uninspectable branch execution function: {label}")
+        functions[label] = {"code": _code_identity(code),
+                            "defaults": repr(getattr(func, "__defaults__", None)),
+                            "kwdefaults": repr(getattr(func, "__kwdefaults__", None))}
+    return sha256(_canonical({"abi": EXECUTION_ABI, "functions": functions})).hexdigest()

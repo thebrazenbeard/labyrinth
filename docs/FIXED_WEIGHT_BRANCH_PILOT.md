@@ -22,6 +22,36 @@ python -m unittest discover -s tests -p 'test_fixed_weight_alu*.py' -v
 python -O -m unittest discover -s tests -p 'test_fixed_weight_branch.py' -v
 ```
 
+### Branch-state custody and reproducible recovery
+
+The host supervisor records a monotonically increasing step counter, and
+`snapshot()` returns a provenance receipt containing the exact branch-program
+hash, fixed ALU-weight hash, branch-weight hash, execution step count, PC,
+and register state. An additional `execution_sha256` binds the bytecode of
+the current numerical forwards, supervisor step/validation, and bit/dot
+helpers. Runtime check also rejects shadowed/replaced core Python primitives
+(e.g. a module-global `max` override) that otherwise bypass bytecode hashes;
+it detects direct method monkeypatches or code changes even when
+the weight hashes remain identical. This is Python-runtime-version-specific
+and requires a matching execution implementation, not just matching weights.
+`restore()` checks the dependencies and replays that many
+steps **through the numerical circuits** before accepting the recovered PC
+and register. Recovery is bounded to 4,096 prior steps to prevent unbounded
+replay of an untrusted receipt; longer-lived sessions require a new recovery
+strategy. Test coverage includes fresh-process recovery after checkpoint
+reload, resumed loop behavior, source-oracle functions patched to fail,
+swapped program and weight identities, tampered PC/state/steps/hashes, and
+future-path numerical-forward monkeypatches that would otherwise replay a
+valid prefix but diverge on continuation, and overridden builtin bindings.
+
+> This is *reconstructible state*, not authenticated custody: hashes are
+> unkeyed and the receipt is controlled by the host. It establishes that a
+> supplied state is consistent with a known program and numerical circuits,
+> not that the program or its execution actually occurred independently.
+> The code fingerprint is not a trusted measurement of the operating system,
+> all imported dependencies, arbitrary globals, or a compromised process;
+> only an explicit set of execution-critical builtin bindings is checked.
+
 The branch circuit has 5 input values, 32 one-hot ReLU detector units, and
 2 output values (258 exact-integer coefficients and biases). The canonical
 manifest content hash is pinned as
