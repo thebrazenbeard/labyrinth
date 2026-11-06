@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import unittest
+from unittest.mock import patch
 
 from labyrinth.graduation_gate import (
     GateState, GraduationPolicy, SCHEMA, _one_sided_exact_paired_p,
@@ -144,6 +145,64 @@ class MinotaurGraduationTests(unittest.TestCase):
                 self.assertEqual(result.disposition, "BLOCKED")
                 self.assertEqual(result.state, GateState())
 
+    def test_subclassed_trusted_state_cannot_claim_graduation_without_evidence(self):
+        # A user-controlled subclass once impersonated a previously bound,
+        # graduated host state via __getattribute__, despite its actual stored
+        # fields remaining an unbound never-graduated GateState.
+        from labyrinth.graduation_gate import _policy_fingerprint
+
+        class ForgedState(GateState):
+            def __getattribute__(self, name):
+                if name == "policy_fingerprint":
+                    return _policy_fingerprint(POLICY)
+                if name == "graduated":
+                    return True
+                return object.__getattribute__(self, name)
+
+        self.assertIsNone(object.__getattribute__(ForgedState(), "policy_fingerprint"))
+        self.assertIs(object.__getattribute__(ForgedState(), "graduated"), False)
+        with self.assertRaises(TypeError):
+            decide_graduation(POLICY, ForgedState(), None, None,
+                              independent_evaluator_key=None)
+
+        class ForgedPolicy(GraduationPolicy):
+            def __getattribute__(self, name):
+                if name == "objective_kind":
+                    return "skill_mastery"
+                return object.__getattribute__(self, name)
+
+        with self.assertRaises(TypeError):
+            decide_graduation(ForgedPolicy(**POLICY.__dict__), GateState(), None, None,
+                              independent_evaluator_key=None)
+
+    def test_post_validation_mutation_cannot_forge_prior_trusted_graduation(self):
+        # A frozen dataclass remains writable through object.__setattr__.
+        # The state is initially fresh, unbound, and never graduated.  An
+        # interleaving at the policy-binding boundary must not let a caller
+        # forge a prior trusted graduation without an evaluator receipt.
+        from labyrinth import graduation_gate as gate
+
+        caller_state = GateState()
+        original_fingerprint = gate._policy_fingerprint
+
+        def adversarial_interleaving(policy):
+            binding = original_fingerprint(policy)
+            object.__setattr__(caller_state, "policy_fingerprint", binding)
+            object.__setattr__(caller_state, "graduated", True)
+            return binding
+
+        self.assertIsNone(caller_state.policy_fingerprint)
+        self.assertFalse(caller_state.graduated)
+        with patch.object(gate, "_policy_fingerprint", side_effect=adversarial_interleaving):
+            result = decide_graduation(POLICY, caller_state, None, None,
+                                       independent_evaluator_key=None)
+
+        # The mutation did happen; the decision must use its prior snapshot,
+        # never the later attacker-modified caller-owned object.
+        self.assertTrue(caller_state.graduated)
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertEqual(result.state, GateState())
+
     def test_tamper_binding_subject_session_run_and_attempt(self):
         for field, value in (
             ("objective_id", "other"), ("trainee_sha256", "d" * 64),
@@ -237,6 +296,31 @@ class MinotaurGraduationTests(unittest.TestCase):
         self.assertEqual(decide_graduation(POLICY, graduated.state, None, None,
                          independent_evaluator_key=None).disposition, "BLOCKED")
 
+    def test_forged_objective_kind_cannot_recast_training_effect_as_mastery(self):
+        # A malicious equality operator previously made an invalid policy
+        # pass the allowlist, then compare equal to skill_mastery at the gate.
+        evidence = evaluated_receipt(controls_correct=True)
+        self.assertEqual(decision(evidence).disposition, "STAY")
+
+        class GhostKind(str):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        class ProxyKind:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+        for invalid in (GhostKind("not-an-approved-kind"), ProxyKind()):
+            with self.subTest(kind=type(invalid).__name__):
+                with self.assertRaises(ValueError):
+                    replace(POLICY, objective_kind=invalid)
+
     def test_sample_threshold_alone_does_not_prove_skill_mastery(self):
         evidence = evaluated_receipt(controls_correct=True)
         for trials in evidence["slices"].values():
@@ -264,6 +348,24 @@ class MinotaurGraduationTests(unittest.TestCase):
                     {"min_gain_over_controls": 0.0}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 replace(POLICY, **bad)
+
+    def test_mutated_frozen_policy_cannot_graduate_all_wrong_model(self):
+        # Frozen dataclasses are not a security boundary: object.__setattr__
+        # can change a previously valid instance after __post_init__. The
+        # direct gate must revalidate before consuming any signed evidence.
+        tampered = replace(POLICY)
+        for field, value in (
+            ("objective_kind", "skill_mastery"),
+            ("min_accuracy", 0.0),
+            ("min_format_rate", 0.0),
+            ("significance_alpha", 100.0),
+        ):
+            object.__setattr__(tampered, field, value)
+        evidence = evaluated_receipt(candidate_correct=False)
+        result = decision(evidence, policy=tampered)
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertFalse(result.state.graduated)
+        self.assertEqual(result.state.next_attempt, 1)
 
     def test_graduation_policy_cannot_skip_private_holdout_or_transfer(self):
         # Before this fix a caller could rename a training-only slice into an

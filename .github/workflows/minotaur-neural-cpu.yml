@@ -4,8 +4,252 @@ on:
   pull_request:
     paths:
       - "labyrinth/minotaur_*.py"
+      - "labyrinth/independent_holdout.py"
+      - "labyrinth/signed_minotaur_pair_r25.py"
       - "labyrinth/toy_backend.py"
+      - "labyrinth/runner.py"
+      - "labyrinth/training_scope.py"
+      - "labyrinth/evaluation.py"
+      - "labyrinth/maze.py"
+      - "labyrinth/regenerative_maze.py"
+      - "labyrinth/journey.py"
+      - "labyrinth/program_maze.py"
+      - "labyrinth/taskmaster_routing.py"
+      - "labyrinth/minotaur_model.py"
+      - "labyrinth/minotaur_policy_learning.py"
+      - "labyrinth/minotaur_measured_toy_bridge_r72.py"
+      - "labyrinth/minotaur_hf_roster_bridge.py"
+      - "labyrinth/adaptive_corridors.py"
+      - "labyrinth/journey_policy_runner.py"
+      - "labyrinth/journey_challenges.py"
+      - "labyrinth/semantic_chambers.py"
+      - "labyrinth/hf_development_transition.py"
+      - "labyrinth/hf_resume_bridge.py"
+      - "labyrinth/checkpoint_schema_bridge.py"
+      - "labyrinth/hf_pilot.py"
+      - "labyrinth/cli.py"
+      - "labyrinth/minotaur_train_roster_manifest_v1.py"
+      - "labyrinth/hf_adaptive_source_v1.py"
+      - "labyrinth/neural_resume_checkpoint.py"
+      - "labyrinth/hf_report_audit.py"
+      - "labyrinth/objective_contract.py"
+      - "labyrinth/hf_development_event_journal.py"
+      - "labyrinth/recovery_composition.py"
+      - "labyrinth/frozen_base_binding.py"
+      - "labyrinth/blind_evaluation_custody.py"
+      - "labyrinth/blind_transition_bridge.py"
+      - "labyrinth/pretrained_model_provenance.py"
+      - "labyrinth/model_inference_custody.py"
+      - "labyrinth/signed_exam_lineage.py"
+      - "labyrinth/neural_run_binding.py"
+      - "labyrinth/retention_qualification.py"
+      - "labyrinth/retention_sample_planning_r57.py"
+      - "labyrinth/retention_transfer_cohort_r68.py"
+      - "labyrinth/measured_weakness_feedback.py"
+      - "labyrinth/atomic_artifact_publication.py"
+      - "labyrinth/preregistered_control_matrix.py"
+      - "labyrinth/arithmetic_semantic_case_key.py"
+      - "labyrinth/retention_family_registry.py"
+      - "labyrinth/retention_entrypoint_guard.py"
+      - "labyrinth/monotonic_anchor_protocol.py"
+      - "labyrinth/measured_corridor_handoff.py"
+      - "labyrinth/measured_taskmaster_transition.py"
+      - "labyrinth/minotaur_development_feedback.py"
+      - "labyrinth/authority_publication_service.py"
+      - "labyrinth/arithmetic_retention_admission.py"
+      - "labyrinth/development_event_reservation_service.py"
+      - "labyrinth/measured_sentiment_corridors.py"
+      - "labyrinth/minilm_optimizer_state_resume.py"
+      - "labyrinth/minilm_cpu_experiment.py"
+      - "labyrinth/maze_conditioned_minilm_cpu_experiment.py"
+      - "labyrinth/maze_multiseed_protocol_cpu_experiment.py"
+      - "labyrinth/sealed_semantic_exam_protocol.py"
+      - "labyrinth/external_monotonic_authority_contract.py"
+      - "labyrinth/measured_neural_batch_binding.py"
+      - "labyrinth/five_arm_experiment_contract.py"
+      - "labyrinth/fivearm_campaign_admission_r13.py"
+      - "labyrinth/fivearm_capture_boundary_r15.py"
+      - "labyrinth/five_arm_statistical_screen.py"
+      - "labyrinth/evidence_pointer.py"
+      - "labyrinth/rezon_pointer_mapping_r57.py"
+      - "labyrinth/rezon_receipt_binding_r69.py"
+      - "labyrinth/schedule_pin_boundary_w2.py"
+      - "labyrinth/graduation_state_external_custody_w4.py"
+      - "labyrinth/q7_temporal_custody_source.py"
+      - "labyrinth/q7_witnessed_cas_intake_r93.py"
+      - "labyrinth/q8_witness_restore_r93.py"
+      - "labyrinth/q6_stratified_toy_study_r93.py"
+      - "labyrinth/adaptive_minotaur_r93.py"
+      - "labyrinth/q8_host_authority_probe.py"
+      - "labyrinth/graduation_gate.py"
+      - "labyrinth/objective_challenge_provider_r92.py"
+      - "labyrinth/minotaur_counterfactual_corridors_r92.py"
+      - "labyrinth/neural_cycle_checkpoint_r92.py"
+      - "scripts/experiments/q5_multiseed_campaign.py"
+      - "docs/qualification/REZON_RECEIPT_BINDING_R69.md"
+      - "docs/qualification/Q7_TEMPORAL_CUSTODY_SOURCE.md"
+      - "docs/qualification/Q7_WITNESSED_SOURCE_CAS_R93.md"
+      - "docs/qualification/Q8_HOST_WITNESS_RESTORE_R93.md"
+      - "docs/qualification/Q6_STRATIFIED_TOY_SOURCE_STUDY_R93.md"
+      - "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md"
+      - "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md"
+      - "docs/qualification/R105_ADAPTIVE_HF_SOURCE_RESEARCH.md"
+      - "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md"
+      - "docs/qualification/MINOTAUR_REGISTRY_TRANSITION_R72.md"
+      - "docs/qualification/Q5_EVALUATION_PREREG_R68.md"
+      - "docs/qualification/Q5_SIGNED_DATA_WITNESS_R72.md"
+      - "docs/qualification/Q7_PRECOMMIT_SUMMARY_IMMUTABILITY_R68.md"
+      - "docs/qualification/Q8_SOURCE_ACCEPTANCE_VALIDATOR_R68.md"
+      - "docs/qualification/R72_MINOTAUR_MEASURED_TOY_CORRIDOR.md"
+      - "docs/qualification/RETENTION_TRANSFER_COHORT_R68.md"
+      - "docs/qualification/REZON_TWO_ADAPTER_SOURCE_PARTITION_R68.md"
+      - "docs/qualification/R76_REZON_TWO_TOY_CONSUMER.md"
+      - "docs/qualification/Q5_PRIVATE_HOLDOUT_EVAL_R92.md"
+      - "labyrinth/q5_holdout_eval_r92.py"
+      - "tests/test_q5_holdout_eval_r92.py"
+      - "labyrinth/objective_learning_loop_r92.py"
+      - "tests/test_objective_learning_loop_r92.py"
+      - "labyrinth/rezon_two_adapter_source_partition_r68.py"
+      - "labyrinth/rezon_toy_pair_consumer_r76.py"
+      - "labyrinth/minotaur_train_roster_manifest_v1.py"
+      - "labyrinth/final_exam_precommit.py"
+      - "labyrinth/q5_evaluation_preregistration_r68.py"
+      - "labyrinth/q5_signed_data_witness_r72.py"
+      - "labyrinth/q8_external_acceptance_source_r68.py"
+      - "labyrinth/train_exposure_attestation.py"
+      - "labyrinth/maze_crash_resume_journal.py"
+      - "labyrinth/pinned_model_inference_receipt.py"
+      - "scripts/qualify_hf_regenerative.py"
+      - "scripts/qualify_maze_conditioned_minilm_cpu.py"
+      - "scripts/qualify_maze_multiseed_protocol_cpu.py"
+      - "scripts/qualify_neural_journey_e2e_cpu.py"
+      - "scripts/qualify_taskmaster_counterfactual_cpu.py"
+      - "scripts/qualify_minilm*.py"
+      - "scripts/verify_minilm_fresh_process_r57.py"
+      - "scripts/qualify_model_bytes_provenance.py"
+      - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
+      - "scripts/qualify_v2_weight_updates_cpu_r25.py"
+      - "scripts/qualify_v2_checkpoint_cpu_r22.py"
+      - "scripts/qualify_toy_cpu_evidence_r36.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_r57_minotaur_policy_regression.py"
+      - "tests/test_r68_minotaur_policy_concurrency.py"
+      - "tests/test_r72_minotaur_registry_transition.py"
+      - "tests/test_minotaur_measured_toy_bridge_r72.py"
+      - "tests/test_minotaur_hf_roster_bridge.py"
+      - "tests/test_minotaur_hf_run_pilot_r84.py"
+      - "tests/test_minotaur_train_roster_manifest_v1.py"
+      - "tests/test_q5_toy_authority_combination_r79.py"
+      - "tests/test_optimizer_lifecycle_r8.py"
+      - "tests/test_retention_sample_planning_r57.py"
+      - "tests/test_retention_transfer_cohort_r68.py"
+      - "tests/test_rezon_pointer_mapping_r57.py"
+      - "tests/test_rezon_receipt_binding_r69.py"
+      - "tests/test_schedule_pin_boundary_w2.py"
+      - "tests/test_graduation_state_external_custody_w4.py"
+      - "tests/test_q5_multiseed_campaign.py"
+      - "tests/test_q7_temporal_custody_source.py"
+      - "tests/test_q7_witnessed_cas_intake_r93.py"
+      - "tests/test_q8_witness_restore_r93.py"
+      - "tests/test_q6_stratified_toy_study_r93.py"
+      - "tests/test_adaptive_minotaur_r93.py"
+      - "tests/test_q8_host_authority_probe.py"
+      - "tests/test_graduation_gate.py"
+      - "tests/test_objective_challenge_provider_r92.py"
+      - "tests/test_minotaur_counterfactual_corridors_r92.py"
+      - "tests/test_neural_cycle_checkpoint_r92.py"
+      - "tests/test_private_wheel_cli_checkpoint_r70.py"
+      - "tests/test_rezon_two_adapter_source_partition_r68.py"
+      - "tests/test_rezon_toy_pair_consumer_r76.py"
+      - "tests/test_q5_evaluation_preregistration_r68.py"
+      - "tests/test_q5_signed_data_witness_r72.py"
+      - "tests/test_q7_precommit_summary_immutability_r68.py"
+      - "tests/test_q8_external_acceptance_source_r68.py"
+      - "tests/test_fresh_process_eval_manifest_r57.py"
+      - "tests/test_independent_holdout.py"
+      - "tests/test_signed_minotaur_pair_r25.py"
+      - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
+      - "tests/test_v2_checkpoint_cpu_smoke_r22.py"
+      - "tests/test_r36_toy_cpu_evidence_receipt.py"
+      - "tests/test_r40_face_minotaur_primitive_boundary.py"
+      - "tests/test_r42_complete_maze_primitive_boundary.py"
+      - "tests/test_r48_canonical_maze_identity.py"
+      - "tests/test_fullstate_physical_gate_r8.py"
+      - "tests/test_optimizer_runner_v2_r19.py"
+      - "tests/test_checkpoint_manifest_v2_r19.py"
+      - "tests/test_r33_signed_pair_ci_membership.py"
+      - "tests/test_r33_physical_neural_ci_contract.py"
+      - "tests/test_adaptive_corridors.py"
+      - "tests/test_journey_policy_runner.py"
+      - "tests/test_journey_challenges.py"
+      - "tests/test_semantic_chambers.py"
+      - "tests/test_hf_development_transition.py"
+      - "tests/test_hf_resume_bridge.py"
+      - "tests/test_checkpoint_schema_bridge.py"
+      - "tests/test_hf_regenerative_harness.py"
+      - "tests/test_hf_pilot.py"
+      - "tests/test_hf_adaptive_source_v1.py"
+      - "tests/test_r110_adaptive_redraw_integration.py"
+      - "tests/test_r110_audit_mode_boundaries.py"
+      - "tests/test_r110_runner_atom_novelty.py"
+      - "tests/test_minotaur_hf_roster_bridge.py"
+      - "tests/test_neural_resume_checkpoint.py"
+      - "tests/test_hf_event_recovery.py"
+      - "tests/test_recovery_composition.py"
+      - "tests/test_frozen_base_binding.py"
+      - "tests/test_blind_*.py"
+      - "tests/test_pretrained_model_provenance.py"
+      - "tests/test_provenance_runner_integration.py"
+      - "tests/test_qualify_minilm*.py"
+      - "tests/test_model_inference_custody.py"
+      - "tests/test_signed_exam_lineage.py"
+      - "tests/test_neural_run_binding.py"
+      - "tests/test_minotaur_policy_effectiveness_l8.py"
+      - "tests/test_retention_qualification.py"
+      - "tests/test_measured_weakness_feedback.py"
+      - "tests/test_atomic_artifact_publication.py"
+      - "tests/test_preregistered_control_matrix.py"
+      - "tests/test_arithmetic_semantic_case_key.py"
+      - "tests/test_retention_family_registry.py"
+      - "tests/test_retention_entrypoint_guard.py"
+      - "tests/test_monotonic_anchor_protocol.py"
+      - "tests/test_measured_corridor_handoff.py"
+      - "tests/test_measured_taskmaster_transition.py"
+      - "tests/test_minotaur_development_feedback.py"
+      - "tests/test_authority_publication_service.py"
+      - "tests/test_arithmetic_retention_admission.py"
+      - "tests/test_development_event_reservation_service.py"
+      - "tests/test_measured_sentiment_corridors.py"
+      - "tests/test_minilm_optimizer_state_resume.py"
+      - "tests/test_private_wheel_minilm_contract_r60.py"
+      - "tests/test_sealed_semantic_exam_protocol.py"
+      - "tests/test_external_monotonic_authority_contract.py"
+      - "tests/test_measured_neural_batch_binding.py"
+      - "tests/test_minilm_runner_optimizer_optin.py"
+      - "tests/test_train_exposure_attestation.py"
+      - "tests/test_maze_crash_resume_journal.py"
+      - "tests/test_minilm_measured_batches_optin.py"
+      - "tests/test_signed_minotaur_tactic_neural_selection.py"
+      - "tests/test_pinned_model_inference_receipt.py"
+      - "tests/test_qualify_maze_measured_tactics_cpu.py"
+      - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
+      - "tests/test_qualify_maze_prereg_controls_cpu.py"
+      - "tests/test_five_arm_experiment_contract.py"
+      - "tests/test_five_arm_statistical_screen.py"
+      - "tests/test_r51_pending_history_integrity.py"
+      - "tests/test_measured_cli_binding_r53.py"
+      - "tests/test_evidence_pointer.py"
+      - "tests/test_final_exam_precommit.py"
+      - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
+      - "tests/test_qualify_neural_journey_e2e_cpu.py"
+      - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
+      - "tests/test_qualify_minotaur_neural_taskmaster_cpu.py"
+      - "tests/test_hf_report_audit.py"
+      - "tests/test_hf_journey_resume_integration.py"
+      - "tests/test_hf_scoped_report_audit.py"
+      - "tests/test_hf_program_scope.py"
+      - "tests/test_objective_contract.py"
+      - "tests/test_reserved_structural_transfer.py"
       - "tests/minotaur_required_tests.txt"
       - "tests/test_ci_membership.py"
       - "scripts/minotaur_ci.py"
@@ -15,8 +259,252 @@ on:
     branches: [main]
     paths:
       - "labyrinth/minotaur_*.py"
+      - "labyrinth/independent_holdout.py"
+      - "labyrinth/signed_minotaur_pair_r25.py"
       - "labyrinth/toy_backend.py"
+      - "labyrinth/runner.py"
+      - "labyrinth/training_scope.py"
+      - "labyrinth/evaluation.py"
+      - "labyrinth/maze.py"
+      - "labyrinth/regenerative_maze.py"
+      - "labyrinth/journey.py"
+      - "labyrinth/program_maze.py"
+      - "labyrinth/taskmaster_routing.py"
+      - "labyrinth/minotaur_model.py"
+      - "labyrinth/minotaur_policy_learning.py"
+      - "labyrinth/minotaur_measured_toy_bridge_r72.py"
+      - "labyrinth/minotaur_hf_roster_bridge.py"
+      - "labyrinth/adaptive_corridors.py"
+      - "labyrinth/journey_policy_runner.py"
+      - "labyrinth/journey_challenges.py"
+      - "labyrinth/semantic_chambers.py"
+      - "labyrinth/hf_development_transition.py"
+      - "labyrinth/hf_resume_bridge.py"
+      - "labyrinth/checkpoint_schema_bridge.py"
+      - "labyrinth/hf_pilot.py"
+      - "labyrinth/cli.py"
+      - "labyrinth/minotaur_train_roster_manifest_v1.py"
+      - "labyrinth/hf_adaptive_source_v1.py"
+      - "labyrinth/neural_resume_checkpoint.py"
+      - "labyrinth/hf_report_audit.py"
+      - "labyrinth/objective_contract.py"
+      - "labyrinth/hf_development_event_journal.py"
+      - "labyrinth/recovery_composition.py"
+      - "labyrinth/frozen_base_binding.py"
+      - "labyrinth/blind_evaluation_custody.py"
+      - "labyrinth/blind_transition_bridge.py"
+      - "labyrinth/pretrained_model_provenance.py"
+      - "labyrinth/model_inference_custody.py"
+      - "labyrinth/signed_exam_lineage.py"
+      - "labyrinth/neural_run_binding.py"
+      - "labyrinth/retention_qualification.py"
+      - "labyrinth/retention_sample_planning_r57.py"
+      - "labyrinth/retention_transfer_cohort_r68.py"
+      - "labyrinth/measured_weakness_feedback.py"
+      - "labyrinth/atomic_artifact_publication.py"
+      - "labyrinth/preregistered_control_matrix.py"
+      - "labyrinth/arithmetic_semantic_case_key.py"
+      - "labyrinth/retention_family_registry.py"
+      - "labyrinth/retention_entrypoint_guard.py"
+      - "labyrinth/monotonic_anchor_protocol.py"
+      - "labyrinth/measured_corridor_handoff.py"
+      - "labyrinth/measured_taskmaster_transition.py"
+      - "labyrinth/minotaur_development_feedback.py"
+      - "labyrinth/authority_publication_service.py"
+      - "labyrinth/arithmetic_retention_admission.py"
+      - "labyrinth/development_event_reservation_service.py"
+      - "labyrinth/measured_sentiment_corridors.py"
+      - "labyrinth/minilm_optimizer_state_resume.py"
+      - "labyrinth/minilm_cpu_experiment.py"
+      - "labyrinth/maze_conditioned_minilm_cpu_experiment.py"
+      - "labyrinth/maze_multiseed_protocol_cpu_experiment.py"
+      - "labyrinth/sealed_semantic_exam_protocol.py"
+      - "labyrinth/external_monotonic_authority_contract.py"
+      - "labyrinth/measured_neural_batch_binding.py"
+      - "labyrinth/five_arm_experiment_contract.py"
+      - "labyrinth/fivearm_campaign_admission_r13.py"
+      - "labyrinth/fivearm_capture_boundary_r15.py"
+      - "labyrinth/five_arm_statistical_screen.py"
+      - "labyrinth/evidence_pointer.py"
+      - "labyrinth/rezon_pointer_mapping_r57.py"
+      - "labyrinth/rezon_receipt_binding_r69.py"
+      - "labyrinth/schedule_pin_boundary_w2.py"
+      - "labyrinth/graduation_state_external_custody_w4.py"
+      - "labyrinth/q7_temporal_custody_source.py"
+      - "labyrinth/q7_witnessed_cas_intake_r93.py"
+      - "labyrinth/q8_witness_restore_r93.py"
+      - "labyrinth/q6_stratified_toy_study_r93.py"
+      - "labyrinth/adaptive_minotaur_r93.py"
+      - "labyrinth/q8_host_authority_probe.py"
+      - "labyrinth/graduation_gate.py"
+      - "labyrinth/objective_challenge_provider_r92.py"
+      - "labyrinth/minotaur_counterfactual_corridors_r92.py"
+      - "labyrinth/neural_cycle_checkpoint_r92.py"
+      - "scripts/experiments/q5_multiseed_campaign.py"
+      - "docs/qualification/REZON_RECEIPT_BINDING_R69.md"
+      - "docs/qualification/Q7_TEMPORAL_CUSTODY_SOURCE.md"
+      - "docs/qualification/Q7_WITNESSED_SOURCE_CAS_R93.md"
+      - "docs/qualification/Q8_HOST_WITNESS_RESTORE_R93.md"
+      - "docs/qualification/Q6_STRATIFIED_TOY_SOURCE_STUDY_R93.md"
+      - "docs/qualification/R93_ADAPTIVE_MULTI_OBJECTIVE_MINOTAUR.md"
+      - "docs/qualification/R100_MINOTAUR_HF_TRAIN_EXPOSURE_SOURCE.md"
+      - "docs/qualification/R105_ADAPTIVE_HF_SOURCE_RESEARCH.md"
+      - "docs/qualification/Q8_HOST_OPERATOR_PROBE_R89.md"
+      - "docs/qualification/MINOTAUR_REGISTRY_TRANSITION_R72.md"
+      - "docs/qualification/Q5_EVALUATION_PREREG_R68.md"
+      - "docs/qualification/Q5_SIGNED_DATA_WITNESS_R72.md"
+      - "docs/qualification/Q7_PRECOMMIT_SUMMARY_IMMUTABILITY_R68.md"
+      - "docs/qualification/Q8_SOURCE_ACCEPTANCE_VALIDATOR_R68.md"
+      - "docs/qualification/R72_MINOTAUR_MEASURED_TOY_CORRIDOR.md"
+      - "docs/qualification/RETENTION_TRANSFER_COHORT_R68.md"
+      - "docs/qualification/REZON_TWO_ADAPTER_SOURCE_PARTITION_R68.md"
+      - "docs/qualification/R76_REZON_TWO_TOY_CONSUMER.md"
+      - "docs/qualification/Q5_PRIVATE_HOLDOUT_EVAL_R92.md"
+      - "labyrinth/q5_holdout_eval_r92.py"
+      - "tests/test_q5_holdout_eval_r92.py"
+      - "labyrinth/objective_learning_loop_r92.py"
+      - "tests/test_objective_learning_loop_r92.py"
+      - "labyrinth/rezon_two_adapter_source_partition_r68.py"
+      - "labyrinth/rezon_toy_pair_consumer_r76.py"
+      - "labyrinth/minotaur_train_roster_manifest_v1.py"
+      - "labyrinth/final_exam_precommit.py"
+      - "labyrinth/q5_evaluation_preregistration_r68.py"
+      - "labyrinth/q5_signed_data_witness_r72.py"
+      - "labyrinth/q8_external_acceptance_source_r68.py"
+      - "labyrinth/train_exposure_attestation.py"
+      - "labyrinth/maze_crash_resume_journal.py"
+      - "labyrinth/pinned_model_inference_receipt.py"
+      - "scripts/qualify_hf_regenerative.py"
+      - "scripts/qualify_maze_conditioned_minilm_cpu.py"
+      - "scripts/qualify_maze_multiseed_protocol_cpu.py"
+      - "scripts/qualify_neural_journey_e2e_cpu.py"
+      - "scripts/qualify_taskmaster_counterfactual_cpu.py"
+      - "scripts/qualify_minilm*.py"
+      - "scripts/verify_minilm_fresh_process_r57.py"
+      - "scripts/qualify_model_bytes_provenance.py"
+      - "scripts/qualify_minotaur_neural_taskmaster_cpu.py"
+      - "scripts/qualify_v2_weight_updates_cpu_r25.py"
+      - "scripts/qualify_v2_checkpoint_cpu_r22.py"
+      - "scripts/qualify_toy_cpu_evidence_r36.py"
       - "tests/test_minotaur_*.py"
+      - "tests/test_r57_minotaur_policy_regression.py"
+      - "tests/test_r68_minotaur_policy_concurrency.py"
+      - "tests/test_r72_minotaur_registry_transition.py"
+      - "tests/test_minotaur_measured_toy_bridge_r72.py"
+      - "tests/test_minotaur_hf_roster_bridge.py"
+      - "tests/test_minotaur_hf_run_pilot_r84.py"
+      - "tests/test_minotaur_train_roster_manifest_v1.py"
+      - "tests/test_q5_toy_authority_combination_r79.py"
+      - "tests/test_optimizer_lifecycle_r8.py"
+      - "tests/test_retention_sample_planning_r57.py"
+      - "tests/test_retention_transfer_cohort_r68.py"
+      - "tests/test_rezon_pointer_mapping_r57.py"
+      - "tests/test_rezon_receipt_binding_r69.py"
+      - "tests/test_schedule_pin_boundary_w2.py"
+      - "tests/test_graduation_state_external_custody_w4.py"
+      - "tests/test_q5_multiseed_campaign.py"
+      - "tests/test_q7_temporal_custody_source.py"
+      - "tests/test_q7_witnessed_cas_intake_r93.py"
+      - "tests/test_q8_witness_restore_r93.py"
+      - "tests/test_q6_stratified_toy_study_r93.py"
+      - "tests/test_adaptive_minotaur_r93.py"
+      - "tests/test_q8_host_authority_probe.py"
+      - "tests/test_graduation_gate.py"
+      - "tests/test_objective_challenge_provider_r92.py"
+      - "tests/test_minotaur_counterfactual_corridors_r92.py"
+      - "tests/test_neural_cycle_checkpoint_r92.py"
+      - "tests/test_private_wheel_cli_checkpoint_r70.py"
+      - "tests/test_rezon_two_adapter_source_partition_r68.py"
+      - "tests/test_rezon_toy_pair_consumer_r76.py"
+      - "tests/test_q5_evaluation_preregistration_r68.py"
+      - "tests/test_q5_signed_data_witness_r72.py"
+      - "tests/test_q7_precommit_summary_immutability_r68.py"
+      - "tests/test_q8_external_acceptance_source_r68.py"
+      - "tests/test_fresh_process_eval_manifest_r57.py"
+      - "tests/test_independent_holdout.py"
+      - "tests/test_signed_minotaur_pair_r25.py"
+      - "tests/test_qualify_v2_weight_updates_cpu_r25.py"
+      - "tests/test_v2_checkpoint_cpu_smoke_r22.py"
+      - "tests/test_r36_toy_cpu_evidence_receipt.py"
+      - "tests/test_r40_face_minotaur_primitive_boundary.py"
+      - "tests/test_r42_complete_maze_primitive_boundary.py"
+      - "tests/test_r48_canonical_maze_identity.py"
+      - "tests/test_fullstate_physical_gate_r8.py"
+      - "tests/test_optimizer_runner_v2_r19.py"
+      - "tests/test_checkpoint_manifest_v2_r19.py"
+      - "tests/test_r33_signed_pair_ci_membership.py"
+      - "tests/test_r33_physical_neural_ci_contract.py"
+      - "tests/test_adaptive_corridors.py"
+      - "tests/test_journey_policy_runner.py"
+      - "tests/test_journey_challenges.py"
+      - "tests/test_semantic_chambers.py"
+      - "tests/test_hf_development_transition.py"
+      - "tests/test_hf_resume_bridge.py"
+      - "tests/test_checkpoint_schema_bridge.py"
+      - "tests/test_hf_regenerative_harness.py"
+      - "tests/test_hf_pilot.py"
+      - "tests/test_hf_adaptive_source_v1.py"
+      - "tests/test_r110_adaptive_redraw_integration.py"
+      - "tests/test_r110_audit_mode_boundaries.py"
+      - "tests/test_r110_runner_atom_novelty.py"
+      - "tests/test_minotaur_hf_roster_bridge.py"
+      - "tests/test_neural_resume_checkpoint.py"
+      - "tests/test_hf_event_recovery.py"
+      - "tests/test_recovery_composition.py"
+      - "tests/test_frozen_base_binding.py"
+      - "tests/test_blind_*.py"
+      - "tests/test_pretrained_model_provenance.py"
+      - "tests/test_provenance_runner_integration.py"
+      - "tests/test_qualify_minilm*.py"
+      - "tests/test_model_inference_custody.py"
+      - "tests/test_signed_exam_lineage.py"
+      - "tests/test_neural_run_binding.py"
+      - "tests/test_minotaur_policy_effectiveness_l8.py"
+      - "tests/test_retention_qualification.py"
+      - "tests/test_measured_weakness_feedback.py"
+      - "tests/test_atomic_artifact_publication.py"
+      - "tests/test_preregistered_control_matrix.py"
+      - "tests/test_arithmetic_semantic_case_key.py"
+      - "tests/test_retention_family_registry.py"
+      - "tests/test_retention_entrypoint_guard.py"
+      - "tests/test_monotonic_anchor_protocol.py"
+      - "tests/test_measured_corridor_handoff.py"
+      - "tests/test_measured_taskmaster_transition.py"
+      - "tests/test_minotaur_development_feedback.py"
+      - "tests/test_authority_publication_service.py"
+      - "tests/test_arithmetic_retention_admission.py"
+      - "tests/test_development_event_reservation_service.py"
+      - "tests/test_measured_sentiment_corridors.py"
+      - "tests/test_minilm_optimizer_state_resume.py"
+      - "tests/test_private_wheel_minilm_contract_r60.py"
+      - "tests/test_sealed_semantic_exam_protocol.py"
+      - "tests/test_external_monotonic_authority_contract.py"
+      - "tests/test_measured_neural_batch_binding.py"
+      - "tests/test_minilm_runner_optimizer_optin.py"
+      - "tests/test_train_exposure_attestation.py"
+      - "tests/test_maze_crash_resume_journal.py"
+      - "tests/test_minilm_measured_batches_optin.py"
+      - "tests/test_signed_minotaur_tactic_neural_selection.py"
+      - "tests/test_pinned_model_inference_receipt.py"
+      - "tests/test_qualify_maze_measured_tactics_cpu.py"
+      - "tests/test_qualify_maze_conditioned_minilm_cpu.py"
+      - "tests/test_qualify_maze_prereg_controls_cpu.py"
+      - "tests/test_five_arm_experiment_contract.py"
+      - "tests/test_five_arm_statistical_screen.py"
+      - "tests/test_r51_pending_history_integrity.py"
+      - "tests/test_measured_cli_binding_r53.py"
+      - "tests/test_evidence_pointer.py"
+      - "tests/test_final_exam_precommit.py"
+      - "tests/test_qualify_maze_multiseed_protocol_cpu.py"
+      - "tests/test_qualify_neural_journey_e2e_cpu.py"
+      - "tests/test_qualify_taskmaster_counterfactual_cpu.py"
+      - "tests/test_qualify_minotaur_neural_taskmaster_cpu.py"
+      - "tests/test_hf_report_audit.py"
+      - "tests/test_hf_journey_resume_integration.py"
+      - "tests/test_hf_scoped_report_audit.py"
+      - "tests/test_hf_program_scope.py"
+      - "tests/test_objective_contract.py"
+      - "tests/test_reserved_structural_transfer.py"
       - "tests/minotaur_required_tests.txt"
       - "tests/test_ci_membership.py"
       - "scripts/minotaur_ci.py"
@@ -54,15 +542,21 @@ jobs:
           python-version: "3.12"
       - name: Install pinned CPU neural dependencies
         run: |
-          python -m pip install --disable-pip-version-check -e . "numpy==2.5.4" "safetensors==0.8.0"
+          # The mandatory source-only installed-wheel test builds offline with
+          # --no-build-isolation; editable project installation's temporary
+          # build env does not provision its backend in this interpreter.
+          python -m pip install --disable-pip-version-check "setuptools==80.9.0"
+          python -m pip install --disable-pip-version-check -e . "numpy==2.5.4" "safetensors==0.8.0" "cryptography==50.0.2"
           python -m pip install --disable-pip-version-check --extra-index-url https://download.pytorch.org/whl/cpu "torch==2.5.1+cpu"
       - name: Require CPU PyTorch and pinned versions
         run: |
           python - <<'PY'
+          import cryptography
           import numpy
           import safetensors
           import torch
 
+          assert cryptography.__version__ == "50.0.2", cryptography.__version__
           assert numpy.__version__ == "2.5.4", numpy.__version__
           assert safetensors.__version__ == "0.8.0", safetensors.__version__
           assert torch.__version__ == "2.5.1+cpu", torch.__version__
@@ -72,3 +566,253 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_ci_membership.py' -v
           python -m scripts.minotaur_ci
+          python -m unittest tests.test_adaptive_corridors tests.test_journey_policy_runner tests.test_journey_challenges tests.test_semantic_chambers tests.test_minotaur_exam -v
+          python -m unittest tests.test_hf_development_transition tests.test_hf_resume_bridge tests.test_hf_regenerative_harness -v
+          python -m unittest tests.test_hf_pilot tests.test_hf_adaptive_source_v1 tests.test_hf_report_audit tests.test_hf_journey_resume_integration -v
+          # Full-state optimizer recovery and measured frozen-base binding
+          # are required CPU tests, never optional/skip-allowed smoke checks.
+          python - <<'PY'
+          import unittest
+          from scripts.minotaur_ci import missing_required, test_ids
+
+          recovery = unittest.defaultTestLoader.loadTestsFromName(
+              "tests.test_neural_resume_checkpoint")
+          recovery_result = unittest.TextTestRunner(verbosity=2).run(recovery)
+          if (recovery_result.testsRun < 8 or not recovery_result.wasSuccessful()
+                  or recovery_result.skipped):
+              raise SystemExit("required full-state recovery CPU tests failed or skipped")
+
+          base = unittest.defaultTestLoader.loadTestsFromName(
+              "tests.test_frozen_base_binding")
+          base_result = unittest.TextTestRunner(verbosity=2).run(base)
+          if (base_result.testsRun < 9 or not base_result.wasSuccessful()
+                  or base_result.skipped):
+              raise SystemExit("required frozen-base CPU tests failed or skipped")
+
+          taskmaster = unittest.defaultTestLoader.loadTestsFromName(
+              "tests.test_qualify_minotaur_neural_taskmaster_cpu")
+          taskmaster_result = unittest.TextTestRunner(verbosity=2).run(taskmaster)
+          if (taskmaster_result.testsRun < 7 or not taskmaster_result.wasSuccessful()
+                  or taskmaster_result.skipped):
+              raise SystemExit("required neural taskmaster CPU tests failed or skipped")
+
+          # This checks deterministic source and custody boundaries under the
+          # pinned dependency-present runner. It is NOT a physical pretrained
+          # training run or an independent private final examination.
+          new_required = (
+              ("tests.test_monotonic_anchor_protocol", 10),
+              ("tests.test_retention_family_registry", 8),
+              ("tests.test_retention_entrypoint_guard", 9),
+              ("tests.test_qualify_minilm_cpu", 7),
+              ("tests.test_hf_pilot", 43),
+              ("tests.test_hf_adaptive_source_v1", 8),
+              # Reconciled #94 novelty redraw and #95 adaptive source must
+              # replay together, including forgery and schema downgrade cases.
+              ("tests.test_r110_adaptive_redraw_integration", 3),
+              ("tests.test_r110_audit_mode_boundaries", 4),
+              ("tests.test_r110_runner_atom_novelty", 3),
+              ("tests.test_minotaur_hf_roster_bridge", 14),
+              ("tests.test_hf_report_audit", 20),
+              ("tests.test_qualify_maze_conditioned_minilm_cpu", 12),
+              ("tests.test_qualify_neural_journey_e2e_cpu", 13),
+              ("tests.test_qualify_taskmaster_counterfactual_cpu", 11),
+              ("tests.test_measured_weakness_feedback", 7),
+              ("tests.test_atomic_artifact_publication", 10),
+              ("tests.test_preregistered_control_matrix", 18),
+              ("tests.test_arithmetic_semantic_case_key", 7),
+              ("tests.test_measured_corridor_handoff", 5),
+              ("tests.test_measured_taskmaster_transition", 5),
+              ("tests.test_minotaur_development_feedback", 7),
+              ("tests.test_authority_publication_service", 10),
+              ("tests.test_arithmetic_retention_admission", 8),
+              ("tests.test_development_event_reservation_service", 15),
+              ("tests.test_measured_sentiment_corridors", 5),
+              ("tests.test_minilm_optimizer_state_resume", 18),
+              ("tests.test_sealed_semantic_exam_protocol", 17),
+              ("tests.test_external_monotonic_authority_contract", 17),
+              ("tests.test_measured_neural_batch_binding", 6),
+              ("tests.test_minilm_runner_optimizer_optin", 5),
+              ("tests.test_train_exposure_attestation", 10),
+              ("tests.test_maze_crash_resume_journal", 13),
+              ("tests.test_minilm_measured_batches_optin", 7),
+              ("tests.test_signed_minotaur_tactic_neural_selection", 2),
+              ("tests.test_pinned_model_inference_receipt", 12),
+              ("tests.test_qualify_maze_measured_tactics_cpu", 4),
+              ("tests.test_qualify_maze_multiseed_protocol_cpu", 21),
+              ("tests.test_qualify_maze_prereg_controls_cpu", 5),
+              ("tests.test_five_arm_experiment_contract", 39),
+              ("tests.test_five_arm_statistical_screen", 8),
+              ("tests.test_r51_pending_history_integrity", 17),
+              ("tests.test_measured_cli_binding_r53", 10),
+              ("tests.test_evidence_pointer", 8),
+              ("tests.test_final_exam_precommit", 14),
+              # R57 patches are source-only. Every boundary test is mandatory:
+              # skipped or missing cases must fail this pinned CPU workflow.
+              ("tests.test_r57_minotaur_policy_regression", 2),
+              ("tests.test_retention_sample_planning_r57", 10),
+              ("tests.test_rezon_pointer_mapping_r57", 10),
+              ("tests.test_fresh_process_eval_manifest_r57", 10),
+              # R68 source-only qualification checks; NO Q5/Q6/Q7/Q8 authority,
+              # witness custody, pretrained learning, or graduation is implied.
+              ("tests.test_q5_evaluation_preregistration_r68", 10),
+              # R72 signed data witness source-only. The signature checks
+              # exact source bytes, NOT independent signer custody, chronology,
+              # durable event consumption, learning or graduation.
+              ("tests.test_q5_signed_data_witness_r72", 9),
+              # R76 local two-toy Rezon consumer binds distinct live toy
+              # parameter digests to source partitions. NOT distributed
+              # inference, model identity/permissions, or graduation.
+              ("tests.test_rezon_toy_pair_consumer_r76", 9),
+              ("tests.test_retention_transfer_cohort_r68", 8),
+              ("tests.test_q7_precommit_summary_immutability_r68", 2),
+              ("tests.test_q8_external_acceptance_source_r68", 9),
+              ("tests.test_rezon_two_adapter_source_partition_r68", 13),
+              ("tests.test_r68_minotaur_policy_concurrency", 1),
+              # R72 source-only nonlearning registry receipt: independently
+              # visible policy/registry transition, NOT neural adaptation.
+              ("tests.test_r72_minotaur_registry_transition", 4),
+              # R72 measured toy corridor exercises real bounded ToyLinearAdapter
+              # parameter updates; this does NOT establish pretrained learning.
+              ("tests.test_minotaur_measured_toy_bridge_r72", 5),
+              # The runner must bind its predecessor to observe()'s atomic
+              # policy receipt, not a separate mutable model_hash read.
+              ("tests.test_journey_policy_runner", 9),
+              # R80 source-only Minotaur->HF TRAIN roster and optimizer exposure
+              # must be tested without skips. This does NOT witness a physical
+              # pretrained optimizer, online learning, or graduation authority.
+              # The roster bridge is already required above in this same loop.
+              # Explicit cycle-zero adaptive TRAIN controls, answerless
+              # replay, cross-arm isolation and source-only audit status.
+              ("tests.test_minotaur_hf_run_pilot_r84", 3),
+              # R85 versioned answerless TRAIN roster exchange with explicit
+              # raw and R18-normalized prompt digests; this is source-only and
+              # NOT accepted by the older model-training corpus importer.
+              ("tests.test_minotaur_train_roster_manifest_v1", 9),
+              # HF pilot's stricter 43-test minimum is already required above.
+              # Explicit exposure-v1 reports are strict by default: remove the
+              # marker/ledger, downgrade schema, or resume incorrectly -> FAIL.
+              # Older v2/v3 reports require explicit allow_legacy opt-in.
+              # The 20-test report audit minimum is required above.
+              ("tests.test_hf_resume_bridge", 24),
+              # Metadata classification may route exposure.v1 to the actual
+              # strict preflight, never silently bypass ledger validation;
+              # MeZO v4 cannot masquerade as AdamW through a schema rename.
+              ("tests.test_checkpoint_schema_bridge", 8),
+              ("tests.test_hf_scoped_report_audit", 4),
+              ("tests.test_hf_event_recovery", 10),
+              ("tests.test_hf_journey_resume_integration", 10),
+              ("tests.test_optimizer_lifecycle_r8", 9),
+              # The signed Q5 source pass plus observed toy updates can never
+              # be composed into physical examination/graduation authority.
+              ("tests.test_q5_toy_authority_combination_r79", 2),
+              # R60 installed-wheel import contract: package-private MiniLM
+              # implementation, no global scripts namespace, no import side effects.
+              ("tests.test_private_wheel_minilm_contract_r60", 1),
+              ("tests.test_private_wheel_cli_checkpoint_r70", 1),
+              ("tests.test_rezon_receipt_binding_r69", 5),
+              ("tests.test_schedule_pin_boundary_w2", 6),
+              ("tests.test_graduation_state_external_custody_w4", 10),
+              ("tests.test_q5_multiseed_campaign", 9),
+              ("tests.test_q7_temporal_custody_source", 9),
+              ("tests.test_q7_witnessed_cas_intake_r93", 12),
+              ("tests.test_q8_witness_restore_r93", 23),
+              ("tests.test_q6_stratified_toy_study_r93", 23),
+              ("tests.test_adaptive_minotaur_r93", 9),
+              ("tests.test_graduation_gate", 28),
+              ("tests.test_objective_challenge_provider_r92", 7),
+              ("tests.test_minotaur_counterfactual_corridors_r92", 19),
+              ("tests.test_q8_host_authority_probe", 18),
+              ("tests.test_q5_holdout_eval_r92", 23),
+              ("tests.test_objective_learning_loop_r92", 5),
+              # Pinned CPU runner installs Torch + safetensors. Enforce all
+              # source and real-tensor checkpoint tests with zero skips here.
+              ("tests.test_neural_cycle_checkpoint_r92", 23),
+              ("tests.test_signed_minotaur_pair_r25", 10),
+              ("tests.test_qualify_v2_weight_updates_cpu_r25", 18),
+              ("tests.test_v2_checkpoint_cpu_smoke_r22", 5),
+              ("tests.test_r36_toy_cpu_evidence_receipt", 9),
+              ("tests.test_minotaur_exam_intake_guard_r36", 10),
+              ("tests.test_r40_face_minotaur_primitive_boundary", 6),
+              ("tests.test_r42_complete_maze_primitive_boundary", 5),
+              ("tests.test_r48_canonical_maze_identity", 7),
+              ("tests.test_minotaur_exam", 16),
+              ("tests.test_independent_holdout", 18),
+              ("tests.test_fullstate_physical_gate_r8", 1),
+              ("tests.test_optimizer_runner_v2_r19", 7),
+              ("tests.test_checkpoint_manifest_v2_r19", 6),
+          )
+          # A count alone is not a physical gate: replacing a real PyTorch
+          # method with a trivial source test must invalidate qualification.
+          required_physical_ids = (
+              "tests.test_fullstate_physical_gate_r8.PhysicalFullStateContinuityGate.test_interrupted_vs_uninterrupted_adamw_rng_and_exposure_cursor",
+              "tests.test_optimizer_runner_v2_r19.OptimizerRunnerV2ToyAdamWTests.test_v2_journal_binds_cycle0_receipt_and_restores_continuous_adamw",
+              "tests.test_optimizer_runner_v2_r19.OptimizerRunnerV2ToyAdamWTests.test_v2_foreign_fork_is_rejected_and_pending_is_not_replayed",
+              "tests.test_checkpoint_manifest_v2_r19.V2PhysicalCheckpointTests.test_real_adamw_v2_save_and_restore_never_cross_load_as_v1",
+              "tests.test_v2_checkpoint_cpu_smoke_r22.ToyV2CpuPhysicalTests.test_real_toy_torch_adamw_two_cycle_resume_and_fresh_reload",
+              "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_real_torch_tensor_updates_frozen_base_and_optimizer_moments",
+              "tests.test_qualify_v2_weight_updates_cpu_r25.WeightUpdatePhysicalTests.test_noop_training_cannot_claim_real_learning",
+              "tests.test_minilm_optimizer_state_resume.PhysicalMazeAdamWResumeTests.test_fresh_python_process_restarts_v2_cycle_with_optimizer_rng_continuity",
+          )
+          discovered_ids = []
+          for module_name, min_count in new_required:
+              suite = unittest.defaultTestLoader.loadTestsFromName(module_name)
+              discovered_ids.extend(test_ids(suite))
+              result = unittest.TextTestRunner(verbosity=2).run(suite)
+              if (result.testsRun < min_count or not result.wasSuccessful()
+                      or result.skipped):
+                  raise SystemExit(f"required CPU source/custody tests failed or skipped: {module_name}")
+          if missing_required(required_physical_ids, discovered_ids):
+              raise SystemExit("required physical toy test identity missing or substituted")
+          PY
+          # These explicitly execute real toy CPU weight updates and a
+          # regenerated-Maze full-state checkpoint/reload. Successful source
+          # preflight alone is insufficient; physical evidence stays NONAUTHORIZING.
+          python - <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          probes = (
+              ("scripts.qualify_v2_weight_updates_cpu_r25", (
+                  "actual_trainable_tensor_updates_both_cycles",
+                  "frozen_base_weights_unchanged",
+                  "adamw_moments_advanced_both_cycles",
+              )),
+              ("scripts.qualify_v2_checkpoint_cpu_r22", (
+                  "optimizer_fullstate_continuity_matches_uninterrupted_toy",
+                  "final_fresh_fullstate_restore_verified",
+              )),
+          )
+          for module, proofs in probes:
+              result = subprocess.run(
+                  [sys.executable, "-m", module, "--execute"],
+                  check=True, capture_output=True, text=True, timeout=180,
+              )
+              evidence = json.loads(result.stdout)
+              if (evidence.get("physical_cpu_toy_executed") is not True
+                      or any(evidence.get(proof) is not True for proof in proofs)
+                      or evidence.get("pretrained_model_loaded") is not False
+                      or evidence.get("graduation_authorized") is not False):
+                  raise SystemExit(f"toy CPU evidence incomplete/noncompliant: {module}")
+              print(f"required source-only toy CPU execution PASS: {module}")
+          PY
+          python -m unittest tests.test_hf_scoped_report_audit tests.test_hf_program_scope tests.test_objective_contract tests.test_reserved_structural_transfer -v
+      - name: Preserve two physical toy CPU probe reports without authority
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          checked_head="$(git rev-parse HEAD)"
+          checked_tree="$(git rev-parse 'HEAD^{tree}')"
+          evidence_path="${RUNNER_TEMP}/labyrinth-toy-cpu-evidence.json"
+          python -m scripts.qualify_toy_cpu_evidence_r36 --execute \
+            --source-head "$checked_head" \
+            --source-tree "$checked_tree" \
+            --run-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --output "$evidence_path"
+          (cd "$RUNNER_TEMP" && sha256sum labyrinth-toy-cpu-evidence.json > labyrinth-toy-cpu-evidence.json.sha256)
+      - name: Retain non-authorizing toy CPU evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: minotaur-toy-cpu-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/labyrinth-toy-cpu-evidence*
+          if-no-files-found: error
+          retention-days: 14
