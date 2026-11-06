@@ -52,6 +52,21 @@ def _cases(bank: dict[str, str]) -> None:
     canonical_digest(bank)
 
 
+def _repeat_plan(repeat_plan: dict[str, list[int]], bank: dict[str, str]) -> None:
+    """Caller-held schedule; surviving packets cannot define their own quota."""
+    if type(repeat_plan) is not dict or set(repeat_plan) != set(bank):
+        raise ValueError("invalid external repeat plan")
+    for case_id in bank:
+        repeats = repeat_plan[case_id]
+        if (type(repeats) is not list or not 1 <= len(repeats) <= 16
+                or any(type(rep) is not int or not 0 <= rep < 16 for rep in repeats)
+                or repeats != sorted(set(repeats))):
+            raise ValueError("invalid external repeat plan")
+    if len({tuple(repeats) for repeats in repeat_plan.values()}) != 1:
+        raise ValueError("unbalanced external repeat plan")
+    canonical_digest(repeat_plan)
+
+
 def _record(record: dict[str, Any], bank: dict[str, str]) -> None:
     if type(record) is not dict or set(record) != FIELDS:
         raise ValueError("trial schema mismatch")
@@ -95,7 +110,8 @@ def _record(record: dict[str, Any], bank: dict[str, str]) -> None:
 
 
 def prepare_two_model_packets(
-    trials: list[dict[str, Any]], bank: dict[str, str], *, seed: int
+    trials: list[dict[str, Any]], bank: dict[str, str], *, seed: int,
+    repeat_plan: dict[str, list[int]]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Hide model metadata from packets; preserve it in a separate operator key.
 
@@ -103,6 +119,7 @@ def prepare_two_model_packets(
     scrubbed without editing the output. This is masking, not sealed blinding.
     """
     _cases(bank)
+    _repeat_plan(repeat_plan, bank)
     if type(seed) is not int or not 0 <= seed < 2**31:
         raise ValueError("invalid shuffling seed")
     if type(trials) is not list or not 4 <= len(trials) <= MAX_TRIALS:
@@ -126,6 +143,8 @@ def prepare_two_model_packets(
             raise ValueError("same prompt/system required across models")
     if len({tuple(sorted(x)) for x in repeats.values()}) != 1:
         raise ValueError("paired balanced repeats required")
+    if any(sorted(repeats[case]) != repeat_plan[case] for case in bank):
+        raise ValueError("observed repeats violate external repeat plan")
     if len({canonical_digest({"runner": r["runner_build"], "decoding": r["decoding"]})
             for r in trials}) != 1:
         raise ValueError("matched runtime and decoding required")
@@ -154,12 +173,15 @@ def prepare_two_model_packets(
             "decoding_sha256": canonical_digest(row["decoding"]),
             "input_sha256": row["input_sha256"],
             "actual_model_generated": row["actual_model_generated"],
+            "stop_reason": row["stop_reason"],
         }
     masked = {"schema": "labyrinth.two_model_tournament.packets.dev.v1",
               "bank": "PUBLIC_DEV_ONLY", "bank_sha256": canonical_digest(bank),
+              "repeat_plan_sha256": canonical_digest(repeat_plan),
               "packets": packets}
     custody = {"schema": "labyrinth.two_model_tournament.key.dev.v1",
                "bank": "PUBLIC_DEV_ONLY",
+               "repeat_plan_sha256": canonical_digest(repeat_plan),
                "packet_manifest_sha256": canonical_digest(masked),
                "key": key}
     return masked, custody
@@ -167,7 +189,7 @@ def prepare_two_model_packets(
 
 def adjudicate_two_model_dev(
     packets: dict[str, Any], custody: dict[str, Any], grades: dict[str, Any],
-    *, bank: dict[str, str]
+    *, bank: dict[str, str], repeat_plan: dict[str, list[int]]
 ) -> dict[str, Any]:
     """Descriptive score only. Caller-held public bank is required as a trust anchor.
 
@@ -175,17 +197,21 @@ def adjudicate_two_model_dev(
     packet. Editable JSON cannot authenticate model inference or admit to Vera.
     """
     _cases(bank)
-    if (type(packets) is not dict or set(packets) != {"schema", "bank", "bank_sha256", "packets"}
+    _repeat_plan(repeat_plan, bank)
+    if (type(packets) is not dict or set(packets) != {"schema", "bank", "bank_sha256", "repeat_plan_sha256", "packets"}
             or packets["schema"] != "labyrinth.two_model_tournament.packets.dev.v1"
             or packets["bank"] != "PUBLIC_DEV_ONLY"):
         raise ValueError("invalid blinded packets")
-    if (type(custody) is not dict or set(custody) != {"schema", "bank", "packet_manifest_sha256", "key"}
+    if (type(custody) is not dict or set(custody) != {"schema", "bank", "repeat_plan_sha256", "packet_manifest_sha256", "key"}
             or custody["schema"] != "labyrinth.two_model_tournament.key.dev.v1"
             or custody["bank"] != "PUBLIC_DEV_ONLY"):
         raise ValueError("invalid operator key")
     _sha(packets["bank_sha256"])
     if packets["bank_sha256"] != canonical_digest(bank):
         raise ValueError("trusted public bank mismatch")
+    if (packets["repeat_plan_sha256"] != canonical_digest(repeat_plan)
+            or custody["repeat_plan_sha256"] != canonical_digest(repeat_plan)):
+        raise ValueError("trusted external repeat plan mismatch")
     if custody["packet_manifest_sha256"] != canonical_digest(packets):
         raise ValueError("packet/custody commitment mismatch")
     if type(grades) is not dict or set(grades) != {"packet_manifest_sha256", "reviewer", "scores"}:
@@ -204,10 +230,10 @@ def adjudicate_two_model_dev(
             or not 4 <= len(ps) <= MAX_TRIALS):
         raise ValueError("invalid paired materials")
     ids = [p.get("packet_id") for p in ps if type(p) is dict]
-    if (len(ids) != len(ps) or any(type(pid) is not str or not pid for pid in ids)
+    if (len(ids) != len(ps) or any(type(pid) is not str or re.fullmatch(r"T[0-9]{4}", pid) is None for pid in ids)
             or len(set(ids)) != len(ps)
             or set(ids) != set(ks) or set(ids) != set(scores)):
-        raise ValueError("unpaired packets/key/grades")
+        raise ValueError("invalid packet IDs or unpaired key/grades")
     by_pair: dict[tuple[str, int], set[str]] = defaultdict(set)
     pair_inputs: dict[tuple[str, int], set[str]] = defaultdict(set)
     repeat_schedule: dict[str, set[int]] = defaultdict(set)
@@ -219,15 +245,15 @@ def adjudicate_two_model_dev(
         if (type(p) is not dict or set(p) != {"packet_id", "case_id", "repeat", "prompt", "system", "response"}
                 or type(p["case_id"]) is not str or type(p["repeat"]) is not int
                 or not 0 <= p["repeat"] < 16 or type(p["prompt"]) is not str
-                or type(p["system"]) is not str
+                or type(p["system"]) is not str or len(p["system"]) > 4096
                 or type(p["response"]) is not str or not 1 <= len(p["response"]) <= MAX_TEXT):
-            raise ValueError("malformed reviewer packet")
+            raise ValueError("malformed reviewer packet or unbounded system context")
         if p["case_id"] not in bank or p["prompt"] != bank[p["case_id"]]:
             raise ValueError("trusted public bank mismatch")
         meta = ks[p["packet_id"]]
         if (type(meta) is not dict or set(meta) != {
                 "model_sha256", "chat_template_sha256", "response_sha256", "case_id", "repeat",
-                "runner_build", "decoding_sha256", "input_sha256", "actual_model_generated"}):
+                "runner_build", "decoding_sha256", "input_sha256", "actual_model_generated", "stop_reason"}):
             raise ValueError("invalid custody row")
         for field in ("model_sha256", "chat_template_sha256", "response_sha256", "decoding_sha256", "input_sha256"):
             _sha(meta[field])
@@ -240,6 +266,8 @@ def adjudicate_two_model_dev(
                 or type(meta["runner_build"]) is not str
                 or not 1 <= len(meta["runner_build"]) <= 128):
             raise ValueError("invalid generation/runner claim")
+        if type(meta["stop_reason"]) is not str or meta["stop_reason"] not in ("stop", "eos"):
+            raise ValueError("complete response required; truncation/unknown stop")
         grade = scores[p["packet_id"]]
         if type(grade) is not int or not 0 <= grade <= 4:
             raise ValueError("invalid grade")
@@ -256,10 +284,12 @@ def adjudicate_two_model_dev(
         raise ValueError("paired prompt/system drift")
     if len(runtime_claims) != 1:
         raise ValueError("runner/decoding drift across bank")
-    if len({tuple(sorted(repeats)) for repeats in repeat_schedule.values()}) != 1:
-        raise ValueError("unbalanced case repeats")
     if set(repeat_schedule) != set(bank):
         raise ValueError("trusted public bank mismatch")
+    if len({tuple(sorted(repeats)) for repeats in repeat_schedule.values()}) != 1:
+        raise ValueError("unbalanced case repeats")
+    if any(sorted(repeat_schedule[case]) != repeat_plan[case] for case in bank):
+        raise ValueError("observed repeats violate external repeat plan")
     if any(len(templates) != 1 for templates in template_by_model.values()):
         raise ValueError("model chat-template drift across bank")
     means = {model: sum(values) / len(values) for model, values in by_model.items()}
