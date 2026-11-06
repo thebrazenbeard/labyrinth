@@ -21,14 +21,20 @@ declared equal. A model comparison cannot establish donor effectiveness.
 ## Artifact interface
 
 1. Define a **public**, reviewed `case_id -> prompt` bank (2–24 cases, neither
-   private user history nor private repo contents). Label all small runs
-   `TWO_MODEL_DEV_TOURNAMENT`; one-case smoke is not a valid bank.
+   private user history nor private repo contents), plus an independently
+   retained `repeat_plan` mapping *every case ID* to its complete sorted list
+   of repeat IDs, e.g. `{case_id: [0, 1] for case_id in bank}`. The plan must
+   be fixed **before** collecting answers and held outside mutable packet/key
+   files. Label all small runs `TWO_MODEL_DEV_TOURNAMENT`; one-case smoke is
+   not a valid bank.
 2. For every case and repeat collect exactly one answer from each of the same
    two model artifact SHA-256s. Collect `system`, `prompt`, `response`, exact
    `stop_reason`, `runner_build`, `chat_template_sha256`, decoding settings,
    and an *asserted* `actual_model_generated` boolean; hash canonical input.
-   A clipped answer (`length`) or unknown stop is rejected, not graded.
-3. Call `prepare_two_model_packets(trials, bank, seed=...)`. It returns a
+   A clipped answer (`length`) or unknown stop is rejected, not graded;
+   valid `stop` vs `eos` termination is retained in private custody.
+3. Call `prepare_two_model_packets(trials, bank, seed=...,
+   repeat_plan=repeat_plan)`. It returns a
    shuffled packet set without model labels, and a separately held operator
    key with SHA bindings. Do not send the key to the reviewer until grades
    have been committed. The public prompt and system are visible to the
@@ -37,15 +43,20 @@ declared equal. A model comparison cannot establish donor effectiveness.
 4. An examiner scores each packet **0–4**, using a separately versioned,
    declared case-level rubric. Bind scores to the exact packet-manifest hash;
    pass as `{packet_manifest_sha256, reviewer: {identity, evidence_class},
-   scores: {packet_id: int}}` to `adjudicate_two_model_dev(..., bank=bank)`.
+   scores: {packet_id: int}}` to
+   `adjudicate_two_model_dev(..., bank=bank, repeat_plan=repeat_plan)`.
    The adjudicator must receive the *independently retained original public
    bank*, not a value copied from the scored packets or editable operator key.
    It checks exact case membership/prompt and the bank's content digest so an
-   entire dropped pair or forged bank hash cannot silently pass.
+   entire dropped pair or forged bank hash cannot silently pass. It also
+   refuses a dropped repeat index across *all* cases by checking the fixed
+   external schedule rather than the surviving packet count.
 5. The report computes descriptive means, paired wins and ties, response
    character lengths and an unconditional **HOLD**. It also rejects runner,
    decoding and per-model chat-template drift after the masking step, and
-   enforces the same repeat schedule across all cases. None of those numbers
+   enforces the same repeat schedule across all cases, caps system context,
+   and rejects malformed packet IDs including terminal control characters.
+   None of those numbers
    authenticate who generated answers or who reviewed them. A local JSON
    boolean/identity/claimed SHA is **not an attestation**.
 
@@ -75,8 +86,9 @@ protocol, attempts, and reviewer provenance as **distinct evidence classes**.
 > This public dev artifact can be gamed by a model that self-identifies in its
 > answer, a reviewer that prefers longer responses, a synthetic answer labeled
 > `actual_model_generated=true`, or a fabricated operator SHA/key. Even the
-> externally supplied public bank can be forged by a dishonest caller; only
-> an independent bank owner/custodian can authenticate its provenance. The code
+> externally supplied public bank or repeat plan can be forged by a dishonest
+> caller; only an independent protocol owner/custodian can authenticate their
+> original provenance and protect against retroactive edits. The code
 > can detect *some* structural tampering, not prove genuine host inference.
 
 There is no current release/identity/"mirror" qualification gate in this
