@@ -217,14 +217,22 @@ class KobayashiMazeLifecycle:
             raise EncounterLifecycleError("no Minotaur argument before initial proposal")
         if self._final_verdict is not None:
             raise EncounterLifecycleError("Minotaur final ruling is immutable")
-        if len(self._arguments) >= self._max_argument_rounds:
-            raise EncounterLifecycleError("Minotaur argument budget exhausted")
         if type(text) is not str or not 1 <= len(text) <= 2048:
             raise EncounterLifecycleError("bounded nonempty argument required")
         if (type(evidence_hashes) is not tuple or len(evidence_hashes) > 8
                 or any(type(item) is not str or _SHA.fullmatch(item) is None
                        for item in evidence_hashes)):
             raise EncounterLifecycleError("bounded evidence digests required")
+        for prior in self._arguments:
+            if (prior["argument_text"] == text
+                    and prior["evidence_hashes"] == evidence_hashes):
+                # The judge already treats an exact repeated delivery as an
+                # inert transport retry. Do not fabricate a new Ariadne turn,
+                # consume a round, or diverge from the judge's transcript.
+                return (self._minotaur.submit_argument(text, evidence_hashes)
+                        if self._minotaur is not None else None)
+        if len(self._arguments) >= self._max_argument_rounds:
+            raise EncounterLifecycleError("Minotaur argument budget exhausted")
         # No free-floating assertion is represented as an adjudicated review.
         response = (
             self._minotaur.submit_argument(text, evidence_hashes)

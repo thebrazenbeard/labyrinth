@@ -160,6 +160,38 @@ def _validate(proposal: WeightSpaceEditProposal, policy: WeightSpaceEditPolicy) 
     })
 
 
+def _check_nonoverlapping_tensors(header: dict[str, object], payload_size: int) -> None:
+    """Reject a shard where an approved tensor aliases any other tensor.
+
+    The edit permission is by *tensor name*. Merely checking the target's
+    offset would allow a malformed safetensors header to give an unapproved
+    tensor the same bytes, making a permitted edit alter both tensors.
+    """
+    intervals: list[tuple[int, int, str]] = []
+    for name, spec in header.items():
+        if name == "__metadata__":
+            if type(spec) is not dict or any(
+                type(key) is not str or type(value) is not str
+                for key, value in spec.items()
+            ):
+                raise WeightSpaceBoundaryError("invalid safetensors metadata")
+            continue
+        if (type(spec) is not dict or type(spec.get("data_offsets")) is not list
+                or len(spec["data_offsets"]) != 2):
+            raise WeightSpaceBoundaryError("invalid tensor range in safetensors header")
+        start, end = spec["data_offsets"]
+        if (type(start) is not int or type(end) is not int
+                or start < 0 or end < start or end > payload_size):
+            raise WeightSpaceBoundaryError("invalid tensor range in safetensors header")
+        if start != end:
+            intervals.append((start, end, name))
+    intervals.sort()
+    for previous, current in zip(intervals, intervals[1:]):
+        if current[0] < previous[1]:
+            raise WeightSpaceBoundaryError(
+                "overlapping safetensors entries violate tensor edit isolation")
+
+
 def _edited_tensor_file(data: bytes, proposal: WeightSpaceEditProposal,
                         policy: WeightSpaceEditPolicy) -> tuple[bytes, int, int, float]:
     """Only modify selected F32 matrix columns; retain every other file byte."""
@@ -174,6 +206,7 @@ def _edited_tensor_file(data: bytes, proposal: WeightSpaceEditProposal,
         raise WeightSpaceBoundaryError("invalid safetensors header") from exc
     if type(header) is not dict or proposal.tensor_name not in header:
         raise WeightSpaceBoundaryError("target tensor absent from physical shard")
+    _check_nonoverlapping_tensors(header, len(data) - 8 - hsize)
     spec = header[proposal.tensor_name]
     if (type(spec) is not dict or set(spec) != {"dtype", "shape", "data_offsets"}
             or spec["dtype"] != "F32"

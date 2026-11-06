@@ -1,8 +1,10 @@
 """Kobayashi/Minotaur source tests: no actual independent model or judge."""
 
 from dataclasses import FrozenInstanceError, replace
+from os import link as hardlink
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 import unittest
 
 from labyrinth.kobayashi_minotaur_v1 import (
@@ -502,6 +504,77 @@ class KobayashiMinotaurTests(unittest.TestCase):
             symlink.symlink_to(first_file)
             with self.assertRaises((OSError, KobayashiError)):
                 KobayashiCorpus.load(symlink)
+
+    def test_corpus_publish_failure_does_not_expose_partial_canonical_file(self) -> None:
+        corpus = KobayashiCorpus("canonical", (_case(_claim()),))
+        with TemporaryDirectory() as directory:
+            destination = Path(directory) / "corpus.json"
+
+            # Serializing to the sibling temp must finish before the canonical
+            # pathname can be published. An I/O failure leaves no false canon.
+            with patch("labyrinth.kobayashi_minotaur_v1.os.fsync",
+                       side_effect=OSError("injected fsync failure")):
+                with self.assertRaisesRegex(OSError, "injected fsync failure"):
+                    corpus.persist(destination)
+            self.assertFalse(destination.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+            # If atomic create-once naming is unavailable, do not fall back to
+            # a potentially replacing rename or partially written final path.
+            with patch("labyrinth.kobayashi_minotaur_v1.os.link",
+                       side_effect=PermissionError("no hardlink support")):
+                with self.assertRaisesRegex(KobayashiError, "unsupported"):
+                    corpus.persist(destination)
+            self.assertFalse(destination.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+            corpus.persist(destination)
+            canonical_bytes = destination.read_bytes()
+            self.assertEqual(KobayashiCorpus.load(destination).corpus_sha256,
+                             corpus.corpus_sha256)
+            corpus.persist(destination)  # exact same immutable artifact replays
+            self.assertEqual(destination.read_bytes(), canonical_bytes)
+            self.assertEqual(list(Path(directory).iterdir()), [destination])
+
+            later = corpus.append_revision((_case(_claim(action=_h(888))),))
+            with self.assertRaisesRegex(KobayashiError, "another commitment"):
+                later.persist(destination)
+            self.assertEqual(destination.read_bytes(), canonical_bytes)
+
+    def test_corpus_concurrent_publisher_wins_without_overwrite(self) -> None:
+        first = KobayashiCorpus("canonical", (_case(_claim()),))
+        competing = first.append_revision((_case(_claim(action=_h(889))),))
+        with TemporaryDirectory() as directory:
+            destination = Path(directory) / "corpus.json"
+            competing_path = Path(directory) / "competing.json"
+            competing.persist(competing_path)
+            competing_bytes = competing_path.read_bytes()
+
+            def competing_publication(source: str, target: Path) -> None:
+                # Simulate another process linking its fully written revision
+                # between first's existence probe and its atomic link.
+                hardlink(competing_path, target)
+                raise FileExistsError("concurrent publication won")
+
+            with patch("labyrinth.kobayashi_minotaur_v1.os.link",
+                       side_effect=competing_publication):
+                with self.assertRaisesRegex(KobayashiError, "another commitment"):
+                    first.persist(destination)
+            self.assertEqual(destination.read_bytes(), competing_bytes)
+            self.assertFalse(any(Path(directory).glob(".kobayashi-corpus-*.tmp")))
+
+            destination.unlink()
+
+            def identical_publication(source: str, target: Path) -> None:
+                hardlink(source, target)
+                raise FileExistsError("concurrent publication won")
+
+            with patch("labyrinth.kobayashi_minotaur_v1.os.link",
+                       side_effect=identical_publication):
+                first.persist(destination)
+            self.assertEqual(KobayashiCorpus.load(destination).corpus_sha256,
+                             first.corpus_sha256)
+            self.assertFalse(any(Path(directory).glob(".kobayashi-corpus-*.tmp")))
 
     def test_bad_case_or_corpus_claim_is_never_silent(self) -> None:
         claim = _claim()

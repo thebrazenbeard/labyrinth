@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import tempfile
 from typing import Callable
 
 
@@ -238,29 +239,57 @@ class KobayashiCorpus:
                 "corpus_sha256": self.corpus_sha256}
 
     def persist(self, path: str | Path) -> None:
-        """Create-once JSON canon; identical replay is no-op, conflict rejected."""
+        """Publish a complete JSON canon at a create-once path.
+
+        Bytes are written and fsynced in a sibling temporary file before an
+        atomic hard-link publishes the canonical name. A process interruption
+        during serialization cannot leave a partial *canonical* file. A host
+        filesystem lacking same-directory hard links fails closed instead of
+        falling back to an overwrite-prone rename. Interrupted processes may
+        leave an uncommitted temporary sibling requiring host cleanup.
+        """
         self.verify()
         destination = Path(path)
         if len(str(destination)) > 4096 or "\x00" in str(destination):
             raise KobayashiError("invalid persisted corpus path")
+        if destination.is_symlink():
+            raise KobayashiError("canonical corpus must not be a symlink")
+        if destination.exists():
+            existing = self.load(destination)
+            if existing.corpus_sha256 != self.corpus_sha256:
+                raise KobayashiError(
+                    "canonical corpus path already contains another commitment")
+            return
         document = {"schema": _SCHEMA, "corpus_id": self.corpus_id,
                     "cases": [asdict(case) for case in self.cases],
                     "parent_corpus_sha256": self.parent_corpus_sha256,
                     "corpus_sha256": self.corpus_sha256}
         payload = json.dumps(document, sort_keys=True, indent=2, ensure_ascii=True) + "\n"
+        temporary: str | None = None
         try:
-            fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        except FileExistsError:
-            if destination.is_symlink():
-                raise KobayashiError("canonical corpus must not be a symlink")
-            existing = self.load(destination)
-            if existing.corpus_sha256 != self.corpus_sha256:
-                raise KobayashiError("canonical corpus path already contains another commitment")
-            return
-        with os.fdopen(fd, "w", encoding="ascii") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
+            fd, temporary = tempfile.mkstemp(
+                prefix=".kobayashi-corpus-", suffix=".tmp",
+                dir=destination.parent,
+            )
+            with os.fdopen(fd, "w", encoding="ascii") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.link(temporary, destination)
+            except FileExistsError:
+                if destination.is_symlink():
+                    raise KobayashiError("canonical corpus must not be a symlink")
+                existing = self.load(destination)
+                if existing.corpus_sha256 != self.corpus_sha256:
+                    raise KobayashiError(
+                        "canonical corpus path already contains another commitment")
+            except OSError as exc:
+                raise KobayashiError(
+                    "atomic create-once corpus publication is unsupported") from exc
+        finally:
+            if temporary is not None:
+                os.unlink(temporary)
 
     @classmethod
     def load(cls, path: str | Path) -> "KobayashiCorpus":

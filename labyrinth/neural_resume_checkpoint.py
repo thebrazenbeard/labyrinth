@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+import ctypes
 import json
 import math
 import os
@@ -29,6 +30,7 @@ import random
 import re
 import shutil
 import stat
+import sys
 import tempfile
 from typing import Any
 
@@ -170,6 +172,36 @@ def _safe_snapshot_dir(path: str | Path, *, existing: bool) -> Path:
         if not root.parent.is_dir():
             raise FullCheckpointError("checkpoint parent directory is missing")
     return root
+
+
+def _publish_noreplace(staging: Path, destination: Path) -> None:
+    """Atomically publish a complete directory without replacing a reservation.
+
+    ``Path.exists`` before ``os.rename`` does not provide a race fence: on
+    POSIX, renaming onto an existing *empty* directory silently replaces it.
+    Linux renameat2(RENAME_NOREPLACE) and Windows directory rename semantics
+    provide the needed atomic primitive. Other platforms fail closed until an
+    equivalent primitive has been independently qualified.
+    """
+    if sys.platform == "linux":
+        libc = ctypes.CDLL(None, use_errno=True)
+        renameat2 = getattr(libc, "renameat2", None)
+        if renameat2 is None:
+            raise FullCheckpointError("atomic no-replace directory rename unavailable")
+        renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p,
+                              ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        renameat2.restype = ctypes.c_int
+        if renameat2(-100, os.fsencode(staging), -100, os.fsencode(destination), 1):
+            code = ctypes.get_errno()
+            raise FullCheckpointError("checkpoint destination already exists or publish failed") from OSError(
+                code, os.strerror(code))
+    elif os.name == "nt":
+        try:
+            os.rename(staging, destination)
+        except OSError as exc:
+            raise FullCheckpointError("checkpoint destination already exists or publish failed") from exc
+    else:
+        raise FullCheckpointError("atomic no-replace directory rename unavailable")
 
 
 def _dependencies():
@@ -393,11 +425,11 @@ def save_full_checkpoint(
                 os.fsync(directory_fd)
             finally:
                 os.close(directory_fd)
-        # No shared writer is allowed to target this path; the caller's journal
-        # fence and unique directory reservation are the external race controls.
+        # Caller journal fencing is still essential for authorized run order,
+        # but publication itself must not replace a racing empty reservation.
         if root.exists():
             raise FullCheckpointError("checkpoint destination already exists")
-        os.rename(temporary, root)
+        _publish_noreplace(temporary, root)
         if os.name == "posix":
             # Persist the rename itself before returning the receipt. Without
             # this barrier, a successful receipt can name a lost directory.

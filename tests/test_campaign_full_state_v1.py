@@ -6,9 +6,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 class CampaignFullStateTests(unittest.TestCase):
@@ -79,6 +81,66 @@ class CampaignFullStateTests(unittest.TestCase):
             self.assertEqual(report["state_sha256"], manifest["state_sha256"])
             self.assertNotEqual(report["pid"], os.getpid())
             self.assertFalse(report["restorable_training_state_proven"])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory fsync contract")
+    def test_manifest_publication_syncs_parent_after_staging_removed(self):
+        from labyrinth.campaign_full_state_v1 import (
+            save_campaign_state_once, verify_campaign_state,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._capture(self._fixture(root))
+            destination = root / "W0-manifest.json"
+            original_fsync = os.fsync
+            seen = []
+
+            def capture_sync(fd):
+                is_directory = stat.S_ISDIR(os.fstat(fd).st_mode)
+                seen.append("directory" if is_directory else "file")
+                if is_directory:
+                    self.assertEqual(list(root.glob(".campaign-staged-*")), [])
+                    self.assertTrue(destination.is_file())
+                return original_fsync(fd)
+
+            with patch("labyrinth.campaign_full_state_v1.os.fsync", side_effect=capture_sync):
+                receipt = save_campaign_state_once(manifest, destination)
+            self.assertEqual(seen, ["file", "directory"])
+            self.assertEqual(receipt, manifest["manifest_sha256"])
+            self.assertEqual(verify_campaign_state(destination, fresh_process=False)["status"],
+                             "LOCAL_FILE_READBACK_ONLY")
+
+            # A write-once path must reject a repeat without modifying content.
+            original_bytes = destination.read_bytes()
+            with self.assertRaisesRegex(ValueError, "new canonical"):
+                save_campaign_state_once(manifest, destination)
+            self.assertEqual(destination.read_bytes(), original_bytes)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory fsync contract")
+    def test_directory_fsync_error_withholds_receipt_and_attempts_rollback(self):
+        from labyrinth.campaign_full_state_v1 import save_campaign_state_once
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._capture(self._fixture(root))
+            destination = root / "unacknowledged.json"
+            original_fsync = os.fsync
+            seen = []
+
+            def fail_first_directory_sync(fd):
+                is_directory = stat.S_ISDIR(os.fstat(fd).st_mode)
+                seen.append("directory" if is_directory else "file")
+                if is_directory and seen.count("directory") == 1:
+                    raise OSError("injected parent directory fsync failure")
+                return original_fsync(fd)
+
+            with patch("labyrinth.campaign_full_state_v1.os.fsync",
+                       side_effect=fail_first_directory_sync):
+                with self.assertRaisesRegex(OSError, "injected parent"):
+                    save_campaign_state_once(manifest, destination)
+            self.assertEqual(seen, ["file", "directory", "directory"])
+            self.assertFalse(destination.exists())
+            self.assertEqual(list(root.glob(".campaign-staged-*")), [])
 
     def test_two_generation_branching_and_selected_entry_require_exact_full_state(self):
         from labyrinth.campaign_full_state_v1 import (

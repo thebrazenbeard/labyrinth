@@ -17,7 +17,7 @@ from labyrinth.evolutionary_population_v1 import (
 )
 from labyrinth.weight_space_spark_v1 import (
     WeightSpaceBoundaryError, WeightSpaceEditPolicy, WeightSpaceEditProposal,
-    create_weight_space_candidate,
+    _edited_tensor_file, create_weight_space_candidate,
 )
 
 
@@ -210,6 +210,29 @@ class WeightSpaceSparkTests(unittest.TestCase):
         self.assertEqual(len(population.candidates), 2)
         self.assertEqual(population.qualification,
                          "SOURCE_ONLY_UNAUTHENTICATED_EXAMINER_FIXTURE")
+
+    def test_overlapping_safetensors_entries_cannot_alias_approved_weights(self):
+        """An unapproved alias cannot be modified through approved tensor bytes."""
+        header = json.dumps({
+            "proj.weight": {"dtype": "F32", "shape": [2, 4],
+                            "data_offsets": [0, 32]},
+            "unapproved.weight": {"dtype": "F32", "shape": [2, 4],
+                                  "data_offsets": [0, 32]},
+        }, separators=(",", ":")).encode()
+        aliased = (struct.pack("<Q", len(header)) + header
+                   + struct.pack("<8f", *self.values))
+        with self.assertRaisesRegex(WeightSpaceBoundaryError, "overlap"):
+            _edited_tensor_file(aliased, self.proposal, self.policy)
+        # The higher-level campaign manifest also rejects aliased shards.
+        malicious_parent = self.root / "aliased-parent"
+        shutil.copytree(self.origin, malicious_parent)
+        (malicious_parent / "manifest.json").unlink()
+        (malicious_parent / "base" / "model.safetensors").write_bytes(aliased)
+        # The parent-state validator already refuses an aliased physical
+        # shard; this new narrow editor check is defense in depth against
+        # bypassing or later weakening that upstream boundary.
+        with self.assertRaisesRegex(ValueError, "overlapping tensor data"):
+            _capture(malicious_parent)
 
 
 if __name__ == "__main__":

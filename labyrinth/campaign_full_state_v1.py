@@ -295,8 +295,27 @@ def capture_campaign_state(
     return manifest
 
 
+def _fsync_manifest_directory(parent: Path) -> None:
+    """Sync a manifest namespace where a directory fsync API is available."""
+    if os.name != "posix":
+        return  # Native Windows: atomic visibility, no directory durability claim.
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise OSError("directory fsync needs O_DIRECTORY and O_NOFOLLOW")
+    directory_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def save_campaign_state_once(manifest: dict[str, Any], destination: Path) -> str:
-    """Atomically publish a write-once manifest; never copy weight bytes."""
+    """Publish once and sync the directory on POSIX; never copy weight bytes.
+
+    Native Windows retains atomic hard-link publication but has no directory
+    durability receipt here. A failed POSIX sync raises without a receipt and
+    attempts to remove the unacknowledged link; power-loss behavior is not
+    proven by this source-level protocol.
+    """
     _verify_memory(manifest)
     if (not isinstance(destination, Path) or not destination.is_absolute()
             or destination.is_symlink() or destination.exists()
@@ -306,14 +325,38 @@ def save_campaign_state_once(manifest: dict[str, Any], destination: Path) -> str
     content = json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False).encode() + b"\n"
     descriptor, name = tempfile.mkstemp(prefix=".campaign-staged-", dir=destination.parent)
     staged = Path(name)
+    linked = False
+    staged_identity = None
     try:
         with os.fdopen(descriptor, "wb") as output:
             output.write(content)
             output.flush()
             os.fsync(output.fileno())
+            stat_result = os.fstat(output.fileno())
+            staged_identity = (stat_result.st_dev, stat_result.st_ino)
         os.link(staged, destination)
-    finally:
+        linked = True
+        staged.unlink()
+        _fsync_manifest_directory(destination.parent)
+    except Exception:
+        # No success receipt was issued. Remove our unacknowledged link when
+        # possible, without erasing a path replaced by an external process.
+        if linked:
+            try:
+                published = destination.stat(follow_symlinks=False)
+                if (published.st_dev, published.st_ino) == staged_identity:
+                    destination.unlink()
+            except OSError:
+                pass
         staged.unlink(missing_ok=True)
+        # Best effort to persist the rollback; the original failure still
+        # propagates, so callers cannot infer a durable commit or rollback.
+        if linked:
+            try:
+                _fsync_manifest_directory(destination.parent)
+            except OSError:
+                pass
+        raise
     return manifest["manifest_sha256"]
 
 

@@ -147,10 +147,27 @@ Falsifier: The hypothesis fails if the seam does not connect to the chamber."""
         with self.assertRaisesRegex(EncounterLifecycleError, "not bound"):
             lifecycle.bind_minotaur(bad)
         dialogue = MinotaurDialogue(corpus, claim, evidence_checker=checker,
-                                    min_rounds=2, max_rounds=3)
+                                    min_rounds=2, max_rounds=2)
         lifecycle.bind_minotaur(dialogue)
-        lifecycle.submit_argument("Can the hidden physical coupling be shown publicly?")
-        lifecycle.submit_argument("I acknowledge that my explanation is not independently measured.")
+        first_reply = lifecycle.submit_argument(
+            "Can the hidden physical coupling be shown publicly?")
+        first_receipt = lifecycle.snapshot()["receipt_sha256"]
+        # A retried transport delivery must be inert, matching Minotaur's
+        # own idempotent argument protocol rather than consuming a round.
+        retry_reply = lifecycle.submit_argument(
+            "Can the hidden physical coupling be shown publicly?")
+        self.assertEqual(first_reply, retry_reply)
+        self.assertEqual(first_receipt, lifecycle.snapshot()["receipt_sha256"])
+        self.assertEqual(lifecycle.snapshot()["minotaur_argument_rounds"], 1)
+        self.assertEqual(len(dialogue.arguments), 1)
+        second_text = "I acknowledge that my explanation is not independently measured."
+        second_reply = lifecycle.submit_argument(second_text)
+        self.assertEqual(lifecycle.submit_argument(second_text), second_reply)
+        self.assertEqual(lifecycle.submit_argument(
+            "Can the hidden physical coupling be shown publicly?"), first_reply)
+        self.assertEqual(lifecycle.snapshot()["minotaur_argument_rounds"], 2)
+        with self.assertRaisesRegex(EncounterLifecycleError, "budget exhausted"):
+            lifecycle.submit_argument("A genuinely new third argument")
         verdict = lifecycle.finalize_appeal()
         self.assertEqual(verdict.status, "UNKNOWN")
         final = lifecycle.snapshot()

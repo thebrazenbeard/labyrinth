@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - "labyrinth/minotaur_*.py"
+      - "labyrinth/kobayashi_*.py"
+      - "labyrinth/local_model_kobayashi_runner_v1.py"
+      - "tests/test_kobayashi_*.py"
+      - "tests/test_local_model_kobayashi_runner_v1.py"
       - "labyrinth/independent_holdout.py"
       - "labyrinth/signed_minotaur_pair_r25.py"
       - "labyrinth/toy_backend.py"
@@ -259,6 +263,10 @@ on:
     branches: [main]
     paths:
       - "labyrinth/minotaur_*.py"
+      - "labyrinth/kobayashi_*.py"
+      - "labyrinth/local_model_kobayashi_runner_v1.py"
+      - "tests/test_kobayashi_*.py"
+      - "tests/test_local_model_kobayashi_runner_v1.py"
       - "labyrinth/independent_holdout.py"
       - "labyrinth/signed_minotaur_pair_r25.py"
       - "labyrinth/toy_backend.py"
@@ -797,6 +805,9 @@ jobs:
               print(f"required source-only toy CPU execution PASS: {module}")
           PY
           python -m unittest tests.test_hf_scoped_report_audit tests.test_hf_program_scope tests.test_objective_contract tests.test_reserved_structural_transfer -v
+      - name: Kobayashi source and local-model boundary tests
+        run: |
+          python -m unittest tests.test_kobayashi_canon_v1 tests.test_kobayashi_encounter_v1 tests.test_kobayashi_minotaur_v1 tests.test_kobayashi_proposals_v1 tests.test_local_model_kobayashi_runner_v1 -v
       - name: Preserve two physical toy CPU probe reports without authority
         run: |
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"

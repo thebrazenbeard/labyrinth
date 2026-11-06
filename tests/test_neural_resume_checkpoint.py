@@ -34,6 +34,48 @@ def _context() -> FullCheckpointContext:
 
 
 class CheckpointContractTests(unittest.TestCase):
+    def test_racing_empty_reservation_cannot_be_replaced(self):
+        """A second actor can reserve an empty name after preflight.
+
+        POSIX os.rename(source_dir, destination_dir) silently replaces an
+        existing empty destination directory unless RENAME_NOREPLACE is used.
+        The model writer must preserve that reservation without publishing.
+        """
+        class FakeOptimizer:
+            def state_dict(self):
+                return {}
+
+        class FakeTorch:
+            @staticmethod
+            def get_rng_state():
+                return "fake-rng"
+
+        def save_tensor(_tensors, path):
+            Path(path).write_bytes(b"test-safetensors")
+
+        original_publish = checkpoint._publish_noreplace
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / "reserved-checkpoint"
+
+            def racing_publish(staging, target):
+                destination.mkdir()
+                return original_publish(staging, target)
+
+            with (patch.object(checkpoint, "_dependencies",
+                               return_value=(FakeTorch, None, save_tensor)),
+                  patch.object(checkpoint, "_trainable_and_groups",
+                               return_value=({}, [])),
+                  patch.object(checkpoint, "_encode_tree",
+                               return_value={"type": "dict", "items": []}),
+                  patch.object(checkpoint, "_numpy_rng_snapshot", return_value=None),
+                  patch.object(checkpoint, "_publish_noreplace",
+                               side_effect=racing_publish)):
+                with self.assertRaisesRegex(FullCheckpointError, "already exists|occupied|reserved"):
+                    save_full_checkpoint(destination, model=object(),
+                                         optimizer=FakeOptimizer(), context=_context())
+            self.assertTrue(destination.is_dir())
+            self.assertEqual(list(destination.iterdir()), [], "a raced reservation was replaced")
+
     def test_publication_fsyncs_tensor_manifest_and_parent_directory(self):
         # Isolate the filesystem publication path from optional neural libraries.
         # A green manifest fsync cannot substitute for an unsynced tensor file.

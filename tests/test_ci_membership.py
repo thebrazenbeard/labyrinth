@@ -38,6 +38,40 @@ class MinotaurPlatformSkipTests(unittest.TestCase):
 
 
 class NeuralCPUWorkflowCoverageTests(unittest.TestCase):
+    def test_kobayashi_boundary_is_selected_and_exercised_by_neural_cpu_ci(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/minotaur-neural-cpu.yml").read_text()
+        event_paths = (
+            workflow.split("  pull_request:\n    paths:\n", 1)[1].split("  push:\n", 1)[0],
+            workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0],
+        )
+        for paths in event_paths:
+            for pattern in (
+                '"labyrinth/kobayashi_*.py"',
+                '"labyrinth/local_model_kobayashi_runner_v1.py"',
+                '"tests/test_kobayashi_*.py"',
+                '"tests/test_local_model_kobayashi_runner_v1.py"',
+            ):
+                self.assertIn(pattern, paths)
+        self.assertIn("python -m unittest tests.test_kobayashi_canon_v1", workflow)
+        self.assertIn("tests.test_local_model_kobayashi_runner_v1", workflow)
+
+    def test_untrusted_pr_workflows_have_minimal_token_permissions_and_pinned_actions(self):
+        root = Path(__file__).resolve().parents[1]
+        expected = (
+            "uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+            "uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+        )
+        for name in ("ci.yml", "minotaur-neural-cpu.yml"):
+            workflow = (root / ".github/workflows" / name).read_text()
+            with self.subTest(workflow=name):
+                self.assertIn("\npermissions:\n  contents: read\n", workflow)
+                for action in expected:
+                    self.assertIn(action, workflow)
+                self.assertNotIn("uses: actions/checkout@v4", workflow)
+                self.assertNotIn("uses: actions/setup-python@v5", workflow)
+                self.assertIn("persist-credentials: false", workflow)
+
     def test_train_completion_primitive_boundary_is_required_by_cpu_ci(self):
         workflow = (Path(__file__).resolve().parents[1] /
                     ".github/workflows/minotaur-neural-cpu.yml").read_text()

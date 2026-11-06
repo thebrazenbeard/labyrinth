@@ -1,20 +1,19 @@
 """Fake-transport qualification; never evidence of live inference/training."""
 
-from collections import Counter
+from collections import deque
 import json
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from labyrinth.kobayashi_encounter_v1 import KobayashiMazeLifecycle
-from labyrinth.living_world_v1 import LivingWorld, LivingWorldRecipe
+from labyrinth.living_world_v1 import LivingWorld, LivingWorldRecipe, WorldAction
 from labyrinth.local_model_action_adapter_v1 import (
     LocalModelActionConfig, LocalModelWorldActor, ModelActionBoundaryError,
 )
 from labyrinth.local_model_kobayashi_runner_v1 import (
     KobayashiLocalModelRunner, run_local_model_kobayashi,
 )
-from labyrinth.source_only_saga_demo_v1 import FictionalActionModel
 
 
 def _maze() -> LivingWorld:
@@ -27,7 +26,7 @@ class FakeGuidedModelTransport:
     """Model-shaped, source-only actor reasoning from public message alone."""
 
     def __init__(self) -> None:
-        self.planner = FictionalActionModel()
+        self.planner = PublicRoutePlanner()
         self.requests: list[dict] = []
 
     def complete(self, config, payload):
@@ -56,6 +55,69 @@ class FakeGuidedModelTransport:
         assert len(payload["messages"]) == 2
         assert "allowed_action_json" in payload["messages"][1]["content"]
         assert "graph_sha256" not in payload["messages"][1]["content"]
+
+
+class PublicRoutePlanner:
+    """Tiny test-only explorer; never consults a source-owned hidden map.
+
+    Keeping this fixture local prevents a Kobayashi-only test from importing
+    the full training/campaign demonstration and its unrelated dependencies.
+    Its observations are exactly the public scene supplied to the fake model.
+    """
+
+    def __init__(self) -> None:
+        self.visited: set[str] = set()
+        self.parents: dict[str, str | None] = {}
+        self.discovered_exits: dict[str, tuple[str, ...]] = {}
+        self.reached_minotaur = False
+
+    def _route_to_discovered_minotaur(self, start: str) -> tuple[str, ...]:
+        gateways = {
+            room for room, exits in self.discovered_exits.items()
+            if "minotaur_sanctum" in exits
+        }
+        queue = deque([(start, ())])
+        seen = {start}
+        while queue:
+            room, path = queue.popleft()
+            if room in gateways:
+                return path + ("minotaur_sanctum",)
+            for neighbor in self.discovered_exits.get(room, ()):
+                if neighbor in self.discovered_exits and neighbor not in seen:
+                    seen.add(neighbor)
+                    queue.append((neighbor, path + (neighbor,)))
+        return ()
+
+    def choose_action(self, observation) -> WorldAction:
+        room = observation.room_id
+        self.visited.add(room)
+        self.parents.setdefault(room, None)
+        self.discovered_exits[room] = observation.visible_exits
+        if room == "minotaur_sanctum":
+            self.reached_minotaur = True
+        if self.reached_minotaur:
+            return WorldAction("retrace")
+        if observation.visible_items:
+            return WorldAction("take", observation.visible_items[0])
+
+        seals = sum(item.startswith("seal_") for item in observation.inventory)
+        seals_needed = min(observation.difficulty, 3)
+        if seals >= seals_needed:
+            route = self._route_to_discovered_minotaur(room)
+            if route:
+                return WorldAction("move", route[0])
+
+        for neighbor in observation.visible_exits:
+            if neighbor not in self.visited and (
+                neighbor != "minotaur_sanctum" or seals >= seals_needed
+            ):
+                self.parents.setdefault(neighbor, room)
+                return WorldAction("move", neighbor)
+        if self.parents[room] is not None:
+            return WorldAction("move", self.parents[room])
+        if "minotaur_sanctum" in observation.visible_exits:
+            return WorldAction("move", "minotaur_sanctum")
+        raise AssertionError("public-only test explorer exhausted reachable routes")
 
 
 class FakeProposalTransport:
