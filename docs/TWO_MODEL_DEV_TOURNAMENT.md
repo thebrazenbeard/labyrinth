@@ -37,9 +37,15 @@ declared equal. A model comparison cannot establish donor effectiveness.
 4. An examiner scores each packet **0–4**, using a separately versioned,
    declared case-level rubric. Bind scores to the exact packet-manifest hash;
    pass as `{packet_manifest_sha256, reviewer: {identity, evidence_class},
-   scores: {packet_id: int}}` to `adjudicate_two_model_dev`.
+   scores: {packet_id: int}}` to `adjudicate_two_model_dev(..., bank=bank)`.
+   The adjudicator must receive the *independently retained original public
+   bank*, not a value copied from the scored packets or editable operator key.
+   It checks exact case membership/prompt and the bank's content digest so an
+   entire dropped pair or forged bank hash cannot silently pass.
 5. The report computes descriptive means, paired wins and ties, response
-   character lengths and an unconditional **HOLD**. None of those numbers
+   character lengths and an unconditional **HOLD**. It also rejects runner,
+   decoding and per-model chat-template drift after the masking step, and
+   enforces the same repeat schedule across all cases. None of those numbers
    authenticate who generated answers or who reviewed them. A local JSON
    boolean/identity/claimed SHA is **not an attestation**.
 
@@ -68,7 +74,9 @@ protocol, attempts, and reviewer provenance as **distinct evidence classes**.
 
 > This public dev artifact can be gamed by a model that self-identifies in its
 > answer, a reviewer that prefers longer responses, a synthetic answer labeled
-> `actual_model_generated=true`, or a fabricated operator SHA/key. The code
+> `actual_model_generated=true`, or a fabricated operator SHA/key. Even the
+> externally supplied public bank can be forged by a dishonest caller; only
+> an independent bank owner/custodian can authenticate its provenance. The code
 > can detect *some* structural tampering, not prove genuine host inference.
 
 There is no current release/identity/"mirror" qualification gate in this
