@@ -17,7 +17,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import Callable
+from typing import Callable, Mapping
 
 from .model_saga_runtime import (
     CheckpointPaths, CheckpointRef, SagaSession, StepResult, capture_checkpoint,
@@ -44,6 +44,13 @@ class SagaTrialEvidence:
     classification: str = "SOURCE_MECHANISM_ONLY_UNQUALIFIED"
     # Deliberately exclude gold, private case identifiers and individual
     # prompts. The caller owns physical checkpoint custody and ancestry.
+
+    def __post_init__(self) -> None:
+        if type(self.classification) is not str or self.classification not in (
+            "SOURCE_MECHANISM_ONLY_UNQUALIFIED",
+            "MODEL_ACTION_INTERFACE_UNQUALIFIED_NOT_NEURAL_EVIDENCE",
+        ):
+            raise ValueError("saga trial cannot upgrade its evidence classification")
 
 
 @dataclass(frozen=True)
@@ -81,6 +88,11 @@ class SagaGenerationEvidence:
     selected_candidate_id: str
     selection_classification: str = "OPERATOR_SCRIPTED_MECHANISM_SELECTION_ONLY"
 
+    def __post_init__(self) -> None:
+        if (type(self.selection_classification) is not str
+                or self.selection_classification != "OPERATOR_SCRIPTED_MECHANISM_SELECTION_ONLY"):
+            raise ValueError("source-only selector cannot assert independently examined fitness")
+
 
 @dataclass(frozen=True)
 class FreshProcessCheckpointControl:
@@ -91,6 +103,11 @@ class FreshProcessCheckpointControl:
     separate_pid: int
     classification: str = "HASH_CONTROL_ONLY_NOT_MODEL_GENERALIZATION"
 
+    def __post_init__(self) -> None:
+        if (type(self.classification) is not str
+                or self.classification != "HASH_CONTROL_ONLY_NOT_MODEL_GENERALIZATION"):
+            raise ValueError("file hash readback cannot assert neural generalization")
+
 
 @dataclass(frozen=True)
 class SagaCampaignEvidence:
@@ -98,6 +115,31 @@ class SagaCampaignEvidence:
     generations: tuple[SagaGenerationEvidence, ...]
     w0_control: FreshProcessCheckpointControl
     classification: str = "MECHANISM_ONLY_NO_NEURAL_EVOLUTION_CLAIM"
+
+    def __post_init__(self) -> None:
+        if (type(self.classification) is not str
+                or self.classification != "MECHANISM_ONLY_NO_NEURAL_EVOLUTION_CLAIM"):
+            raise ValueError("saga mechanism cannot assert proven neural evolution")
+
+
+def _fresh_worker_environment(
+    source: Mapping[str, str], *, platform_name: str,
+) -> dict[str, str]:
+    """Forward only the process bootstrap variables required by the worker.
+
+    Windows Python startup may require SystemRoot/WINDIR and its temporary
+    directory; do not blindly inherit API keys or other parent credentials.
+    This protects the subprocess boundary while remaining runnable on VN1.
+    """
+    environment = {
+        "PATH": source.get("PATH", ""),
+        "PYTHONPATH": os.pathsep.join(sys.path),
+    }
+    if platform_name == "nt":
+        for key in ("SystemRoot", "WINDIR", "TEMP", "TMP"):
+            if source.get(key):
+                environment[key] = source[key]
+    return environment
 
 
 def fresh_process_checkpoint_control(paths: CheckpointPaths) -> FreshProcessCheckpointControl:
@@ -117,8 +159,7 @@ def fresh_process_checkpoint_control(paths: CheckpointPaths) -> FreshProcessChec
             command, check=True, capture_output=True, text=True, timeout=180,
             # This child needs imports and file access, not a copied parent
             # credential environment or any model evaluation answer keys.
-            env={"PATH": os.environ.get("PATH", ""),
-                 "PYTHONPATH": os.pathsep.join(sys.path)},
+            env=_fresh_worker_environment(os.environ, platform_name=os.name),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ValueError("fresh-process W0 control failed; no recovery or fitness claim") from exc

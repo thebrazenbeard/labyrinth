@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from labyrinth.evolutionary_saga_runner_v1 import (
-    CandidateSagaPlan, fresh_process_checkpoint_control,
+    CandidateSagaPlan, _fresh_worker_environment, fresh_process_checkpoint_control,
     run_mechanism_campaign, run_saga_trial,
 )
 from labyrinth.model_saga_runtime import (
@@ -54,6 +54,22 @@ def build_mock_session(root: Path, parent: CheckpointPaths, *, should_pass: bool
 
 
 class EvolutionarySagaRunnerV1Tests(unittest.TestCase):
+    def test_fresh_worker_env_keeps_windows_bootstrap_without_secrets(self):
+        environ = {
+            "PATH": "C:\\Python;C:\\Windows", "SystemRoot": "C:\\Windows",
+            "WINDIR": "C:\\Windows", "TEMP": "C:\\Temp", "TMP": "C:\\Temp",
+            "GITHUB_TOKEN": "private", "OPENAI_API_KEY": "private",
+        }
+        result = _fresh_worker_environment(environ, platform_name="nt")
+        self.assertEqual(result["SystemRoot"], "C:\\Windows")
+        self.assertEqual(result["WINDIR"], "C:\\Windows")
+        self.assertEqual(result["TEMP"], "C:\\Temp")
+        self.assertNotIn("GITHUB_TOKEN", result)
+        self.assertNotIn("OPENAI_API_KEY", result)
+        self.assertIn("PYTHONPATH", result)
+        linux = _fresh_worker_environment(environ, platform_name="posix")
+        self.assertNotIn("SystemRoot", linux)
+
     def test_actual_session_navigation_and_source_train_instead_of_fake_evolution(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
