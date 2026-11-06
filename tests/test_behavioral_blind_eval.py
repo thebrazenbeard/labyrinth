@@ -101,6 +101,12 @@ class BlindEvaluationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "user-input digest"):
             prepare_blind_packets(trials, seed=17)
 
+    def test_unpaired_surrogate_in_model_output_rejects(self):
+        trials = records()
+        trials[0]["response"] = "bad \ud800"
+        with self.assertRaisesRegex(ValueError, "Unicode scalar"):
+            prepare_blind_packets(trials, seed=17)
+
     def test_grade_custody_required_and_internal_review_holds(self):
         packets, key = prepare_blind_packets(records(), seed=17)
         grades = {"reviewer": {"identity": "synthetic-internal", "evidence_class": "INTERNAL_MODEL_REVIEW"},
