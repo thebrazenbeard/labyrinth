@@ -6,7 +6,12 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from labyrinth.kobayashi_canon_v1 import KobayashiAction, KobayashiWorld
 from labyrinth.kobayashi_encounter_v1 import KobayashiMazeLifecycle
+from labyrinth.kobayashi_minotaur_v1 import (
+    BoundClaim, EvidenceAssessment, KobayashiCorpus, MinotaurDialogue,
+)
+from labyrinth.kobayashi_proposals_v1 import assess_kobayashi_proposal
 from labyrinth.living_world_v1 import LivingWorld, LivingWorldRecipe, WorldAction
 from labyrinth.local_model_action_adapter_v1 import (
     LocalModelActionConfig, LocalModelWorldActor, ModelActionBoundaryError,
@@ -144,9 +149,12 @@ class FakeProposalTransport:
                                          "content": self.content}}]}
 
 
-def _setup(proposal_text: str):
+def _setup(proposal_text: str, *, strict: bool = False,
+           max_argument_rounds: int = 4):
     maze = _maze()
-    lifecycle = KobayashiMazeLifecycle(maze, variant_seed=2)
+    lifecycle = KobayashiMazeLifecycle(maze, variant_seed=2,
+                                      require_final_appeal=strict,
+                                      max_argument_rounds=max_argument_rounds)
     guide = FakeGuidedModelTransport()
     actor = LocalModelWorldActor(
         LocalModelActionConfig(17344, "mock-guide", retries=0, max_tokens=64),
@@ -158,6 +166,178 @@ def _setup(proposal_text: str):
 
 
 class LocalModelKobayashiRunnerTests(unittest.TestCase):
+    def test_strict_runner_requires_explicit_host_appeal_handler(self):
+        maze, lifecycle, guide, actor, proposal, config = _setup(
+            "I turn the cobalt valve once.", strict=True)
+        with self.assertRaisesRegex(ModelActionBoundaryError, "host.*appeal"):
+            KobayashiLocalModelRunner(lifecycle, actor, config, proposal)
+        self.assertFalse(lifecycle.snapshot()["mandatory_encounter_attempted"])
+        self.assertEqual(guide.requests, [])
+        self.assertEqual(proposal.requests, [])
+        with self.assertRaisesRegex(ModelActionBoundaryError, "host appeal must be a callable"):
+            KobayashiLocalModelRunner(
+                lifecycle, actor, config, proposal, host_appeal="fake-judge")
+
+    def test_callback_not_silently_ignored_outside_strict_mode(self):
+        maze, lifecycle, guide, actor, proposal, config = _setup(
+            "I turn the cobalt valve once.")
+        with self.assertRaisesRegex(ModelActionBoundaryError, "strict lifecycle"):
+            KobayashiLocalModelRunner(
+                lifecycle, actor, config, proposal, host_appeal=lambda _: None)
+        self.assertFalse(lifecycle.snapshot()["mandatory_encounter_attempted"])
+
+    def test_strict_runner_invokes_host_appeal_once_before_more_navigation(self):
+        text = "I turn the cobalt valve once because it appears connected to coolant."
+        maze, lifecycle, guide, actor, proposal, config = _setup(text, strict=True)
+        host_calls = []
+
+        def host_appeal(episode):
+            host_calls.append(episode.snapshot())
+            self.assertTrue(episode.snapshot()["mandatory_encounter_attempted"])
+            self.assertFalse(episode.snapshot()["appeal_final"])
+            # Strict mode must prevent the callback from bypassing the judge.
+            with self.assertRaisesRegex(ValueError, "Minotaur.*final"):
+                episode.step(WorldAction("retrace"))
+            world = KobayashiWorld(variant_seed=2)
+            observation = world.observe()
+            assessed = assess_kobayashi_proposal(text, observation.visible_objects)
+            self.assertEqual(assessed.status, "KNOWN_MECHANISM")
+            event = world.evaluate(KobayashiAction(
+                assessed.action.verb, assessed.action.target))
+            claim = BoundClaim(observation.sha256, world.graph_sha256,
+                               event.action_sha256, text)
+
+            def check(bound, case, arguments, dialogue_hash):
+                self.assertEqual(len(arguments), 2)
+                return EvidenceAssessment(
+                    bound.scenario_sha256, bound.world_sha256,
+                    bound.claim_sha256, None, dialogue_hash, "INDETERMINATE",
+                    None, "The fixture offers no independently supported exception.",
+                    "source-only-host-fixture")
+
+            episode.bind_minotaur(MinotaurDialogue(
+                KobayashiCorpus("source-only-fixture", ()), claim,
+                evidence_checker=check, min_rounds=2, max_rounds=2))
+            episode.submit_argument("My hypothesis may be wrong under the source graph.")
+            episode.submit_argument("I would seek evidence that distinguishes alternatives.")
+            self.assertEqual(episode.finalize_appeal().status, "UNKNOWN")
+
+        receipt = run_local_model_kobayashi(
+            lifecycle, actor, config, proposal, host_appeal=host_appeal)
+        self.assertEqual(len(host_calls), 1)
+        self.assertEqual(receipt["host_appeal_callback_calls"], 1)
+        self.assertTrue(receipt["appeal_final"])
+        self.assertTrue(receipt["minotaur_appeal_required"])
+        self.assertEqual(receipt["minotaur_verdict_status"], "UNKNOWN")
+        self.assertFalse(receipt["minotaur_attested"])
+        self.assertTrue(receipt["maze_completed"])
+        self.assertTrue(maze.state.completed)
+
+    def test_strict_runner_accepts_judge_configured_five_round_appeal(self):
+        text = "I turn the cobalt valve once because it appears connected to coolant."
+        maze, lifecycle, guide, actor, proposal, config = _setup(
+            text, strict=True, max_argument_rounds=8)
+
+        def host_appeal(episode):
+            world = KobayashiWorld(variant_seed=2)
+            observation = world.observe()
+            assessed = assess_kobayashi_proposal(text, observation.visible_objects)
+            event = world.evaluate(KobayashiAction(
+                assessed.action.verb, assessed.action.target))
+            claim = BoundClaim(observation.sha256, world.graph_sha256,
+                               event.action_sha256, text)
+
+            def check(bound, case, arguments, dialogue_hash):
+                self.assertEqual(len(arguments), 5)
+                return EvidenceAssessment(
+                    bound.scenario_sha256, bound.world_sha256,
+                    bound.claim_sha256, None, dialogue_hash, "INDETERMINATE",
+                    None, "Five arguments are not physical verification.",
+                    "source-only-host-fixture")
+
+            episode.bind_minotaur(MinotaurDialogue(
+                KobayashiCorpus("five-round-fixture", ()), claim,
+                evidence_checker=check, min_rounds=5, max_rounds=5))
+            for round_number in range(5):
+                episode.submit_argument(
+                    f"Round {round_number + 1}: I challenge the causal inference.")
+            self.assertEqual(episode.finalize_appeal().status, "UNKNOWN")
+
+        receipt = run_local_model_kobayashi(
+            lifecycle, actor, config, proposal, host_appeal=host_appeal)
+        self.assertEqual(receipt["lifecycle_snapshot"]["minotaur_argument_rounds"], 5)
+        self.assertTrue(receipt["appeal_final"])
+        self.assertTrue(receipt["maze_completed"])
+
+    def test_strict_runner_rejects_host_callback_without_final_verdict(self):
+        maze, lifecycle, guide, actor, proposal, config = _setup(
+            "I turn the cobalt valve once.", strict=True)
+        callbacks = []
+
+        def incomplete(episode):
+            callbacks.append(episode.snapshot())
+
+        runner = KobayashiLocalModelRunner(
+            lifecycle, actor, config, proposal, host_appeal=incomplete)
+        with self.assertRaisesRegex(ModelActionBoundaryError, "appeal must finalize"):
+            runner.run()
+        self.assertEqual(len(callbacks), 1)
+        self.assertFalse(lifecycle.snapshot()["appeal_final"])
+        self.assertFalse(maze.state.completed)
+
+    def test_novel_falsifiable_model_proposal_reaches_review_without_fake_success(self):
+        novel = ("Action: I will weave a thermal phase braid around the cobalt valve.\n"
+                 "Mechanism: The braid transfers heat through a coupled interface.\n"
+                 "Assumptions: I assume the material is thermally stable.\n"
+                 "Prediction: I predict a measurable temperature decline.\n"
+                 "Falsifier: My mechanism fails if no temperature change occurs.")
+        maze, lifecycle, guide, actor, proposal, config = _setup(novel)
+        receipt = run_local_model_kobayashi(lifecycle, actor, config, proposal)
+        self.assertEqual(receipt["local_encounter_status"], "REVIEW_REQUIRED")
+        self.assertTrue(receipt["mandatory_encounter_attempted"])
+        self.assertFalse(receipt["lifecycle_snapshot"]["minotaur_appeal_required"])
+        self.assertFalse(receipt["minotaur_attested"])
+        self.assertTrue(receipt["maze_completed"])
+
+    def test_novel_claim_can_reach_strict_host_minotaur_without_fake_win(self):
+        novel = ("Action: I will weave a thermal phase braid around the cobalt valve.\n"
+                 "Mechanism: The braid transfers heat through a coupled interface.\n"
+                 "Assumptions: I assume the material is thermally stable.\n"
+                 "Prediction: I predict a measurable temperature decline.\n"
+                 "Falsifier: My mechanism fails if no temperature change occurs.")
+        maze, lifecycle, guide, actor, proposal, config = _setup(novel, strict=True)
+
+        def host_appeal(episode):
+            world = KobayashiWorld(variant_seed=2)
+            observation = world.observe()
+            assessment = assess_kobayashi_proposal(novel, observation.visible_objects)
+            self.assertEqual(assessment.status, "NOVEL_CANDIDATE")
+            outcome = world.record_unverified_proposal(novel)
+            claim = BoundClaim(observation.sha256, world.graph_sha256,
+                               outcome.action_sha256, novel)
+
+            def check(bound, case, arguments, dialogue_hash):
+                return EvidenceAssessment(
+                    bound.scenario_sha256, bound.world_sha256,
+                    bound.claim_sha256, None, dialogue_hash, "INDETERMINATE",
+                    None, "No independent verification of the proposed thermal braid.",
+                    "source-only-host-fixture")
+
+            episode.bind_minotaur(MinotaurDialogue(
+                KobayashiCorpus("novel-review-fixture", ()), claim,
+                evidence_checker=check, min_rounds=2, max_rounds=2))
+            episode.submit_argument("The hypothesis predicts a temperature change.")
+            episode.submit_argument("I cannot claim an observed change without measurement.")
+            self.assertEqual(episode.finalize_appeal().status, "UNKNOWN")
+
+        receipt = run_local_model_kobayashi(
+            lifecycle, actor, config, proposal, host_appeal=host_appeal)
+        self.assertEqual(receipt["local_encounter_status"], "REVIEW_REQUIRED")
+        self.assertEqual(receipt["minotaur_verdict_status"], "UNKNOWN")
+        self.assertTrue(receipt["appeal_final"])
+        self.assertFalse(receipt["minotaur_attested"])
+        self.assertTrue(receipt["maze_completed"])
+
     def test_one_free_text_known_loss_then_successful_maze(self):
         maze, lifecycle, guide, actor, proposal, config = _setup(
             "I turn the cobalt valve once because it appears connected to coolant.")

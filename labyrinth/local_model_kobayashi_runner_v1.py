@@ -11,6 +11,7 @@ reasoning improvement, an independent Minotaur ruling, or actual local HTTP.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import copy
 from hashlib import sha256
 import json
@@ -106,13 +107,21 @@ def _is_epistemic_abstention(raw: str, assessment_reason: str) -> bool:
 
 
 class KobayashiLocalModelRunner:
-    """Bounded synchronous orchestrator; no hidden world or host operation."""
+    """Bounded orchestrator; host owns any strict Minotaur appeal.
+
+    ``host_appeal`` is an explicitly supplied, synchronous source-only
+    coordinator. It must bind a claim-matched Minotaur through the lifecycle,
+    submit participant arguments through the lifecycle, and finalize there.
+    This callback is NOT an independent judge, authenticated authority, or
+    evidence that the participant's arguments were model-generated.
+    """
 
     def __init__(self, lifecycle: KobayashiMazeLifecycle,
                  actor: LocalModelWorldActor,
                  proposal_config: LocalModelActionConfig,
                  proposal_transport: JSONChatTransport,
-                 *, max_maze_actions: int = 128) -> None:
+                 *, max_maze_actions: int = 128,
+                 host_appeal: Callable[[KobayashiMazeLifecycle], None] | None = None) -> None:
         if (type(lifecycle) is not KobayashiMazeLifecycle
                 or type(actor) is not LocalModelWorldActor
                 or type(proposal_config) is not LocalModelActionConfig
@@ -125,11 +134,20 @@ class KobayashiLocalModelRunner:
             raise ModelActionBoundaryError("free-text Kobayashi proposal cannot use JSON mode")
         if lifecycle.snapshot()["mandatory_encounter_attempted"]:
             raise ModelActionBoundaryError("runner must own the single encounter proposal")
+        strict_appeal = lifecycle.snapshot()["minotaur_appeal_required"]
+        if host_appeal is not None and not callable(host_appeal):
+            raise ModelActionBoundaryError("host appeal must be a callable coordinator")
+        if strict_appeal and host_appeal is None:
+            raise ModelActionBoundaryError("strict maze requires explicit host appeal coordinator")
+        if not strict_appeal and host_appeal is not None:
+            raise ModelActionBoundaryError("host appeal requires an explicitly strict lifecycle")
         self.lifecycle = lifecycle
         self.actor = actor
         self.proposal_config = proposal_config
         self.proposal_transport = proposal_transport
         self.max_maze_actions = max_maze_actions
+        self._host_appeal = host_appeal
+        self.host_appeal_calls = 0
         self.proposal_calls = 0
         self.maze_action_calls = 0
         self._started = False
@@ -168,6 +186,35 @@ class KobayashiLocalModelRunner:
                 f"unresolved single physical proposal: {assessment.reason}; encounter unchanged")
         self.lifecycle.submit_proposal(raw)
 
+    def _host_appeal_once(self) -> None:
+        """Require a completed bound Minotaur appeal before maze navigation.
+
+        The host callback may speak for a participant through lifecycle APIs,
+        but its origin, evidentiary independence and model identity are not
+        authenticated here. No callback return value can substitute for a
+        source-validated lifecycle finalization receipt.
+        """
+        if self._host_appeal is None or self.host_appeal_calls:
+            raise ModelActionBoundaryError("one explicit host appeal required")
+        before = self.lifecycle.snapshot()
+        if (not before["mandatory_encounter_attempted"]
+                or not before["minotaur_appeal_required"]
+                or before["appeal_final"]):
+            raise ModelActionBoundaryError("host appeal requires pending strict encounter")
+        self.host_appeal_calls += 1
+        response = self._host_appeal(self.lifecycle)
+        after = self.lifecycle.snapshot()
+        if (response is not None
+                or after["maze_state_sha256"] != before["maze_state_sha256"]
+                or after["encounter_proposal_sha256"] != before["encounter_proposal_sha256"]
+                or not after["appeal_final"]
+                # Judge-owned min/max rounds are validated by MinotaurDialogue;
+                # do not independently freeze its current 2..5 policy here.
+                or after["minotaur_argument_rounds"] < 1
+                or any(not turn["minotaur_attached"] for turn in after["minotaur_arguments"])):
+            raise ModelActionBoundaryError(
+                "host appeal must finalize bound Minotaur arguments without maze mutation")
+
     def run(self) -> dict[str, object]:
         if self._started:
             raise ModelActionBoundaryError("runner is single-use; construct a new instance")
@@ -179,6 +226,8 @@ class KobayashiLocalModelRunner:
                 break
             if self.lifecycle.phase == "AWAITING_PROPOSAL":
                 self._propose_once()
+                if self._host_appeal is not None:
+                    self._host_appeal_once()
                 continue
             if self.maze_action_calls >= self.max_maze_actions:
                 raise ModelActionBoundaryError("bounded maze-action budget exhausted")
@@ -225,7 +274,10 @@ class KobayashiLocalModelRunner:
             "maze_action_calls": self.maze_action_calls,
             "guided_model_transport_calls": self.actor.attempts - actor_attempts_before,
             "kobayashi_free_text_transport_calls": self.proposal_calls,
+            "host_appeal_callback_calls": self.host_appeal_calls,
             "lifecycle_receipt_sha256": snapshot["receipt_sha256"],
+            "minotaur_appeal_required": snapshot["minotaur_appeal_required"],
+            "appeal_final": snapshot["appeal_final"],
             "minotaur_verdict_status": snapshot["minotaur_verdict_status"],
             "minotaur_attested": False,
             "weights_changed": False,
@@ -242,10 +294,11 @@ def run_local_model_kobayashi(
     proposal_config: LocalModelActionConfig,
     proposal_transport: JSONChatTransport,
     *, max_maze_actions: int = 128,
+    host_appeal: Callable[[KobayashiMazeLifecycle], None] | None = None,
 ) -> dict[str, object]:
     return KobayashiLocalModelRunner(
         lifecycle, actor, proposal_config, proposal_transport,
-        max_maze_actions=max_maze_actions).run()
+        max_maze_actions=max_maze_actions, host_appeal=host_appeal).run()
 
 
 __all__ = ["KobayashiLocalModelRunner", "run_local_model_kobayashi"]

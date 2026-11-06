@@ -297,6 +297,12 @@ class KobayashiCorpus:
         destination = Path(path)
         if len(str(destination)) > 4096 or "\x00" in str(destination):
             raise KobayashiError("invalid corpus source path")
+        # O_NOFOLLOW is not available on every supported host (notably some
+        # Windows/Python builds). Reject the observable symlink even without
+        # that kernel guard. A writable parent remains an external custody
+        # boundary; this preflight is not a race-proof replacement for it.
+        if destination.is_symlink():
+            raise KobayashiError("corpus source must not be a symlink")
         descriptor = os.open(destination, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         with os.fdopen(descriptor, "r", encoding="ascii") as handle:
             if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
@@ -718,8 +724,17 @@ class MinotaurDialogue:
         if assessment.evidence_sha256 != self._case.evidence_sha256:
             return "UNKNOWN", "REVIEW_EVIDENCE_HASH_MISMATCH"
         if self._case.claim_sha256 is not None:
-            # A precommitted exact raw-claim rebuttal is actually about this
-            # proposition, not merely the physical intervention.
+            # An exact-claim answer key cannot overrule the host's actual
+            # semantic review. Unassessed or contradictory interpretations
+            # require further review; the precommit is not infallible.
+            expected = (
+                "CLAIM_REFUTED" if self._case.finding == "REFUTED"
+                else "CLAIM_SUPPORTED"
+            )
+            if assessment.semantic_scope == "UNASSESSED":
+                return "UNKNOWN", "EXACT_CLAIM_SEMANTIC_REVIEW_MISSING"
+            if assessment.semantic_scope != expected:
+                return "UNKNOWN", "EXACT_CLAIM_PRECOMMIT_REVIEW_CONFLICT"
             return self._case.finding, "EXACT_CLAIM_EVIDENCE_CONFIRMED"
         # A generic action rebuttal can establish a *failed intervention*,
         # but cannot refute reasoning that correctly predicts that failure.

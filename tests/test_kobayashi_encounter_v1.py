@@ -58,6 +58,77 @@ def _resume_to_atrium(lifecycle: KobayashiMazeLifecycle):
 
 
 class KobayashiEncounterTests(unittest.TestCase):
+    def test_insufficient_wrapper_argument_budget_rejected_before_binding(self):
+        """A strict maze must not accept a judge it cannot finish debating."""
+        lifecycle = KobayashiMazeLifecycle(
+            _maze(), require_final_appeal=True, max_argument_rounds=1)
+        _trigger(lifecycle)
+        raw = "I turn the cobalt valve once."
+        attempt = lifecycle.submit_proposal(raw)
+        observation = lifecycle._challenge.observe()
+        claim = BoundClaim(observation.sha256, lifecycle._challenge.graph_sha256,
+                           attempt["action_sha256"], raw)
+        dialogue = MinotaurDialogue(
+            KobayashiCorpus("budget", ()), claim,
+            evidence_checker=lambda *_: None,
+            min_rounds=2, max_rounds=2,
+        )
+        with self.assertRaisesRegex(EncounterLifecycleError, "cannot satisfy.*rounds"):
+            lifecycle.bind_minotaur(dialogue)
+
+    def test_prepopulated_host_dialogue_cannot_bind_to_fresh_lifecycle(self):
+        lifecycle = KobayashiMazeLifecycle(_maze(), require_final_appeal=True)
+        _trigger(lifecycle)
+        raw = "I turn the cobalt valve once."
+        attempt = lifecycle.submit_proposal(raw)
+        observation = lifecycle._challenge.observe()
+        claim = BoundClaim(observation.sha256, lifecycle._challenge.graph_sha256,
+                           attempt["action_sha256"], raw)
+        corpus = KobayashiCorpus("prepopulated", ())
+        dialogue = MinotaurDialogue(
+            corpus, claim,
+            evidence_checker=lambda *_: None,
+            min_rounds=2, max_rounds=2,
+        )
+        dialogue.submit_argument("Recorded outside wrapper before attachment.")
+        with self.assertRaisesRegex(EncounterLifecycleError, "already started"):
+            lifecycle.bind_minotaur(dialogue)
+
+    def test_host_dialogue_cannot_bypass_lifecycle_argument_receipts(self):
+        """Strict completion must reflect arguments submitted through the wrapper.
+
+        A host retaining the attached judge can mutate it directly. A final
+        verdict from that hidden transcript must not unlock maze traversal.
+        """
+        lifecycle = KobayashiMazeLifecycle(_maze(), require_final_appeal=True)
+        _trigger(lifecycle)
+        raw = "I turn the cobalt valve once."
+        attempt = lifecycle.submit_proposal(raw)
+        observation = lifecycle._challenge.observe()
+        claim = BoundClaim(observation.sha256, lifecycle._challenge.graph_sha256,
+                           attempt["action_sha256"], raw)
+
+        def checker(bound, case, arguments, dialogue_hash):
+            return EvidenceAssessment(
+                bound.scenario_sha256, bound.world_sha256, bound.claim_sha256,
+                None, dialogue_hash, "INDETERMINATE", None,
+                "No independent physical evidence was supplied.", "host-fixture",
+            )
+
+        dialogue = MinotaurDialogue(KobayashiCorpus("custody", ()), claim,
+                                    evidence_checker=checker,
+                                    min_rounds=2, max_rounds=2)
+        lifecycle.bind_minotaur(dialogue)
+        dialogue.submit_argument("First out-of-band argument.")
+        dialogue.submit_argument("Second out-of-band argument.")
+        dialogue.finalize()
+        with self.assertRaisesRegex(EncounterLifecycleError,
+                                    "outside Kobayashi lifecycle"):
+            lifecycle.finalize_appeal()
+        with self.assertRaisesRegex(EncounterLifecycleError,
+                                    "outside Kobayashi lifecycle"):
+            lifecycle.step(WorldAction("retrace"))
+
     def test_strict_host_judged_mode_cannot_bypass_minotaur_final_appeal(self):
         """A proposal alone is not a completed adversarial examination."""
         lifecycle = KobayashiMazeLifecycle(_maze(), require_final_appeal=True)

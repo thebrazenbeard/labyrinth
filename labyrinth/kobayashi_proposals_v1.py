@@ -72,6 +72,17 @@ _PHYSICAL_QUALIFIERS = (
                r"(?:one|two|three|five|ten|\d+(?:\.\d+)?)\s+"
                r"(?:degrees?|turns?|seconds?|millimeters?|inches?))\b|"
                r"\b\d+\s*/\s*\d+\b", re.I),
+    # A single canonical operation has no repetition count, dwell duration,
+    # travel limit, or target end-position. Those are distinct hypotheses,
+    # even when the verb and visible object happen to match the toy grammar.
+    re.compile(r"\b(?:twice|thrice|repeatedly|repetitively|again|"
+               r"(?:once|two|three|four|five|several|multiple|\d+)\s+times?|"
+               r"once\s+more)\b", re.I),
+    re.compile(r"\b(?:fully|completely|entirely|all\s+the\s+way|"
+               r"(?:back\s+)?to\s+(?:its|the)\s+(?:original|initial|"
+               r"previous|final|end)\s+position|until\s+)\b", re.I),
+    re.compile(r"\bfor\s+(?:(?:a|an|one|two|three|five|ten|\d+(?:\.\d+)?)\s+)?"
+               r"(?:milliseconds?|seconds?|minutes?|hours?|days?|moments?|while)\b", re.I),
     re.compile(r"\b(?:gently|forcefully|slowly|rapidly|gradually|lightly|"
                r"hard|softly|abruptly|carefully|only\s+until|"
                r"precise\s+torque|controlled\s+force|maximum\s+torque)\b", re.I),
@@ -251,7 +262,11 @@ def _is_committed_unrecognized_action(action_text: str) -> bool:
 
 def _has_unmodelled_physical_qualifier(action_text: str) -> bool:
     """Detect physically distinct parameters absent from the toy action API."""
-    action_clause = re.split(r"\b(?:because|although|since)\b", action_text,
+    # Use the same Unicode normalization as parse_open_action. Otherwise an
+    # NFKC-styled qualifier bypasses this check even though the physical verb
+    # and target are successfully normalized into an executable known action.
+    normalized = unicodedata.normalize("NFKC", action_text).casefold()
+    action_clause = re.split(r"\b(?:because|although|since)\b", normalized,
                              maxsplit=1, flags=re.I)[0]
     return any(pattern.search(action_clause) for pattern in _PHYSICAL_QUALIFIERS)
 

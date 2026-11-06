@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - "labyrinth/minotaur_*.py"
+      - "labyrinth/kobayashi_*.py"
+      - "labyrinth/local_model_kobayashi_runner_v1.py"
+      - "tests/test_kobayashi_*.py"
+      - "tests/test_local_model_kobayashi_runner_v1.py"
       - "labyrinth/toy_backend.py"
       - "tests/test_minotaur_*.py"
       - "tests/minotaur_required_tests.txt"
@@ -15,6 +19,10 @@ on:
     branches: [main]
     paths:
       - "labyrinth/minotaur_*.py"
+      - "labyrinth/kobayashi_*.py"
+      - "labyrinth/local_model_kobayashi_runner_v1.py"
+      - "tests/test_kobayashi_*.py"
+      - "tests/test_local_model_kobayashi_runner_v1.py"
       - "labyrinth/toy_backend.py"
       - "tests/test_minotaur_*.py"
       - "tests/minotaur_required_tests.txt"
@@ -72,3 +80,6 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_ci_membership.py' -v
           python -m scripts.minotaur_ci
+      - name: Kobayashi source and local-model boundary tests
+        run: |
+          python -m unittest tests.test_kobayashi_canon_v1 tests.test_kobayashi_encounter_v1 tests.test_kobayashi_minotaur_v1 tests.test_kobayashi_proposals_v1 tests.test_local_model_kobayashi_runner_v1 -v

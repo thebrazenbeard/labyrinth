@@ -83,6 +83,7 @@ class KobayashiMazeLifecycle:
         self._route: list[AriadneTracePoint] = []
         self._arguments: list[dict[str, object]] = []
         self._minotaur = None
+        self._expected_dialogue_sha256: str | None = None
         self._final_verdict = None
         self._max_argument_rounds = max_argument_rounds
         self._require_final_appeal = require_final_appeal
@@ -92,6 +93,12 @@ class KobayashiMazeLifecycle:
                 or self._maze.state_sha256 != self._expected_state_sha256):
             raise EncounterLifecycleError(
                 "maze changed outside Kobayashi lifecycle or source state diverged")
+        if self._minotaur is not None and (
+            self._minotaur.dialogue_sha256 != self._expected_dialogue_sha256
+            or self._minotaur.final != self._final_verdict
+        ):
+            raise EncounterLifecycleError(
+                "Minotaur changed outside Kobayashi lifecycle or transcript diverged")
 
     @property
     def phase(self) -> str:
@@ -215,9 +222,19 @@ class KobayashiMazeLifecycle:
                 or claim.action_sha256 != self._result["action_sha256"]
                 or claim.claim_text != self._result["proposal_text"]):
             raise EncounterLifecycleError("Minotaur claim is not bound to this encounter")
+        if dialogue.arguments or dialogue.final is not None:
+            raise EncounterLifecycleError("Minotaur dialogue already started before binding")
         if self._arguments:
             raise EncounterLifecycleError("bind before first argument to preserve provenance")
+        if self._max_argument_rounds < dialogue.max_rounds:
+            # The dialogue's minimum is host configured. Its public maximum
+            # is the only conservative bound exposed by this API. Reject a
+            # potentially impossible finalization instead of accepting a
+            # strict lifecycle that can exhaust its rounds before the judge.
+            raise EncounterLifecycleError(
+                "lifecycle budget cannot satisfy Minotaur declared max rounds")
         self._max_argument_rounds = min(self._max_argument_rounds, dialogue.max_rounds)
+        self._expected_dialogue_sha256 = dialogue.dialogue_sha256
         self._minotaur = dialogue
 
     def submit_argument(self, text: str, evidence_hashes: tuple[str, ...] = ()) -> object:
@@ -259,6 +276,8 @@ class KobayashiMazeLifecycle:
             "judgment_status": "UNREVIEWED" if response is None else "REVIEW_RETURNED_UNATTESTED",
             "public_minotaur_reply": asdict(response) if response is not None else None,
         })
+        if self._minotaur is not None:
+            self._expected_dialogue_sha256 = self._minotaur.dialogue_sha256
         return response
 
     def finalize_appeal(self) -> object:

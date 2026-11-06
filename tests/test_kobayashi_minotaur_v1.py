@@ -18,6 +18,7 @@ from labyrinth.kobayashi_minotaur_v1 import (
     ReasonedTurnFeedback,
     RebuttalCase,
 )
+from labyrinth import kobayashi_minotaur_v1 as minotaur
 from labyrinth.kobayashi_canon_v1 import KobayashiWorld, KobayashiAction
 
 
@@ -221,6 +222,43 @@ class KobayashiMinotaurTests(unittest.TestCase):
                 )
                 _two_rounds(dialogue)
                 self.assertEqual(dialogue.finalize().status, expected)
+
+    def test_exact_precommit_cannot_override_conflicting_semantic_review(self) -> None:
+        """An answer key and reviewer can disagree: neither auto-wins."""
+        claim = _claim()
+        for finding, semantic_review in (
+            ("REFUTED", "CLAIM_SUPPORTED"),
+            ("SURVIVES", "CLAIM_REFUTED"),
+            ("REFUTED", "UNASSESSED"),
+        ):
+            with self.subTest(finding=finding, semantic_review=semantic_review):
+                case = _case(claim, finding=finding, exact_claim=True)
+                dialogue = MinotaurDialogue(
+                    KobayashiCorpus("exact-claim", (case,)), claim,
+                    evidence_checker=lambda c, known, args, transcript: _assessment(
+                        c, known, transcript, semantic_scope=semantic_review,
+                    ),
+                )
+                _two_rounds(dialogue)
+                final = dialogue.finalize()
+                self.assertEqual(final.status, "UNKNOWN")
+
+    def test_exact_precommit_with_matching_review_retains_supported_verdict(self) -> None:
+        claim = _claim()
+        for finding, semantic_review in (
+            ("REFUTED", "CLAIM_REFUTED"),
+            ("SURVIVES", "CLAIM_SUPPORTED"),
+        ):
+            with self.subTest(finding=finding):
+                case = _case(claim, finding=finding, exact_claim=True)
+                dialogue = MinotaurDialogue(
+                    KobayashiCorpus("exact-claim", (case,)), claim,
+                    evidence_checker=lambda c, known, args, transcript: _assessment(
+                        c, known, transcript, semantic_scope=semantic_review,
+                    ),
+                )
+                _two_rounds(dialogue)
+                self.assertEqual(dialogue.finalize().status, finding)
 
     def test_unrecognized_ungrounded_hashes_never_promote_novelty(self) -> None:
         claim = _claim()
@@ -555,6 +593,17 @@ class KobayashiMinotaurTests(unittest.TestCase):
             destination.write_text(ambiguous, encoding="ascii")
             with self.assertRaisesRegex(KobayashiError, "duplicate"):
                 KobayashiCorpus.load(destination)
+
+    def test_corpus_loader_rejects_symlinks_without_os_nofollow(self) -> None:
+        """Windows-like platforms lack O_NOFOLLOW; preflight still matters."""
+        with TemporaryDirectory() as directory:
+            canonical = Path(directory) / "corpus.json"
+            KobayashiCorpus("canonical", (_case(_claim()),)).persist(canonical)
+            shortcut = Path(directory) / "shortcut.json"
+            shortcut.symlink_to(canonical)
+            with patch.object(minotaur.os, "O_NOFOLLOW", 0, create=True):
+                with self.assertRaisesRegex(KobayashiError, "symlink"):
+                    KobayashiCorpus.load(shortcut)
 
     def test_corpus_loader_limits_untrusted_file_size_before_json_parsing(self) -> None:
         with TemporaryDirectory() as directory:
