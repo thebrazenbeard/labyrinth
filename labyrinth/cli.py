@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from .adapters import AdapterError, load_adapter
 from .runner import (
@@ -88,6 +89,7 @@ def _parser() -> argparse.ArgumentParser:
     audit.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
     hf_audit = subcommands.add_parser("audit-hf-report", help="Offline internal consistency audit of a saved HF LoRA pilot")
     hf_audit.add_argument("--input", metavar="JSON", required=True, help="Saved HF pilot report")
+    hf_audit.add_argument("--allow-legacy", action="store_true", help="Explicitly audit old v2/v3 reports without the current exposure ledger; internal consistency only")
     hf_audit.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
     rg = subcommands.add_parser("benchmark-rg", help="Optional Reasoning Gym development-only scoring; not sealed evaluation")
     rg.add_argument("--dataset", required=True, help="Registered reasoning-gym task identifier")
@@ -102,7 +104,59 @@ def _parser() -> argparse.ArgumentParser:
     rg.add_argument("--report", metavar="JSON", help="Exclusively create a JSON report")
     subcommands.add_parser("train-hf", help="Opt-in bounded LoRA update of an existing local HF checkpoint")
     subcommands.add_parser("eval-hf", help="Reload and evaluate a saved HF LoRA pilot in a new process")
+    journey_plan = subcommands.add_parser("journey-plan", help="Preview a declared, regenerative training maze (no training)")
+    journey_declaration = journey_plan.add_mutually_exclusive_group(required=True)
+    journey_declaration.add_argument("--scope", metavar="JSON", help="Predeclared immutable training-scope manifest")
+    journey_declaration.add_argument("--objective-contract", metavar="JSON",
+                                     help="Scope plus observable skill objectives/rubric declarations (not implemented graders)")
+    journey_plan.add_argument("--cycle", type=int, default=0, help="Bounded zero-based regeneration cycle")
+    journey_plan.add_argument("--weak-skills", default="", help="Comma-separated DEVELOPMENT weaknesses only")
+    journey_plan.add_argument("--materialize-training", action="store_true",
+                              help="Also generate trainee-visible training prompts using bounded Minotaur routing (arithmetic only)")
+    journey_plan.add_argument("--report", metavar="JSON", help="Exclusively create a JSON plan")
+    journey_toy = subcommands.add_parser("journey-toy", help="Real toy-weight adaptive journey; not an LLM or graduation")
+    journey_toy.add_argument("--scope", required=True, metavar="JSON", help="Predeclared immutable training-scope manifest")
+    journey_toy.add_argument("--learner-seed", type=int, default=0)
+    journey_toy.add_argument("--epochs-by-cycle", help="One positive toy epoch count per authorized cycle (default: 4 each)")
+    journey_toy.add_argument("--learning-rate", type=float, default=0.5)
+    journey_toy.add_argument("--report", metavar="JSON", help="Exclusively create JSON receipts")
+    journey_controls = subcommands.add_parser("journey-toy-controls", help="Matched arithmetic toy learning controls; not formal qualification")
+    journey_controls.add_argument("--scope", required=True, metavar="JSON")
+    journey_controls.add_argument("--learner-seed", type=int, default=0)
+    journey_controls.add_argument("--epochs-by-cycle", help="Comma-separated positive epochs, one per cycle (default: 4 each)")
+    journey_controls.add_argument("--learning-rate", type=float, default=0.5)
+    journey_controls.add_argument("--report", metavar="JSON", help="Exclusively create JSON control receipts")
+    chronicle = subcommands.add_parser(
+        "journey-chronicle", help="Read a toy development report as a bounded Labyrinth chronicle"
+    )
+    chronicle.add_argument("--input", required=True, metavar="JSON", help="Existing toy-journey report")
     return parser
+
+
+def _read_training_scope(path: str):
+    """Bound scope bytes before parsing; a declaration is never executed."""
+    from .training_scope import MAX_SCOPE_JSON_BYTES, parse_scope_json
+
+    with Path(path).open("rb") as stream:
+        raw = stream.read(MAX_SCOPE_JSON_BYTES + 1)
+    return parse_scope_json(raw)
+
+
+def _epochs_by_cycle(raw: str | None, cycles: int) -> tuple[int, ...] | None:
+    """Validate a declaration-bounded schedule before any model work."""
+    if raw is None:
+        if cycles * 4 > 256:
+            raise ValueError("default total toy epoch budget exceeded")
+        return None
+    try:
+        epochs = tuple(int(token.strip()) for token in raw.split(","))
+    except ValueError as exc:
+        raise ValueError("epochs-by-cycle must be comma-separated integers") from exc
+    if (not epochs or len(epochs) != cycles
+            or any(type(n) is not int or not 1 <= n <= 128 for n in epochs)
+            or sum(epochs) > 256):
+        raise ValueError("epochs-by-cycle must supply bounded positive epochs for every cycle")
+    return epochs
 
 
 def _load_model(args: argparse.Namespace):
@@ -143,8 +197,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "audit-report":
             report = audit_report(load_json(args.input, strict=True),
                                   artifact=load_json(args.artifact, strict=True) if args.artifact else None)
+        elif args.command == "journey-chronicle":
+            from .saga_narrative import render_journey_chronicle
+
+            print(render_journey_chronicle(load_json(args.input, strict=True)))
+            return 0
         elif args.command == "audit-hf-report":
-            report = audit_hf_report(load_json(args.input, strict=True))
+            report = audit_hf_report(load_json(args.input, strict=True), allow_legacy=args.allow_legacy)
         elif args.command == "train-toy":
             report = run_toy_experiment(
                 seed=args.seed, train_count=args.train_count, eval_count=args.eval_count,
@@ -160,6 +219,87 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "toy-eval":
             candidate = ToyLinearAdapter.load_checkpoint(args.checkpoint)
             report = evaluate_toy_model(candidate, seed=args.seed, eval_count=args.eval_count)
+        elif args.command == "journey-plan":
+            from dataclasses import asdict
+            from .regenerative_maze import generate_maze_plan
+
+            contract = None
+            if args.objective_contract:
+                from .objective_contract import MAX_OBJECTIVE_JSON_BYTES, parse_objective_json
+
+                with Path(args.objective_contract).open("rb") as stream:
+                    contract = parse_objective_json(stream.read(MAX_OBJECTIVE_JSON_BYTES + 1))
+                scope = contract.training_scope
+            else:
+                scope = _read_training_scope(args.scope)
+            weak = tuple(token.strip() for token in args.weak_skills.split(",") if token.strip())
+            plan = generate_maze_plan(scope, args.cycle, weak_skills=weak)
+            report = {"schema": "labyrinth.journey-plan.v1", "scope": scope.to_dict(),
+                      "scope_fingerprint": scope.fingerprint, "plan": asdict(plan),
+                      "limitations": ["Room descriptors are not actual learning or private exams."]}
+            if contract is not None:
+                report["objective_contract"] = contract.to_dict()
+                report["objective_fingerprint"] = contract.fingerprint
+                report["selected_focus"] = {
+                    skill: list(contract.selected_focus(skill)) for skill in scope.skills
+                }
+                report["limitations"].append(
+                    "Objective text/rubric thresholds express operator intent, not generated tests or trained behavior."
+                )
+            if args.materialize_training:
+                if contract is not None:
+                    # A declaration is not permission to silently fall back to
+                    # scope-only tasks. Only an explicitly approved objective
+                    # binding may materialize executable TRAIN content.
+                    from .objective_contract import prepare_objective_program_room
+
+                    prepared = tuple(
+                        prepare_objective_program_room(contract, plan, room)
+                        for room in plan.rooms
+                    )
+                    report["training_provider"] = "approved_objective_program_focus_v1"
+                    report["training_views"] = [
+                        {**asdict(entry.trainee_view),
+                         "semantic_focus": dict(entry.challenge.metadata)["semantic_focus"]}
+                        for entry in prepared
+                    ]
+                elif scope.skills == ("arithmetic",):
+                    from .taskmaster_routing import route_training_rooms
+
+                    routed = route_training_rooms(scope, plan)
+                    report["training_provider"] = "bounded_minotaur_arithmetic_routing"
+                    report["training_views"] = [
+                        {**asdict(entry.trainee_view), "difficulty": entry.suggestion.difficulty,
+                         "tactic": entry.suggestion.tactic, "planner_source": entry.suggestion.source}
+                        for entry in routed
+                    ]
+                else:
+                    from .journey_challenges import prepare_training_rooms
+
+                    prepared = prepare_training_rooms(plan, semantic_scope=scope)
+                    report["training_provider"] = "approved_skill_providers_with_program_focus"
+                    report["training_views"] = [
+                        {**asdict(entry.trainee_view),
+                         "semantic_focus": dict(entry.challenge.metadata).get("semantic_focus")}
+                        for entry in prepared
+                    ]
+                report["limitations"].append(
+                    "Generated training-only prompts are not model updates; gold stays evaluator-side."
+                )
+        elif args.command == "journey-toy":
+            from .journey_toy import run_toy_journey
+
+            scope = _read_training_scope(args.scope)
+            epochs = _epochs_by_cycle(args.epochs_by_cycle, scope.max_cycles)
+            report = run_toy_journey(scope, learner_seed=args.learner_seed,
+                                     epochs_by_cycle=epochs, learning_rate=args.learning_rate)
+        elif args.command == "journey-toy-controls":
+            from .journey_controls import run_matched_toy_controls
+
+            scope = _read_training_scope(args.scope)
+            epochs = _epochs_by_cycle(args.epochs_by_cycle, scope.max_cycles)
+            report = run_matched_toy_controls(scope, learner_seed=args.learner_seed,
+                                              epochs_by_cycle=epochs, learning_rate=args.learning_rate)
         elif args.command == "benchmark-rg":
             from .reasoning_gym_bridge import benchmark_reasoning_gym
 
