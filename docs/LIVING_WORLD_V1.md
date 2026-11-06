@@ -79,13 +79,49 @@ generation transitions, narrative memory continuity, tamper rejection and
 bounded model-proposed dialogue. The test policies are scripted fixtures,
 **not a live Qwen, Vera, or neural generalization evaluation**.
 
+## Lappy local-model episode: observed result, not neural qualification
+
+On 2026-11-06, an operator-invoked, **real loopback Ollama inference** run on
+Lappy used the existing `vera-qwen35:trial-20261029` model with the published
+Labyrinth Draft PR #125 action adapter at remote head
+`17efdbcfbcb3691c6819ad1311933843dcf3458c`. An isolated clean temporary
+checkout was fast-forwarded to that exact source commit. The existing signed
+Python 3.14.5 interpreter was invoked by absolute path, avoiding the broken
+WindowsApps `python.exe` alias; no system Python setting was altered.
+
+Reproduction parameters (requires an operator-approved, already-running
+OpenAI-compatible loopback model endpoint; **not** a CI fixture):
+
+```powershell
+& 'C:\Users\patri\AppData\Local\Python\pythoncore-3.14-64\python.exe' `
+  -m labyrinth.local_model_world_runner_v1 `
+  --allow-local-inference --model 'vera-qwen35:trial-20261029' `
+  --port 11434 --reasoning-effort none --json-mode `
+  --max-completion-tokens 128 --max-actions 64 --timeout 15 --retries 1
+```
+
+For public seed 71, difficulty 1, the source-owned result was
+`PUBLIC_QUEST_COMPLETED`, exit code 0, after **48 valid model-chosen world
+actions** and 48 model-completion requests. The traveler carried Ariadne's
+thread, found the required seal, physically triggered `MINOTAUR_ENCOUNTER`,
+and retraced to `ariadne_atrium`; no model actions were rejected. The complete
+returned JSON's canonical `trace_sha256` was
+`d77c058dccc3c107567f4db9d53719f6e01f99ef1067fd84eaaaacde23e6677a`.
+The source-owned terminal state reported `met_minotaur=true` and
+`completed=true`.
+
+Earlier bounded attempts provide essential negatives: an 8-action run had
+repeated inspections; subsequent navigation runs improved partial progress;
+the first 24-action run using the exact public JSON-action mapping exhausted
+its budget before reaching the Minotaur. Raising the action ceiling to 64
+enabled the 48-action completion, including numerous unnecessary detours.
+**One successful bounded episode does not establish reliability across seeds,
+learned policy improvement, weight changes, or private Minotaur examination.**
+
 ## Unfinished real-world integration
 
-- Reliable complete live-model navigation remains to be demonstrated. An
-  opt-in local inference adapter and episode runner exist; one bounded live
-  pilot exposed repeated inspections, and subsequent source fixes now carry
-  public actor/action history and explicit exploration/return phases. Source
-  tests alone cannot prove a model will choose sound routes.
+- Multi-seed independent local-model navigation evaluation with unchanged
+  control, time/step efficiency measures, retries and full trace custody.
 - Authentic operator approval and case separation for newly generated
   dialogue scenes. Model-authored story data must never be promoted to
   high-priority instructions or executable code.
