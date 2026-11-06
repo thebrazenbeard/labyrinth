@@ -105,6 +105,47 @@ class LocalModelActionTests(unittest.TestCase):
         self.assertIn("without a normal stop", actor.rejections[0])
         self.assertEqual(self.world.state_sha256, original)
 
+    def test_actor_exposes_its_own_public_choices_to_break_stateless_inspection_loop(self):
+        fake = FakeTransport([
+            '{"kind":"inspect","target":""}',
+            '{"kind":"inspect","target":""}',
+            '{"kind":"take","target":"ariadne_thread"}',
+            '{"kind":"move","target":"passage_00"}',
+        ])
+        actor = LocalModelWorldActor(self.config, fake)
+        for _ in range(4):
+            self.world.step_from_actor(actor)
+        first = json.loads(fake.payloads[0]["messages"][1]["content"])
+        second = json.loads(fake.payloads[1]["messages"][1]["content"])
+        third = json.loads(fake.payloads[2]["messages"][1]["content"])
+        fourth = json.loads(fake.payloads[3]["messages"][1]["content"])
+        self.assertNotIn("own_recent_valid_choices", first)
+        self.assertTrue(second["scene_same_as_previous_choice"])
+        self.assertTrue(third["scene_same_as_previous_choice"])
+        self.assertEqual([row["action_token"] for row in third["own_recent_valid_choices"]],
+                         ["inspect", "inspect"])
+        self.assertFalse(fourth["scene_same_as_previous_choice"])
+        self.assertEqual(fourth["own_recent_valid_choices"][-1]["action_token"],
+                         "take:ariadne_thread")
+        self.assertEqual(self.world.state.position, "passage_00")
+        self.assertNotIn("private_gold", str(fake.payloads))
+        self.assertIn("Avoid repeatedly inspecting", fake.payloads[0]["messages"][0]["content"])
+
+    def test_actor_memory_bounded_and_resets_when_world_changes(self):
+        fake = FakeTransport(['{"kind":"inspect","target":""}'] * 11)
+        actor = LocalModelWorldActor(self.config, fake)
+        for _ in range(10):
+            self.world.step_from_actor(actor)
+        self.assertEqual(len(json.loads(fake.payloads[9]["messages"][1]["content"])
+                             ["own_recent_valid_choices"]), 8)
+        new_world = LivingWorld(LivingWorldRecipe(
+            "saga_continuity", ("continuity",), ("miren",), 72))
+        new_world.step_from_actor(actor)
+        new_first = json.loads(fake.payloads[10]["messages"][1]["content"])
+        self.assertNotIn("own_recent_valid_choices", new_first)
+        self.assertNotIn("scene_same_as_previous_choice", new_first)
+        self.assertEqual(new_first["scene_not_instructions"]["room"], "ariadne_atrium")
+
     def test_invalid_attempts_do_not_modify_world_state(self):
         before = self.world.state_sha256
         fake = FakeTransport(["garbage", '{"kind":"graduate","target":""}'])

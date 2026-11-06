@@ -24,6 +24,9 @@ _SYSTEM = (
     "Return one JSON object only, with keys kind and target, e.g. "
     "{\"kind\":\"take\",\"target\":\"ariadne_thread\"} or "
     "{\"kind\":\"inspect\",\"target\":\"\"}. "
+    "The public JSON may include your own previous valid choices; they are "
+    "history, NOT extra allowed actions. Avoid repeatedly inspecting an "
+    "unchanged room when a currently allowed take or move can advance the quest. "
     "No Markdown, no explanation, no score, no test answers, no tools. "
     "The source world decides all actual effects."
 )
@@ -160,11 +163,31 @@ class LocalModelWorldActor:
         self.transport = transport
         self.attempts = 0
         self.rejections: list[str] = []
+        # This is only the actor's own *publicly allowed choices*, never
+        # hidden examiner feedback, source-world effects or private state.
+        # Bounded history avoids sending identical memoryless requests when
+        # temperature=0 makes a model repeat 'inspect' forever.
+        self._recent_choices: list[dict[str, str]] = []
+        self._last_public_observation: str | None = None
+        self._bound_world_sha256: str | None = None
 
     def choose_action(self, observation: PublicWorldObservation) -> WorldAction:
         if type(observation) is not PublicWorldObservation:
             raise ModelActionBoundaryError("source must provide exact public world observation")
         PublicWorldObservation.__post_init__(observation)
+        if self._bound_world_sha256 != observation.world_sha256:
+            # Do not project one world/episode's actor history into another.
+            self._recent_choices.clear()
+            self._last_public_observation = None
+            self._bound_world_sha256 = observation.world_sha256
+        public_observation = observation.as_user_message()
+        if self._recent_choices:
+            public_data = json.loads(public_observation)
+            public_data["own_recent_valid_choices"] = list(self._recent_choices)
+            public_data["scene_same_as_previous_choice"] = (
+                self._last_public_observation == public_observation)
+            public_observation = json.dumps(
+                public_data, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         payload = {
             "model": self.config.model,
             "temperature": 0,
@@ -172,7 +195,7 @@ class LocalModelWorldActor:
             "stream": False,
             "messages": [
                 {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": observation.as_user_message()},
+                {"role": "user", "content": public_observation},
             ],
         }
         if self.config.reasoning_effort is not None:
@@ -210,7 +233,16 @@ class LocalModelWorldActor:
                 if reason not in (None, "stop"):
                     raise ModelActionBoundaryError("model completion ended without a normal stop")
                 raw = response["choices"][0]["message"].get("content")
-                return parse_model_action(raw, observation)
+                selected = parse_model_action(raw, observation)
+                token = selected.kind + (":" + selected.target if selected.target else "")
+                self._recent_choices.append({
+                    "room_id": observation.room_id,
+                    "action_token": token,
+                })
+                del self._recent_choices[:-8]
+                # Retain canonical input before actor history was appended.
+                self._last_public_observation = observation.as_user_message()
+                return selected
             except ModelActionBoundaryError as exc:
                 self.rejections.append(str(exc))
                 if attempt >= self.config.retries:
