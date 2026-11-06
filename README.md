@@ -4,6 +4,29 @@ Labyrinth is an offline-first **reasoning challenge, training-lifecycle, and eva
 
 It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path. A bounded CPU smoke run on Lappy demonstrated numerical adapter changes and fresh-process reload with a tiny, **randomly initialized** HF model; it did **not** demonstrate improved reasoning.
 
+### Opt-in Kobayashi Maru encounter (source-only)
+
+The optional `labyrinth.kobayashi_*_v1` modules provide a fictional engineering
+scenario, a deterministic Minotaur-style rebuttal loop, an immutable case
+corpus, and a `KobayashiMazeLifecycle` wrapper for the narrative `LivingWorld`.
+`labyrinth.local_model_kobayashi_runner_v1` can drive that wrapper through
+caller-supplied OpenAI-compatible transports. The model must propose a physical
+intervention or explicitly abstain; unknown interventions are marked for review,
+never silently declared successful. Repeated identical appeals do not consume
+additional debate rounds. The encounter's failure is not a failure of the maze.
+Setting `require_final_appeal=True` on the lifecycle enforces a final,
+host-bound Minotaur verdict before maze navigation resumes, but the default
+remains optional and the synchronous local-model runner does not supply the
+host-judgment callback necessary to complete strict mode on its own.
+
+The encounter is **not automatically installed in every maze entry point**;
+Minotaur decisions are not authenticated independent judgments, and these
+modules do not perform model training. Verify this standalone slice with:
+
+```bash
+PYTHONPATH=tests:. python -m unittest tests.test_kobayashi_canon_v1 tests.test_kobayashi_minotaur_v1 tests.test_kobayashi_encounter_v1 tests.test_kobayashi_proposals_v1 tests.test_local_model_kobayashi_runner_v1
+```
+
 ## Run it
 
 Requires Python 3.10+; core functionality uses the standard library.
