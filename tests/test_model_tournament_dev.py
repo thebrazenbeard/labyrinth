@@ -60,7 +60,7 @@ class TwoModelDevTests(unittest.TestCase):
         grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
                   "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
                   "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
-        result = adjudicate_two_model_dev(masked, key, grades)
+        result = adjudicate_two_model_dev(masked, key, grades, bank=CASES)
         self.assertEqual(result["decision"], "HOLD_UNVERIFIED_HOST_CUSTODY")
         self.assertFalse(result["release_authority"])
         self.assertEqual(result["paired_ties"], 3)
@@ -102,7 +102,7 @@ class TwoModelDevTests(unittest.TestCase):
         grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
                   "reviewer": {"identity": "self", "evidence_class": "INTERNAL_MODEL_REVIEW"},
                   "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
-        result = adjudicate_two_model_dev(masked, key, grades)
+        result = adjudicate_two_model_dev(masked, key, grades, bank=CASES)
         self.assertEqual(result["decision"], "HOLD_SYNTHETIC_OR_UNVERIFIED_GENERATION")
 
     def test_custody_response_relabel_rejected(self):
@@ -114,7 +114,7 @@ class TwoModelDevTests(unittest.TestCase):
                   "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
                   "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
         with self.assertRaisesRegex(ValueError, "response binding"):
-            adjudicate_two_model_dev(masked, bad, grades)
+            adjudicate_two_model_dev(masked, bad, grades, bank=CASES)
 
     def test_custody_prompt_system_relabel_rejected(self):
         masked, key = prepare_two_model_packets(self.rows, CASES, seed=8)
@@ -125,7 +125,7 @@ class TwoModelDevTests(unittest.TestCase):
                   "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
                   "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
         with self.assertRaisesRegex(ValueError, "prompt/system binding"):
-            adjudicate_two_model_dev(masked, bad, grades)
+            adjudicate_two_model_dev(masked, bad, grades, bank=CASES)
 
     def test_paired_win_loss_tie_recomputed_from_custody(self):
         masked, key = prepare_two_model_packets(self.rows, CASES, seed=8)
@@ -136,10 +136,86 @@ class TwoModelDevTests(unittest.TestCase):
         grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
                   "reviewer": {"identity": "reviewer-X", "evidence_class": "INTERNAL_MODEL_REVIEW"},
                   "scores": scores}
-        result = adjudicate_two_model_dev(masked, key, grades)
+        result = adjudicate_two_model_dev(masked, key, grades, bank=CASES)
         self.assertEqual(result["paired_wins"], {M1: 3, M2: 0})
         self.assertEqual(result["paired_ties"], 0)
         self.assertEqual(result["decision"], "HOLD_UNVERIFIED_HOST_CUSTODY")
+
+    def test_adjudicator_rejects_drift_even_with_rehashed_packet_manifest(self):
+        masked, key = prepare_two_model_packets(self.rows, CASES, seed=8)
+        packet_id = masked["packets"][0]["packet_id"]
+        target = next(p for p in masked["packets"] if p["packet_id"] == packet_id)
+        target["system"] = "secretly different model prompt"
+        key["key"][packet_id]["input_sha256"] = canonical_digest(
+            {"system": target["system"], "prompt": target["prompt"]})
+        key["packet_manifest_sha256"] = canonical_digest(masked)
+        grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
+                  "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
+        with self.assertRaisesRegex(ValueError, "paired prompt/system drift"):
+            adjudicate_two_model_dev(masked, key, grades, bank=CASES)
+
+    def test_adjudicator_rejects_runner_drift_after_prepare(self):
+        masked, key = prepare_two_model_packets(self.rows, CASES, seed=8)
+        packet_id = masked["packets"][0]["packet_id"]
+        key["key"][packet_id]["runner_build"] = "different runner"
+        grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
+                  "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
+        with self.assertRaisesRegex(ValueError, "runner/decoding drift"):
+            adjudicate_two_model_dev(masked, key, grades, bank=CASES)
+
+    def test_adjudicator_rejects_unbalanced_case_repeats(self):
+        masked, key = prepare_two_model_packets(self.rows, CASES, seed=8)
+        for packet in masked["packets"]:
+            if packet["case_id"] == "care":
+                packet["repeat"] = 1
+                key["key"][packet["packet_id"]]["repeat"] = 1
+        key["packet_manifest_sha256"] = canonical_digest(masked)
+        grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
+                  "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
+        with self.assertRaisesRegex(ValueError, "unbalanced case repeats"):
+            adjudicate_two_model_dev(masked, key, grades, bank=CASES)
+
+    def test_adjudicator_rejects_coordinated_case_deletion(self):
+        masked, key = prepare_two_model_packets(self.rows, CASES, seed=8)
+        masked["packets"] = [p for p in masked["packets"] if p["case_id"] != "care"]
+        key["key"] = {pid: item for pid, item in key["key"].items()
+                      if item["case_id"] != "care"}
+        key["packet_manifest_sha256"] = canonical_digest(masked)
+        grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
+                  "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
+        with self.assertRaisesRegex(ValueError, "trusted public bank mismatch"):
+            adjudicate_two_model_dev(masked, key, grades, bank=CASES)
+
+    def test_adjudicator_rejects_forged_bank_hash(self):
+        masked, key = prepare_two_model_packets(self.rows, CASES, seed=8)
+        masked["bank_sha256"] = "f" * 64
+        key["packet_manifest_sha256"] = canonical_digest(masked)
+        grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
+                  "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
+        with self.assertRaisesRegex(ValueError, "trusted public bank mismatch"):
+            adjudicate_two_model_dev(masked, key, grades, bank=CASES)
+
+    def test_model_template_drift_rejected_in_prepare_and_adjudicate(self):
+        for item in self.rows:
+            if item["model_sha256"] == M1:
+                item["chat_template_sha256"] = "c" * 64
+                break
+        with self.assertRaisesRegex(ValueError, "model chat-template drift"):
+            prepare_two_model_packets(self.rows, CASES, seed=8)
+
+        masked, key = prepare_two_model_packets(trials(), CASES, seed=8)
+        packet_id = masked["packets"][0]["packet_id"]
+        key["key"][packet_id]["chat_template_sha256"] = "c" * 64
+        grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
+                  "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
+        with self.assertRaisesRegex(ValueError, "model chat-template drift"):
+            adjudicate_two_model_dev(masked, key, grades, bank=CASES)
 
     def test_bad_bank_and_bool_values_rejected(self):
         self.rows[0]["repeat"] = True
