@@ -228,6 +228,30 @@ class FixedWeightBranchTests(unittest.TestCase):
         self.assertEqual(BranchSupervisor.restore(self.alu, self.branch,
                                                   program, receipt).snapshot(), receipt)
 
+    def test_recovery_rejects_shadowed_builtin_on_future_path(self):
+        # Independent hostile-review falsifier: a module-global max shadow
+        # changes one future ReLU activation while numerical weights and
+        # forward.__code__ remain byte-for-byte unchanged.
+        import labyrinth.fixed_weight_branch as branch_module
+
+        program = BranchProgram("primitive-drift", ((0, 0, 0, 0), (1, 0, 0, 0),
+                                                    (0, 0, 0, 0), (0, 0, 0, 0)))
+        session = BranchSupervisor.start(self.alu, self.branch, program)
+        session.step()
+        receipt = session.snapshot()
+        original_max = max
+
+        def changed_max(*args, **kwargs):
+            # Any shadowed primitive is a code-identity breach, whether or
+            # not a particular activation actually changes on replay.
+            return original_max(*args, **kwargs)
+
+        with patch.object(branch_module, "max", changed_max, create=True):
+            with self.assertRaisesRegex(ValueError, "primitive binding"):
+                BranchSupervisor.restore(self.alu, self.branch, program, receipt)
+        self.assertEqual(BranchSupervisor.restore(self.alu, self.branch,
+                                                  program, receipt).snapshot(), receipt)
+
     def test_branch_snapshot_recovery_in_fresh_process(self):
         program = BranchProgram("fresh-recovery", ((0, 0, 1, 1), (1, 0, 0, 0),
                                                     (0, 1, 0, 0), (1, 0, 0, 0)))

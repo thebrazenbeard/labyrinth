@@ -7,6 +7,7 @@ still owns instruction memory, the PC register, and execution scheduling.
 
 from __future__ import annotations
 
+import builtins
 from dataclasses import dataclass
 from hashlib import sha256
 from itertools import product
@@ -28,6 +29,9 @@ MAX_ABS_COEFFICIENT = 1024
 SNAPSHOT_SCHEMA = "neural-branch-supervisor-snapshot-v1"
 MAX_RECOVERY_STEPS = 4096
 EXECUTION_ABI = "cpython-neural-branch-execution-bytecode-v1"
+_EXECUTION_BUILTINS = ("max", "sum", "zip", "tuple", "any", "len", "type", "int",
+                       "range", "str", "isinstance", "enumerate")
+_BASELINE_BUILTINS = {name: getattr(builtins, name) for name in _EXECUTION_BUILTINS}
 
 
 def branch_reference(bits: tuple[int, ...]) -> tuple[int, int]:
@@ -266,6 +270,15 @@ def execution_semantics_sha256() -> str:
     Runtime monkeypatches of any listed function change this fingerprint.
     This is advisory custody, not a defense against hostile process control.
     """
+    # Code-object hashes alone miss shadows of Python builtins: for example,
+    # changing this module's `max` global changes future hidden activations
+    # without changing NeuralBranchCircuit.forward.__code__. Fail closed when
+    # critical primitive lookups change relative to this process's import.
+    for module_globals in (globals(), alu_module.__dict__):
+        for name, expected in _BASELINE_BUILTINS.items():
+            resolved = module_globals.get(name, getattr(builtins, name))
+            if resolved is not expected:
+                raise ValueError(f"branch execution primitive binding changed: {name}")
     watched = {
         "branch.forward": NeuralBranchCircuit.forward,
         "alu.forward": NeuralStepper.forward,
