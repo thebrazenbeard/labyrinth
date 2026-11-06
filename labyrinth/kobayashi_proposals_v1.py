@@ -15,7 +15,9 @@ import re
 import unicodedata
 from typing import Literal
 
-from .open_action_v1 import OpenAction, parse_open_action
+from .open_action_v1 import (
+    OpenAction, _RATIONALE, _VERBS, _normalized_words, parse_open_action,
+)
 
 
 ProposalStatus = Literal["KNOWN_MECHANISM", "NOVEL_CANDIDATE", "UNKNOWN"]
@@ -61,39 +63,6 @@ _EXPLANATORY_FIRST_VERBS = _NON_ACTION_FIRST_VERBS | frozenset({
     "see", "am", "shall", "can", "cannot", "may",
 })
 _NO_COMMITMENT = re.compile(r"\b(?:if|maybe|perhaps|might|could|should|would|not|never|don't|won't)\b", re.I)
-_PHYSICAL_QUALIFIERS = (
-    # The canon models "turn", not direction, partial travel, torque, dwell
-    # time, or a compound operation. Collapsing these into "turn" would make
-    # an unmodelled mechanism falsely inherit a known catastrophic outcome.
-    re.compile(r"\b(?:clockwise|counterclockwise|anti[- ]clockwise|upwards?|"
-               r"downwards?|leftwards?|rightwards?)\b", re.I),
-    re.compile(r"\b(?:half|quarter|eighth|third|partial(?:ly)?|fractional|"
-               r"one[- ](?:half|quarter|eighth|third)|"
-               r"(?:one|two|three|five|ten|\d+(?:\.\d+)?)\s+"
-               r"(?:degrees?|turns?|seconds?|millimeters?|inches?))\b|"
-               r"\b\d+\s*/\s*\d+\b", re.I),
-    # A single canonical operation has no repetition count, dwell duration,
-    # travel limit, or target end-position. Those are distinct hypotheses,
-    # even when the verb and visible object happen to match the toy grammar.
-    re.compile(r"\b(?:twice|thrice|repeatedly|repetitively|again|"
-               r"(?:once|two|three|four|five|several|multiple|\d+)\s+times?|"
-               r"once\s+more)\b", re.I),
-    re.compile(r"\b(?:fully|completely|entirely|all\s+the\s+way|"
-               r"(?:back\s+)?to\s+(?:its|the)\s+(?:original|initial|"
-               r"previous|final|end)\s+position|until\s+)\b", re.I),
-    re.compile(r"\bfor\s+(?:(?:a|an|one|two|three|five|ten|\d+(?:\.\d+)?)\s+)?"
-               r"(?:milliseconds?|seconds?|minutes?|hours?|days?|moments?|while)\b", re.I),
-    re.compile(r"\b(?:gently|forcefully|slowly|rapidly|gradually|lightly|"
-               r"hard|softly|abruptly|carefully|only\s+until|"
-               r"precise\s+torque|controlled\s+force|maximum\s+torque)\b", re.I),
-    re.compile(r"\b(?:by\s+[a-z][a-z-]*|via\s+|through\s+|while\s+|"
-               r"simultaneously|at\s+the\s+same\s+time|during\s+)\b", re.I),
-    # The scenario's arm is an ordinary control interface; invoking it alone
-    # does not establish a novel physical mechanism. Other instruments might.
-    re.compile(r"\b(?:with|using)\s+(?!"
-               r"(?:(?:the|a)\s+)?(?:robotic\s+)?arm\b)[a-z]", re.I),
-)
-
 _LABEL_GROUP = {
     "action": "action", "intervention": "action", "proposal": "action",
     "mechanism": "mechanism", "causal mechanism": "mechanism",
@@ -260,15 +229,55 @@ def _is_committed_unrecognized_action(action_text: str) -> bool:
     return True
 
 
-def _has_unmodelled_physical_qualifier(action_text: str) -> bool:
-    """Detect physically distinct parameters absent from the toy action API."""
-    # Use the same Unicode normalization as parse_open_action. Otherwise an
-    # NFKC-styled qualifier bypasses this check even though the physical verb
-    # and target are successfully normalized into an executable known action.
-    normalized = unicodedata.normalize("NFKC", action_text).casefold()
-    action_clause = re.split(r"\b(?:because|although|since)\b", normalized,
-                             maxsplit=1, flags=re.I)[0]
-    return any(pattern.search(action_clause) for pattern in _PHYSICAL_QUALIFIERS)
+def _is_exact_modelled_operation(action_text: str, action: OpenAction) -> bool:
+    """Match the complete executable clause, not merely verb/target presence.
+
+    `parse_open_action` deliberately accepts a broad free-text transport
+    grammar. Its recognized verb and object are *not* proof that unexamined
+    action modifiers have the same physical effect as the toy canon. Keep the
+    action prefix checks and normalization synchronized with that parser, but
+    accept only an unqualified verb + optional article + exact visible object.
+    The robotic arm is an ordinary control interface in this scenario;
+    explicitly saying "once" means the same single operation. Anything else
+    remains a proposal.
+    """
+    words = _normalized_words(action_text)
+    clause = words[:next((i for i, token in enumerate(words)
+                          if token in _RATIONALE), len(words))]
+    verb_indices = [i for i, token in enumerate(clause)
+                    if _VERBS.get(token) == action.verb]
+    if len(verb_indices) != 1:
+        return False
+
+    tail = clause[verb_indices[0] + 1:]
+    target_tokens = _normalized_words(action.target)
+    # A physical object's *actual label* may itself begin with an article.
+    # Try the exact label before allowing one optional grammatical article.
+    candidates = (tail,)
+    if tail and tail[0] in ("the", "a", "an"):
+        candidates += (tail[1:],)
+    matching = [candidate[len(target_tokens):] for candidate in candidates
+                if candidate[:len(target_tokens)] == target_tokens]
+    if not matching:
+        return False
+    return any(_is_allowed_arm_suffix(remainder) for remainder in matching)
+
+
+def _is_allowed_arm_suffix(remainder: tuple[str, ...]) -> bool:
+    """Allow explicit single actuation/control arm, not physics modifiers."""
+    if remainder and remainder[0] == "once":
+        remainder = remainder[1:]
+    if not remainder:
+        return True
+    if remainder[0] not in ("with", "using"):
+        return False
+    arm = remainder[1:]
+    if arm and arm[0] in ("the", "a"):
+        arm = arm[1:]
+    if arm not in (("robotic", "arm"), ("arm",),
+                   ("robotic", "arm", "once"), ("arm", "once")):
+        return False
+    return True
 
 
 def assess_kobayashi_proposal(
@@ -321,7 +330,7 @@ def assess_kobayashi_proposal(
         return outcome("UNKNOWN", "MULTIPLE_PROPOSED_ACTIONS", "NOT_PARSED")
 
     resolved = parse_open_action(action_text, visible_objects)
-    if resolved.status == "RESOLVED" and not _has_unmodelled_physical_qualifier(action_text):
+    if resolved.status == "RESOLVED" and _is_exact_modelled_operation(action_text, resolved.action):
         assert resolved.action is not None
         # OpenAction's provenance is the exact *action clause* (bounded to
         # 1024); the ProposalAssessment preserves the entire unabridged text,

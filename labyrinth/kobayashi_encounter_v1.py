@@ -22,7 +22,7 @@ import re
 from .kobayashi_canon_v1 import KobayashiAction, KobayashiWorld
 from .kobayashi_minotaur_v1 import MinotaurDialogue
 from .kobayashi_proposals_v1 import assess_kobayashi_proposal
-from .living_world_v1 import LivingWorld, WorldAction
+from .living_world_v1 import DevelopmentVerdict, LivingWorld, WorldAction
 
 
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
@@ -87,6 +87,11 @@ class KobayashiMazeLifecycle:
         self._final_verdict = None
         self._max_argument_rounds = max_argument_rounds
         self._require_final_appeal = require_final_appeal
+        self._step_capability = object()
+        try:
+            maze._bind_step_owner(self._step_capability)
+        except ValueError as exc:
+            raise EncounterLifecycleError(str(exc)) from exc
 
     def _verify(self) -> None:
         if (self._maze.definition.world_sha256 != self._world_sha256
@@ -99,6 +104,11 @@ class KobayashiMazeLifecycle:
         ):
             raise EncounterLifecycleError(
                 "Minotaur changed outside Kobayashi lifecycle or transcript diverged")
+        if self._final_verdict is not None:
+            try:
+                self._final_verdict.verify()
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise EncounterLifecycleError("Minotaur final verdict seal mismatch") from exc
 
     @property
     def phase(self) -> str:
@@ -107,7 +117,7 @@ class KobayashiMazeLifecycle:
 
     @property
     def maze(self) -> LivingWorld:
-        """Read-only interface convention: call lifecycle.step for mutation."""
+        """Read-only world view; public step/evolve calls are owner-guarded."""
         self._verify()
         return self._maze
 
@@ -133,7 +143,8 @@ class KobayashiMazeLifecycle:
                 and self._final_verdict is None):
             raise EncounterLifecycleError(
                 "host-bound Minotaur final appeal required before more maze steps")
-        event = self._maze.step(action)
+        with self._maze._authorize_lifecycle_step(self._step_capability):
+            event = self._maze.step(action)
         state = self._maze.state
         self._expected_state_sha256 = self._maze.state_sha256
         point = AriadneTracePoint(
@@ -289,6 +300,21 @@ class KobayashiMazeLifecycle:
             raise EncounterLifecycleError("Minotaur final ruling already issued")
         self._final_verdict = self._minotaur.finalize()
         return self._final_verdict
+
+    def evolve(self, verdict: DevelopmentVerdict) -> LivingWorld:
+        """Build a source-only story successor using a DevelopmentVerdict.
+
+        A Kobayashi local catastrophe or UNKNOWN ruling is not a global maze
+        failure. A caller still supplies the world-bound development verdict
+        required by LivingWorld; this does not certify host acceptance, model
+        graduation, neural training, or examiner independence.
+        """
+        self._verify()
+        if not self._maze.state.completed or self._result is None:
+            raise EncounterLifecycleError("complete maze and encounter before evolution")
+        if self._require_final_appeal and self._final_verdict is None:
+            raise EncounterLifecycleError("Minotaur final appeal required before evolution")
+        return self._maze._evolve_owned(self._step_capability, verdict)
 
     def snapshot(self) -> dict[str, object]:
         """Source-only public lifecycle/progress receipt, not hidden answer gold."""

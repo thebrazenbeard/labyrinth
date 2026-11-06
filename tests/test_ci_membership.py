@@ -60,8 +60,18 @@ class NeuralWorkflowCoverageTests(unittest.TestCase):
             with self.subTest(scope=scope[:20]):
                 for pattern in ("labyrinth/kobayashi_*.py",
                                 "labyrinth/local_model_kobayashi_runner_v1.py",
+                                "labyrinth/local_model_world_session_v1.py",
+                                "labyrinth/local_model_action_adapter_v1.py",
+                                "labyrinth/living_world_v1.py",
+                                "labyrinth/open_action_v1.py",
                                 "tests/test_kobayashi_*.py",
-                                "tests/test_local_model_kobayashi_runner_v1.py"):
+                                "tests/test_local_model_kobayashi_runner_v1.py",
+                                "tests/test_local_model_world_session_v1.py",
+                                "tests/test_local_model_action_adapter_v1.py",
+                                "tests/test_living_world_v1.py"):
                     self.assertIn(pattern, scope)
         self.assertIn("Kobayashi source and local-model boundary tests", workflow)
         self.assertIn("tests.test_kobayashi_minotaur_v1", workflow)
+        self.assertIn("tests.test_kobayashi_completion_gate_v1", workflow)
+        self.assertIn("tests.test_local_model_world_session_v1", workflow)
+        self.assertIn("tests.test_kobayashi_capability_guard_v1", workflow)

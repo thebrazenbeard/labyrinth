@@ -296,11 +296,24 @@ Falsifier: The hypothesis fails if the seam does not connect to the chamber."""
         with self.assertRaisesRegex(EncounterLifecycleError, "already issued"):
             lifecycle.finalize_appeal()
 
-    def test_out_of_band_maze_step_is_detected(self):
+    def test_out_of_band_maze_step_is_rejected_before_world_mutation(self):
         maze = _maze()
         lifecycle = KobayashiMazeLifecycle(maze)
-        maze.step(WorldAction("inspect"))
-        with self.assertRaisesRegex(EncounterLifecycleError, "outside"):
+        before = maze.state_sha256
+        with self.assertRaisesRegex(ValueError, "lifecycle.*step"):
+            maze.step(WorldAction("inspect"))
+        self.assertEqual(maze.state_sha256, before)
+        self.assertEqual(maze.state.steps, 0)
+        self.assertEqual(lifecycle.step(WorldAction("inspect")).outcome, "OBSERVED")
+        self.assertEqual(maze.state.steps, 1)
+
+    def test_out_of_band_private_state_tampering_is_still_detected(self):
+        maze = _maze()
+        lifecycle = KobayashiMazeLifecycle(maze)
+        # Deliberate in-process adversary: frozen state is not a security
+        # isolation boundary against Python object.__setattr__ introspection.
+        object.__setattr__(maze._state, "steps", maze._state.steps + 1)
+        with self.assertRaisesRegex(ValueError, "integrity changed"):
             lifecycle.observe()
 
 

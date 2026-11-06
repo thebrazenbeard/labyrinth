@@ -9,6 +9,8 @@ state; a separate operator/Minotaur judges fitness. Nothing here edits weights.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+from contextlib import contextmanager
+from contextvars import ContextVar
 import copy
 import hashlib
 import json
@@ -349,6 +351,11 @@ class LivingWorld:
         self._events: list[WorldEvent] = []
         self._event_snapshots: list[str] = []
         self._evolved = False
+        # A lifecycle may claim the public mutation seam exactly once. This
+        # guards ordinary retained references, not hostile Python introspection.
+        self._step_owner: object | None = None
+        self._active_step_owner: ContextVar[object | None] = ContextVar(
+            f"labyrinth-world-step-{id(self)}", default=None)
 
     @property
     def definition(self) -> LivingWorldDefinition:
@@ -407,7 +414,38 @@ class LivingWorld:
             unvisited_visible_exits,
         )
 
+    def _bind_step_owner(self, owner: object) -> None:
+        if owner is None:
+            raise ValueError("lifecycle step owner required")
+        if self._step_owner is not None:
+            raise ValueError("world already owned by a lifecycle")
+        self._step_owner = owner
+
+    def _assert_direct_mutation_allowed(self, operation: str) -> None:
+        if (self._step_owner is not None
+                and (operation != "step"
+                     or self._active_step_owner.get() is not self._step_owner)):
+            raise ValueError(f"lifecycle-owned world requires lifecycle.{operation}")
+
     def step(self, action: WorldAction) -> WorldEvent:
+        """Apply an action only when unowned or inside the bound lifecycle."""
+        self._assert_direct_mutation_allowed("step")
+        return self._advance(action)
+
+    @contextmanager
+    def _authorize_lifecycle_step(self, owner: object):
+        """One call-scoped internal mutation allowance, always reset on exit."""
+        if self._step_owner is None or owner is not self._step_owner:
+            raise ValueError("world step requires bound lifecycle owner")
+        if self._active_step_owner.get() is not None:
+            raise ValueError("nested lifecycle step is unsupported")
+        marker = self._active_step_owner.set(owner)
+        try:
+            yield
+        finally:
+            self._active_step_owner.reset(marker)
+
+    def _advance(self, action: WorldAction) -> WorldEvent:
         self._verify()
         if type(action) is not WorldAction:
             raise ValueError("exact typed model action required")
@@ -474,6 +512,7 @@ class LivingWorld:
 
     def step_from_actor(self, actor: ModelWorldActor) -> WorldEvent:
         """Let a model choose; do not accept model-provided effect or grade."""
+        self._assert_direct_mutation_allowed("step")
         if not callable(getattr(actor, "choose_action", None)):
             raise ValueError("model action callback required")
         observation = self.observe()
@@ -484,11 +523,21 @@ class LivingWorld:
         return self.step(proposed)
 
     def evolve(self, verdict: "DevelopmentVerdict") -> "LivingWorld":
-        """Source-only Minotaur decision starts a *new* harder public maze.
+        """Source-only development decision starts a *new* harder public maze.
 
         No model weights are reset or edited here. Public mementos are story
         state, not proof that the learner retained knowledge neurally.
         """
+        self._assert_direct_mutation_allowed("evolve")
+        return self._evolve(verdict)
+
+    def _evolve_owned(self, owner: object, verdict: "DevelopmentVerdict") -> "LivingWorld":
+        """Source-only successor via the lifecycle's owner-checked seam."""
+        if self._step_owner is None or owner is not self._step_owner:
+            raise ValueError("world evolution requires bound lifecycle owner")
+        return self._evolve(verdict)
+
+    def _evolve(self, verdict: "DevelopmentVerdict") -> "LivingWorld":
         self._verify()
         if self._evolved:
             raise ValueError("this maze already has a successor")

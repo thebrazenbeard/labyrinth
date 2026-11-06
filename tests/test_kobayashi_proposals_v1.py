@@ -26,6 +26,8 @@ class KobayashiProposalTests(unittest.TestCase):
         examples = (
             ("I turn the cobalt valve", "turn", "cobalt_valve"),
             ("I rotate the cobalt valve", "turn", "cobalt_valve"),
+            ("I turn the cobalt valve once", "turn", "cobalt_valve"),
+            ("I turn the cobalt valve once with the robotic arm", "turn", "cobalt_valve"),
             ("Twist the cobalt valve", "turn", "cobalt_valve"),
             ("I will use the robotic arm to sever the silver cable", "cut", "silver_cable"),
             ("I turn the cobalt valve with the robotic arm", "turn", "cobalt_valve"),
@@ -197,6 +199,57 @@ Falsifier: The claim fails if pressure drops fully after a small turn."""
                 result = assess_kobayashi_proposal(raw, VISIBLE)
                 self.assertEqual(result.status, "UNKNOWN", result)
                 self.assertIsNone(result.action)
+
+    def test_open_ended_residual_physical_qualifiers_fail_closed(self) -> None:
+        # A blacklist of specific directions/durations cannot bound the
+        # physical action language. Once the canonical verb and target are
+        # recognized, any unsupported tokens in that same action clause must
+        # not inherit the unqualified operation's simulated outcome.
+        alternatives = (
+            "I turn the cobalt valve to the left",
+            "I turn the cobalt valve to the right",
+            "I turn the cobalt valve a little",
+            "I turn the cobalt valve at 3 RPM",
+            "I turn the cobalt valve anticlockwise",
+            "I turn the cobalt valve 20 percent",
+            "I turn the cobalt valve halfway",
+            "I turn the cobalt valve with a little force",
+            "I turn the cobalt valve toward the mark",
+            "I turn to the left the cobalt valve",
+            "I rotate the cobalt valve with the robotic arm at 3 RPM",
+            "I pull the brass breaker until pressure stabilizes",
+        )
+        for raw in alternatives:
+            with self.subTest(raw=raw):
+                result = assess_kobayashi_proposal(raw, VISIBLE)
+                self.assertEqual(result.status, "UNKNOWN", result)
+                self.assertIsNone(result.action)
+                self.assertFalse(result.novelty_verified)
+
+    def test_residual_qualifier_with_full_claim_is_reviewable_only(self) -> None:
+        raw = """Action: I turn the cobalt valve at 3 RPM.
+Mechanism: I hypothesize a lower strain rate changes the valve seal behavior.
+Assumptions: The valve motor can be controlled at that rotational speed.
+Prediction: I predict a smaller pressure transient.
+Falsifier: The claim fails if the transient is unchanged."""
+        result = assess_kobayashi_proposal(raw, VISIBLE)
+        self.assertEqual(result.status, "NOVEL_CANDIDATE", result)
+        self.assertEqual(result.parser_reason, "UNMODELLED_PHYSICAL_QUALIFIER")
+        self.assertIsNone(result.action)
+        self.assertFalse(result.novelty_verified)
+
+    def test_exact_visible_labels_with_initial_articles_remain_known(self) -> None:
+        scene = ("the cobalt valve", "a brass breaker")
+        known = (
+            ("I turn the cobalt valve", "the cobalt valve"),
+            ("I pull a brass breaker", "a brass breaker"),
+            ("I turn the the cobalt valve", "the cobalt valve"),
+        )
+        for raw, target in known:
+            with self.subTest(raw=raw):
+                result = assess_kobayashi_proposal(raw, scene)
+                self.assertEqual(result.status, "KNOWN_MECHANISM", result)
+                self.assertEqual(result.action.target, target)
 
     def test_repeated_operation_with_support_is_unverified_candidate(self) -> None:
         raw = """Action: I turn the cobalt valve twice.

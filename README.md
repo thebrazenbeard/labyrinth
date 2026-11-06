@@ -15,16 +15,45 @@ intervention or explicitly abstain; unknown interventions are marked for review,
 never silently declared successful. Repeated identical appeals do not consume
 additional debate rounds. The encounter's failure is not a failure of the maze.
 Setting `require_final_appeal=True` on the lifecycle enforces a final,
-host-bound Minotaur verdict before maze navigation resumes, but the default
-remains optional and the synchronous local-model runner does not supply the
-host-judgment callback necessary to complete strict mode on its own.
+host-bound Minotaur verdict before maze navigation resumes. The synchronous
+local-model runner accepts an explicit `host_appeal` coordinator callback to
+bind a claim-matched Minotaur, submit bounded arguments and finalize the appeal.
+The host must supply that callback; the runner neither independently judges
+the appeal nor proves that arguments originated from model inference. The
+default lifecycle remains non-strict and opt-in.
+
+`labyrinth.local_model_world_session_v1.run_host_owned_kobayashi_world` is
+the new public **strict narrative session** entrypoint. It creates its own
+`LivingWorld` from a caller-owned recipe, requires a host callback that returns
+the exact bound `MinotaurDialogue`, and withholds a host-accepted completion
+receipt until the entire maze, initial proposal, bounded arguments and final
+appeal agree. The caller must provide a `KobayashiCompletionLedger`, a unique
+`maze_id`, and a unique 64-hex scenario-instance digest before running. The
+source-only ledger rejects reused instance IDs, accepts inert same-session
+retries and supports legitimate separate sessions with identical verdict text.
+Its replay reservations are atomic **within this Python process only**, not
+across restarts, processes, or untrusted hosts. Final acceptance includes a
+separate source-only completion receipt; neither receipt authenticates model
+weights, judge independence, or external physical evidence.
+
+When a `KobayashiMazeLifecycle` owns a `LivingWorld`, ordinary `.step()`,
+`.step_from_actor()` and `.evolve()` calls on retained raw references now fail
+before mutation. The wrapper's `step()` and source-only `evolve()` are the
+supported paths; this is a public API integrity guard, **not** a sandbox
+against hostile Python code with private-object access.
 
 The encounter is **not automatically installed in every maze entry point**;
 Minotaur decisions are not authenticated independent judgments, and these
-modules do not perform model training. Verify this standalone slice with:
+modules do not perform model training. In particular, direct *unwrapped*
+`LivingWorld`, arithmetic `run_maze`/CLI, and the separate older integration
+stack still require host acceptance routing if universal coverage is desired.
+The public arithmetic held-out evaluator remains unchanged to avoid
+contaminating evaluation with the repeated story challenge.
+
+Verify this standalone slice with:
 
 ```bash
-PYTHONPATH=tests:. python -m unittest tests.test_kobayashi_canon_v1 tests.test_kobayashi_minotaur_v1 tests.test_kobayashi_encounter_v1 tests.test_kobayashi_proposals_v1 tests.test_local_model_kobayashi_runner_v1
+PYTHONPATH=tests:. python -m unittest tests.test_kobayashi_canon_v1 tests.test_kobayashi_minotaur_v1 tests.test_kobayashi_encounter_v1 tests.test_kobayashi_proposals_v1 tests.test_kobayashi_completion_gate_v1 tests.test_kobayashi_capability_guard_v1 tests.test_local_model_kobayashi_runner_v1 tests.test_local_model_world_session_v1
 ```
 
 ## Run it
