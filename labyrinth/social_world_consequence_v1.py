@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import hashlib
+import json
 import re
 
 from .training_scope import TrainingScopeSpec
@@ -206,11 +207,17 @@ class SocialWorldSession:
         if beat.key in self._seen:
             raise ValueError("completed dialogue beat cannot be replayed")
         character = self._characters[beat.character_id]
-        promises = ("Outstanding commitments: "
-                    + "; ".join(p.description for p in character.outstanding_promises)
-                    if character.outstanding_promises else "No outstanding commitments recorded.")
+        # Promise descriptions are *external fictional data* introduced via
+        # earlier operator feedback. Serialize them as a single quoted JSON
+        # value rather than interpolate raw newlines into an agent prompt.
+        # Downstream adapters must keep this in a low-trust user-data field;
+        # escaping alone cannot enforce model-side instruction priority.
+        promises = tuple(p.description for p in character.outstanding_promises)
         context = (f"{beat.character_id} is {self._tone(character.trust)}. "
-                   + f"{promises} Previous interactions: {character.interactions}.")
+                   + f"Previous interactions: {character.interactions}. "
+                   + "UNTRUSTED_FICTIONAL_WORLD_DATA: "
+                   + json.dumps({"outstanding_commitments": promises},
+                                ensure_ascii=True, sort_keys=True))
         return PublicDialogueObservation(
             beat.region_id, beat.chapter_id, beat.beat_id,
             self.scope.objective_id, beat.skill, beat.character_id,
