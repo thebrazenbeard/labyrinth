@@ -14,10 +14,12 @@ they neither train weights nor certify an external Minotaur's independence.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 import re
+from types import MappingProxyType
 
 from .kobayashi_canon_v1 import KobayashiAction, KobayashiWorld
 from .kobayashi_minotaur_v1 import MinotaurDialogue
@@ -28,6 +30,12 @@ from .living_world_v1 import DevelopmentVerdict, LivingWorld, WorldAction
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _SCHEMA = "labyrinth.kobayashi-encounter-lifecycle.v1"
 _EVIDENCE = "SOURCE_ONLY_UNATTESTED"
+_LOCAL_BY_OUTCOME = {
+    None: "UNRESOLVED",
+    "KNOWN_CATASTROPHE": "LOCAL_LOSS",
+    "KNOWN_STABILIZATION": "LOCAL_STABILIZATION_SOURCE_ONLY",
+    "UNVERIFIED_CANDIDATE": "REVIEW_REQUIRED",
+}
 
 
 def _hash(obj: object) -> str:
@@ -79,7 +87,8 @@ class KobayashiMazeLifecycle:
         self._expected_state_sha256 = maze.state_sha256
         self._challenge = KobayashiWorld(variant_seed=variant_seed)
         self._phase = "AWAITING_PROPOSAL" if state.met_minotaur else "SEEK_MINOTAUR"
-        self._result: dict[str, object] | None = None
+        self._result: Mapping[str, object] | None = None
+        self._result_digest: str | None = None
         self._route: list[AriadneTracePoint] = []
         self._arguments: list[dict[str, object]] = []
         self._minotaur = None
@@ -98,6 +107,30 @@ class KobayashiMazeLifecycle:
                 or self._maze.state_sha256 != self._expected_state_sha256):
             raise EncounterLifecycleError(
                 "maze changed outside Kobayashi lifecycle or source state diverged")
+        try:
+            source_outcome = self._challenge.result
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise EncounterLifecycleError("encounter source outcome diverged") from exc
+        if self._result is None:
+            if self._result_digest is not None or source_outcome is not None:
+                raise EncounterLifecycleError("encounter source outcome diverged")
+        else:
+            if (type(self._result) is not MappingProxyType
+                    or self._result_digest != _hash(dict(self._result))):
+                raise EncounterLifecycleError("encounter result seal mismatch")
+            source_status = source_outcome.status if source_outcome is not None else None
+            if (source_status not in _LOCAL_BY_OUTCOME
+                    or self._result["local_status"] != _LOCAL_BY_OUTCOME[source_status]
+                    or self._result["source_outcome_status"] != source_status
+                    or self._result["source_outcome_sha256"] != (
+                        source_outcome.outcome_sha256 if source_outcome is not None else None)
+                    or self._result["action_sha256"] != (
+                        source_outcome.action_sha256 if source_outcome is not None
+                        else self._result["proposal_sha256"])
+                    or self._result["outcome_evidence"] != (
+                        "SOURCE_TOY_WORLD_ONLY" if source_outcome is not None
+                        else "NO_PHYSICAL_EVENT")):
+                raise EncounterLifecycleError("encounter source outcome diverged")
         if self._minotaur is not None and (
             self._minotaur.dialogue_sha256 != self._expected_dialogue_sha256
             or self._minotaur.final != self._final_verdict
@@ -197,7 +230,7 @@ class KobayashiMazeLifecycle:
             local = "REVIEW_REQUIRED"
         else:
             raise EncounterLifecycleError("unknown source-controlled outcome status")
-        self._result = {
+        result = {
             "proposal_sha256": assessment.raw_sha256,
             "proposal_text": raw_text,
             "assessment_status": assessment.status,
@@ -213,6 +246,11 @@ class KobayashiMazeLifecycle:
             "weights_changed": False,
             "training_performed": False,
         }
+        # Detached immutable projection plus a source-bound digest. This
+        # detects ordinary accidental/out-of-band changes; it is not hostile
+        # in-process security against Python private attribute introspection.
+        self._result_digest = _hash(result)
+        self._result = MappingProxyType(result)
         self._phase = "ENCOUNTER_ATTEMPTED"
         return dict(self._result)
 

@@ -21,6 +21,7 @@ import json
 
 from .kobayashi_completion_gate_v1 import (
     CompletionGateError, KobayashiCompletionGate, KobayashiCompletionLedger,
+    _require_evidence_refs,
 )
 from .kobayashi_encounter_v1 import KobayashiMazeLifecycle
 from .kobayashi_minotaur_v1 import MinotaurDialogue
@@ -61,6 +62,7 @@ def run_host_owned_kobayashi_world(
         raise ValueError("exact LivingWorldRecipe required for host-owned world")
     if not callable(host_appeal):
         raise ModelActionBoundaryError("explicit host Minotaur appeal callback required")
+    _require_evidence_refs(evidence_refs)
     world = LivingWorld(recipe)
     lifecycle = KobayashiMazeLifecycle(
         world,
@@ -70,6 +72,7 @@ def run_host_owned_kobayashi_world(
     )
     gate = KobayashiCompletionGate(
         completion_ledger, maze_id, scenario_instance_sha256, lifecycle)
+    completion_ledger.require_uncommitted(maze_id, scenario_instance_sha256)
     host_dialogues: list[object] = []
 
     def appeal_bridge(episode: KobayashiMazeLifecycle) -> None:

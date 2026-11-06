@@ -2,7 +2,14 @@
 
 from queue import Queue
 from threading import Barrier, Thread
+import json
+from pathlib import Path
+import sqlite3
+import subprocess
+import sys
+from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from labyrinth.kobayashi_completion_gate_v1 import (
     CompletionGateError,
@@ -53,6 +60,149 @@ def _finish(lifecycle, with_evidence=True):
 
 
 class KobayashiCompletionGateTests(unittest.TestCase):
+    def test_sqlite_separate_connection_race_has_one_committed_nonce(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "receipts.sqlite3"
+            first = KobayashiCompletionLedger(storage_path=path)
+            second = KobayashiCompletionLedger(storage_path=path)
+            left, left_lifecycle, left_dialogue = _open_episode(first, "race-A", "7" * 64)
+            right, right_lifecycle, right_dialogue = _open_episode(second, "race-B", "7" * 64)
+            _finish(left_lifecycle)
+            _finish(right_lifecycle)
+            barrier = Barrier(3)
+            results = Queue()
+
+            def attempt(gate, dialogue):
+                try:
+                    barrier.wait(timeout=3)
+                    results.put(("accepted", gate.commit(dialogue, evidence_refs=(EVIDENCE,))))
+                except CompletionGateError as exc:
+                    results.put(("rejected", str(exc)))
+                except BaseException as exc:
+                    results.put(("unexpected", repr(exc)))
+
+            workers = [Thread(target=attempt, args=(left, left_dialogue)),
+                       Thread(target=attempt, args=(right, right_dialogue))]
+            for worker in workers:
+                worker.start()
+            barrier.wait(timeout=3)
+            for worker in workers:
+                worker.join(timeout=4)
+                self.assertFalse(worker.is_alive(), "two SQLite connections deadlocked")
+            outcomes = [results.get_nowait() for _ in range(2)]
+            self.assertCountEqual([entry[0] for entry in outcomes], ["accepted", "rejected"])
+            accepted = next(value for kind, value in outcomes if kind == "accepted")
+            self.assertIn("instance replay", next(value for kind, value in outcomes
+                                                  if kind == "rejected"))
+            reopened = KobayashiCompletionLedger(storage_path=path)
+            self.assertEqual(reopened.lookup(accepted.maze_id, "7" * 64), accepted)
+            first.close()
+            second.close()
+            reopened.close()
+
+    def test_sqlite_receipt_reopens_in_separate_process_without_lifecycle(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "receipts.sqlite3"
+            ledger = KobayashiCompletionLedger(storage_path=path)
+            gate, lifecycle, dialogue = _open_episode(ledger)
+            _finish(lifecycle)
+            saved = gate.commit(dialogue, evidence_refs=(EVIDENCE,))
+            self.assertEqual(gate.commit(dialogue, evidence_refs=(EVIDENCE,)), saved)
+            ledger.close()
+            with self.assertRaisesRegex(CompletionGateError, "closed"):
+                ledger.lookup("maze-A", "1" * 64)
+            with self.assertRaisesRegex(CompletionGateError, "closed"):
+                gate.commit(dialogue, evidence_refs=(EVIDENCE,))
+
+            # Fresh interpreter: there is no original Python lifecycle to consult.
+            probe = subprocess.run([sys.executable, "-c", """
+import sys
+from labyrinth.kobayashi_completion_gate_v1 import KobayashiCompletionLedger
+ledger = KobayashiCompletionLedger(storage_path=sys.argv[1])
+receipt = ledger.lookup('maze-A', '1' * 64)
+assert receipt is not None
+receipt.verify()
+print(receipt.receipt_sha256)
+ledger.close()
+""", str(path)], text=True, capture_output=True, timeout=10, check=True)
+            self.assertEqual(probe.stdout.strip(), saved.receipt_sha256)
+            reopened = KobayashiCompletionLedger(storage_path=path)
+            self.assertEqual(reopened.lookup("maze-A", "1" * 64), saved)
+            with self.assertRaisesRegex(CompletionGateError, "replay"):
+                reopened.accept(saved, lifecycle)
+            reopened.close()
+
+    def test_sqlite_cross_process_nonce_collision_and_repeat_exam(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "receipts.sqlite3"
+            first = KobayashiCompletionLedger(storage_path=path)
+            competing = KobayashiCompletionLedger(storage_path=path)
+            gate, lifecycle, dialogue = _open_episode(first, "maze-A", "1" * 64)
+            _finish(lifecycle)
+            saved = gate.commit(dialogue, evidence_refs=(EVIDENCE,))
+            conflicting, other_lifecycle, other_dialogue = _open_episode(
+                competing, "maze-B", "1" * 64)
+            _finish(other_lifecycle)
+            with self.assertRaisesRegex(CompletionGateError, "instance replay"):
+                conflicting.commit(other_dialogue, evidence_refs=(EVIDENCE,))
+            duplicate, new_lifecycle, new_dialogue = _open_episode(
+                competing, "maze-A", "1" * 64)
+            _finish(new_lifecycle)
+            with self.assertRaisesRegex(CompletionGateError, "replay"):
+                duplicate.commit(new_dialogue, evidence_refs=(EVIDENCE,))
+            self.assertEqual(competing.lookup("maze-A", "1" * 64), saved)
+            distinct, distinct_lifecycle, distinct_dialogue = _open_episode(
+                competing, "maze-B", "2" * 64)
+            _finish(distinct_lifecycle)
+            second = distinct.commit(distinct_dialogue, evidence_refs=(EVIDENCE,))
+            self.assertEqual(second.verdict_sha256, saved.verdict_sha256)
+            self.assertNotEqual(second.receipt_sha256, saved.receipt_sha256)
+            first.close()
+            competing.close()
+
+    def test_sqlite_failed_commit_rolls_back_without_memory_acceptance(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "receipts.sqlite3"
+            ledger = KobayashiCompletionLedger(storage_path=path)
+            gate, lifecycle, dialogue = _open_episode(ledger)
+            _finish(lifecycle)
+            with patch.object(ledger, "_sqlite_commit", side_effect=RuntimeError("failpoint")):
+                with self.assertRaisesRegex(RuntimeError, "failpoint"):
+                    gate.commit(dialogue, evidence_refs=(EVIDENCE,))
+            self.assertIsNone(ledger.lookup("maze-A", "1" * 64))
+            reopened = KobayashiCompletionLedger(storage_path=path)
+            self.assertIsNone(reopened.lookup("maze-A", "1" * 64))
+            recovered = gate.commit(dialogue, evidence_refs=(EVIDENCE,))
+            self.assertEqual(reopened.lookup("maze-A", "1" * 64), recovered)
+            ledger.close()
+            reopened.close()
+
+    def test_sqlite_symlink_and_modified_receipt_fail_closed(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "real.sqlite3"
+            ledger = KobayashiCompletionLedger(storage_path=path)
+            gate, lifecycle, dialogue = _open_episode(ledger)
+            _finish(lifecycle)
+            gate.commit(dialogue, evidence_refs=(EVIDENCE,))
+            ledger.close()
+            link = Path(directory) / "alias.sqlite3"
+            link.symlink_to(path)
+            with self.assertRaisesRegex(CompletionGateError, "symlink"):
+                KobayashiCompletionLedger(storage_path=link)
+            # A self-writable DB has no external authenticity: detect accidental
+            # mutation only, not an attacker who recomputes the source digest.
+            raw = sqlite3.connect(path)
+            row = raw.execute("SELECT receipt_json FROM accepted_receipts").fetchone()
+            payload = json.loads(row[0])
+            payload["verdict_status"] = "SURVIVES"
+            raw.execute("UPDATE accepted_receipts SET receipt_json=?", (json.dumps(payload),))
+            raw.commit()
+            raw.close()
+            reopened = KobayashiCompletionLedger(storage_path=path)
+            with self.assertRaisesRegex(CompletionGateError, "seal|tamper|mismatch"):
+                reopened.lookup("maze-A", "1" * 64)
+            reopened.close()
+
     def test_parallel_same_instance_acceptance_has_one_winner_without_deadlock(self):
         ledger = KobayashiCompletionLedger()
         first, first_lifecycle, first_dialogue = _open_episode(

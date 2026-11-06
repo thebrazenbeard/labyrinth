@@ -31,10 +31,38 @@ appeal agree. The caller must provide a `KobayashiCompletionLedger`, a unique
 `maze_id`, and a unique 64-hex scenario-instance digest before running. The
 source-only ledger rejects reused instance IDs, accepts inert same-session
 retries and supports legitimate separate sessions with identical verdict text.
-Its replay reservations are atomic **within this Python process only**, not
-across restarts, processes, or untrusted hosts. Final acceptance includes a
-separate source-only completion receipt; neither receipt authenticates model
-weights, judge independence, or external physical evidence.
+The default ledger is **in-memory** and only guards one Python process. For a
+trusted host directory, the caller may opt into an SQLite-backed ledger with
+`KobayashiCompletionLedger(storage_path=Path("/trusted/path/receipts.sqlite3"))`.
+It serializes accepted-instance commits across connections, permits readback
+after process restart via `ledger.lookup(maze_id, scenario_instance_sha256)`,
+and rejects a fresh episode reusing a committed instance even if its result is
+byte-identical. The strict world session checks for known committed instances
+and a closed ledger **before model calls**, but this is only a read-only
+preflight and does not exclude a simultaneous competing execution. The host
+must close the ledger when finished. **This does not
+reserve an instance before maze execution**, protect against an older SQLite
+snapshot being restored, resist hostile writers, or eliminate filesystem
+symlink races. The host must protect the directory and retain an external
+monotonic witness before treating these receipts as durable anti-rollback
+evidence. Final acceptance includes a separate source-only completion receipt;
+neither receipt authenticates model weights, judge independence, or external
+physical evidence.
+
+The older `labyrinth.local_model_world_runner_v1.run_local_model_world` story
+runner is available again for source-only local action traces. Its default
+`kobayashi_enforced=False` and `host_completion_accepted=False` labels are
+deliberate: a fictional quest ending is not a Minotaur pass. Python callers
+may opt into `require_kobayashi=True`, which requires a separate proposal
+configuration/transport, explicit host Minotaur callback, host completion
+ledger, maze ID, and scenario-instance digest **before** any model call; this
+routes through the strict host-owned narrative session above. Its CLI remains
+legacy trace-only and requires `--allow-local-inference`; the CLI does not
+offer strict host-gated completion. The strict Python result has its own
+`session_schema`, `host_completion_*`, and `maze_completed` fields; it is **not
+output-schema interchangeable** with the legacy trace result (`outcome`,
+`trace_sha256`, and `world_final_state`). `host_completion_accepted=True` means
+only source-level host acceptance, explicitly `SOURCE_ONLY_UNATTESTED`.
 
 When a `KobayashiMazeLifecycle` owns a `LivingWorld`, ordinary `.step()`,
 `.step_from_actor()` and `.evolve()` calls on retained raw references now fail
@@ -53,7 +81,7 @@ contaminating evaluation with the repeated story challenge.
 Verify this standalone slice with:
 
 ```bash
-PYTHONPATH=tests:. python -m unittest tests.test_kobayashi_canon_v1 tests.test_kobayashi_minotaur_v1 tests.test_kobayashi_encounter_v1 tests.test_kobayashi_proposals_v1 tests.test_kobayashi_completion_gate_v1 tests.test_kobayashi_capability_guard_v1 tests.test_local_model_kobayashi_runner_v1 tests.test_local_model_world_session_v1
+PYTHONPATH=tests:. python -m unittest tests.test_kobayashi_canon_v1 tests.test_kobayashi_minotaur_v1 tests.test_kobayashi_encounter_v1 tests.test_kobayashi_proposals_v1 tests.test_kobayashi_completion_gate_v1 tests.test_kobayashi_capability_guard_v1 tests.test_local_model_kobayashi_runner_v1 tests.test_local_model_world_session_v1 tests.test_local_model_world_runner_v1
 ```
 
 ## Run it

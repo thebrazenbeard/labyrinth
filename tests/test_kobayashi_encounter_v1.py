@@ -316,6 +316,33 @@ Falsifier: The hypothesis fails if the seam does not connect to the chamber."""
         with self.assertRaisesRegex(ValueError, "integrity changed"):
             lifecycle.observe()
 
+    def test_postproposal_local_result_cannot_be_relabelled_or_replaced(self):
+        lifecycle = KobayashiMazeLifecycle(_maze(), require_final_appeal=True)
+        _trigger(lifecycle)
+        accepted = lifecycle.submit_proposal("I turn the cobalt valve once.")
+        self.assertEqual(accepted["local_status"], "LOCAL_LOSS")
+        self.assertEqual(lifecycle.snapshot()["local_encounter_status"], "LOCAL_LOSS")
+
+        with self.assertRaises(TypeError):
+            lifecycle._result["local_status"] = "REVIEW_REQUIRED"
+        forged = dict(lifecycle._result)
+        forged["local_status"] = "REVIEW_REQUIRED"
+        lifecycle._result = forged  # hostile in-process replacement attempt
+        with self.assertRaisesRegex(EncounterLifecycleError, "encounter.*seal"):
+            lifecycle.snapshot()
+        with self.assertRaisesRegex(EncounterLifecycleError, "encounter.*seal"):
+            lifecycle.step(WorldAction("retrace"))
+
+    def test_source_outcome_and_exposed_result_remain_consistent(self):
+        lifecycle = KobayashiMazeLifecycle(_maze())
+        _trigger(lifecycle)
+        lifecycle.submit_proposal("I turn the cobalt valve once.")
+        # Out-of-band canonical source replacement cannot make a known local
+        # catastrophe appear unknown even if the reported result is untouched.
+        lifecycle._challenge._outcome = None
+        with self.assertRaisesRegex(EncounterLifecycleError, "encounter.*source"):
+            lifecycle.snapshot()
+
 
 if __name__ == "__main__":
     unittest.main()

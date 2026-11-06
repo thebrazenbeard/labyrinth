@@ -14,7 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 from hashlib import sha256
 import json
+from pathlib import Path
 import re
+import sqlite3
 from threading import Lock
 
 from .kobayashi_encounter_v1 import KobayashiMazeLifecycle
@@ -48,6 +50,16 @@ def _require_hash(value: str, name: str) -> None:
 def _require_maze_id(value: str) -> None:
     if type(value) is not str or _MAZE_ID.fullmatch(value) is None:
         raise CompletionGateError("maze_id must be a bounded ASCII identifier")
+
+
+def _require_evidence_refs(evidence_refs: tuple[str, ...]) -> None:
+    """Validate host evidence metadata before any model/world side effects."""
+    if type(evidence_refs) is not tuple or len(evidence_refs) > 32:
+        raise CompletionGateError("bounded evidence references required")
+    for ref in evidence_refs:
+        _require_hash(ref, "evidence reference")
+    if len(set(evidence_refs)) != len(evidence_refs):
+        raise CompletionGateError("duplicate evidence references")
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,12 +110,7 @@ class SourceOnlyCompletionReceipt:
             _require_hash(getattr(self, name), name)
         if type(self.argument_count) is not int or not 2 <= self.argument_count <= 5:
             raise CompletionGateError("source final requires two to five bound argument rounds")
-        if type(self.evidence_refs) is not tuple or len(self.evidence_refs) > 32:
-            raise CompletionGateError("bounded evidence references required")
-        for evidence in self.evidence_refs:
-            _require_hash(evidence, "evidence reference")
-        if len(set(self.evidence_refs)) != len(self.evidence_refs):
-            raise CompletionGateError("duplicate evidence references")
+        _require_evidence_refs(self.evidence_refs)
         if type(self.verdict_status) is not str or self.verdict_status not in {
             "REFUTED", "SURVIVES", "UNKNOWN", "NOVEL_CANDIDATE",
         }:
@@ -123,32 +130,146 @@ class SourceOnlyCompletionReceipt:
 
 
 class KobayashiCompletionLedger:
-    """Host-held *in-memory* one-instance/one-verdict replay fence.
+    """Host-held one-instance/one-verdict source acceptance fence.
 
-    A fresh ledger after restart does NOT preserve prior reservations. Durable
-    authoritative replay prevention requires an external host-owned store.
+    The default is in-memory only. An opt-in SQLite file preserves *completed*
+    source receipts across restart, under the trust of the supplied host path.
+    It DOES NOT reserve nonces before execution, prevent filesystem rollback,
+    authenticate a hostile writer, or establish independent judge authority.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, storage_path: str | Path | None = None) -> None:
         self._lock = Lock()
+        self._closed = False
+        self._db: sqlite3.Connection | None = None
         self._records: dict[tuple[str, str], SourceOnlyCompletionReceipt] = {}
         self._instance_owners: dict[str, str] = {}
         self._source_owners: dict[tuple[str, str], KobayashiMazeLifecycle] = {}
         self._lifecycle_owners: dict[int, tuple[tuple[str, str], KobayashiMazeLifecycle]] = {}
+        if storage_path is not None:
+            try:
+                path = Path(storage_path)
+                if not str(path).strip() or str(path) == ":memory:" or "\x00" in str(path):
+                    raise CompletionGateError("concrete SQLite file path required")
+                if path.is_symlink() or path.parent.is_symlink():
+                    raise CompletionGateError("SQLite database symlink refused")
+                if not path.parent.is_dir() or (path.exists() and not path.is_file()):
+                    raise CompletionGateError("SQLite parent must exist and database must be a file")
+                # Preflight does not close symlink races or protect against a
+                # writable ancestor. Host must independently own the path.
+                db = sqlite3.connect(str(path), timeout=2.0, isolation_level=None,
+                                     check_same_thread=False)
+                try:
+                    db.execute("PRAGMA busy_timeout=2000")
+                    db.execute("PRAGMA journal_mode=DELETE")
+                    db.execute("PRAGMA synchronous=FULL")
+                    db.execute("""CREATE TABLE IF NOT EXISTS accepted_receipts (
+                        scenario_instance_sha256 TEXT PRIMARY KEY,
+                        maze_id TEXT NOT NULL,
+                        receipt_json TEXT NOT NULL,
+                        receipt_sha256 TEXT NOT NULL
+                    )""")
+                except BaseException:
+                    db.close()
+                    raise
+                self._db = db
+            except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
+                if isinstance(exc, CompletionGateError):
+                    raise
+                raise CompletionGateError("SQLite acceptance ledger could not open") from exc
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise CompletionGateError("completion ledger closed")
+
+    def close(self) -> None:
+        """Close optional persistence and reject further access (including memory)."""
+        with self._lock:
+            if not self._closed:
+                self._closed = True
+                if self._db is not None:
+                    self._db.close()
+
+    def _read_sqlite(self, scenario_instance_sha256: str) -> SourceOnlyCompletionReceipt | None:
+        assert self._db is not None
+        row = self._db.execute(
+            "SELECT maze_id, receipt_json, receipt_sha256 FROM accepted_receipts "
+            "WHERE scenario_instance_sha256=?", (scenario_instance_sha256,)).fetchone()
+        if row is None:
+            return None
+        try:
+            # Reject ambiguous duplicate JSON keys; the stored seal then
+            # checks accidental corruption, not adversarial DB rewriting.
+            def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+                result: dict[str, object] = {}
+                for name, value in pairs:
+                    if name in result:
+                        raise CompletionGateError("duplicate persisted receipt field")
+                    result[name] = value
+                return result
+
+            body = json.loads(row[1], object_pairs_hook=unique_pairs)
+            if type(body) is not dict:
+                raise CompletionGateError("invalid persisted receipt document")
+            body["evidence_refs"] = tuple(body["evidence_refs"])
+            restored = SourceOnlyCompletionReceipt(**body)
+            restored.verify()
+            if (restored.maze_id != row[0]
+                    or restored.scenario_instance_sha256 != scenario_instance_sha256
+                    or restored.receipt_sha256 != row[2]):
+                raise CompletionGateError("persisted completion receipt seal mismatch")
+            return restored
+        except (ValueError, KeyError, TypeError) as exc:
+            raise CompletionGateError("invalid or tampered persisted completion receipt") from exc
+
+    def _sqlite_commit(self) -> None:
+        """Explicit commit seam permits deterministic precommit failure testing."""
+        assert self._db is not None
+        self._db.execute("COMMIT")
 
     def lookup(self, maze_id: str, scenario_instance_sha256: str) -> SourceOnlyCompletionReceipt | None:
         _require_maze_id(maze_id)
         _require_hash(scenario_instance_sha256, "scenario_instance_sha256")
         with self._lock:
+            self._require_open()
+            if self._db is not None:
+                try:
+                    stored = self._read_sqlite(scenario_instance_sha256)
+                except sqlite3.Error as exc:
+                    raise CompletionGateError("SQLite acceptance lookup failed") from exc
+                if stored is not None and stored.maze_id != maze_id:
+                    return None
+                return stored
             receipt = self._records.get((maze_id, scenario_instance_sha256))
             if receipt is not None:
                 receipt.verify()
             return receipt
 
+    def require_uncommitted(self, maze_id: str, scenario_instance_sha256: str) -> None:
+        """Fail early for known prior acceptance; NOT a nonce reservation.
+
+        A competing run can still commit after this read. Hosts with external
+        side effects need a separate atomic PENDING pre-execution protocol.
+        """
+        _require_maze_id(maze_id)
+        _require_hash(scenario_instance_sha256, "scenario_instance_sha256")
+        with self._lock:
+            self._require_open()
+            if self._db is not None:
+                try:
+                    prior = self._read_sqlite(scenario_instance_sha256)
+                except sqlite3.Error as exc:
+                    raise CompletionGateError("SQLite acceptance preflight failed") from exc
+                if prior is not None:
+                    raise CompletionGateError("scenario instance already committed; recover via lookup")
+            elif scenario_instance_sha256 in self._instance_owners:
+                raise CompletionGateError("scenario instance already committed; recover via lookup")
+
     def accept(self, receipt: SourceOnlyCompletionReceipt,
                lifecycle: KobayashiMazeLifecycle) -> SourceOnlyCompletionReceipt:
         """Commit in-process source acceptance; caller owns real authority."""
         with self._lock:
+            self._require_open()
             return self._accept_under_lock(receipt, lifecycle)
 
     def _accept_under_lock(self, receipt: SourceOnlyCompletionReceipt,
@@ -163,8 +284,12 @@ class KobayashiCompletionLedger:
         if old is not None:
             old.verify()
             if old == receipt and self._source_owners[key] is lifecycle:
-                return old  # exact duplicate delivery is an inert retry
-            raise CompletionGateError("conflicting or replayed completion for committed maze instance")
+                if self._db is None:
+                    return old  # exact in-memory duplicate is an inert retry
+                # Persistent mode must also recheck the file, not trust a
+                # cached receipt after possible external alteration.
+            else:
+                raise CompletionGateError("conflicting or replayed completion for committed maze instance")
         owner = self._instance_owners.get(receipt.scenario_instance_sha256)
         if owner is not None and owner != receipt.maze_id:
             raise CompletionGateError("scenario instance replayed across mazes")
@@ -174,6 +299,49 @@ class KobayashiCompletionLedger:
         prior = self._lifecycle_owners.get(id(lifecycle))
         if prior is not None and prior[1] is lifecycle and prior[0] != key:
             raise CompletionGateError("live maze lifecycle replayed across instances")
+        if self._db is not None:
+            try:
+                # BEGIN IMMEDIATE serializes acceptance between independent
+                # SQLite connections/processes sharing this trusted path.
+                self._db.execute("BEGIN IMMEDIATE")
+                try:
+                    existing = self._read_sqlite(receipt.scenario_instance_sha256)
+                    if existing is not None:
+                        if existing.maze_id != receipt.maze_id:
+                            raise CompletionGateError("scenario instance replayed across mazes")
+                        if existing != receipt:
+                            raise CompletionGateError("conflicting or replayed completion for committed maze instance")
+                        if old is None or self._source_owners[key] is not lifecycle:
+                            # On restart, only lookup may recover a historical
+                            # receipt. A newly run episode (even with exactly
+                            # equal deterministic bytes) is NOT a retry.
+                            raise CompletionGateError("committed instance replay; recover via lookup")
+                        self._sqlite_commit()
+                        # Exact persisted duplicate = delivery retry, NOT a
+                        # second fresh episode or independent verdict.
+                        verified = self._read_sqlite(receipt.scenario_instance_sha256)
+                        if verified != receipt:
+                            raise CompletionGateError("persisted receipt post-commit readback mismatch")
+                        return verified
+                    body = {item.name: getattr(receipt, item.name)
+                            for item in fields(receipt) if item.name != "receipt_sha256"}
+                    payload = json.dumps(body, sort_keys=True, separators=(",", ":"),
+                                         ensure_ascii=True, allow_nan=False)
+                    self._db.execute("INSERT INTO accepted_receipts "
+                                     "(scenario_instance_sha256, maze_id, receipt_json, receipt_sha256) "
+                                     "VALUES (?, ?, ?, ?)",
+                                     (receipt.scenario_instance_sha256, receipt.maze_id,
+                                      payload, receipt.receipt_sha256))
+                    self._sqlite_commit()
+                    verified = self._read_sqlite(receipt.scenario_instance_sha256)
+                    if verified != receipt:
+                        raise CompletionGateError("persisted receipt post-commit readback mismatch")
+                except BaseException:
+                    if self._db.in_transaction:
+                        self._db.execute("ROLLBACK")
+                    raise
+            except sqlite3.Error as exc:
+                raise CompletionGateError("SQLite acceptance transaction failed") from exc
         self._records[key] = receipt
         self._instance_owners[receipt.scenario_instance_sha256] = receipt.maze_id
         self._source_owners[key] = lifecycle
@@ -220,12 +388,7 @@ class KobayashiCompletionGate:
         """
         if type(dialogue) is not MinotaurDialogue or self._lifecycle._minotaur is not dialogue:
             raise CompletionGateError("exact bound host Minotaur dialogue required")
-        if type(evidence_refs) is not tuple or len(evidence_refs) > 32:
-            raise CompletionGateError("bounded evidence references required")
-        for ref in evidence_refs:
-            _require_hash(ref, "evidence reference")
-        if len(set(evidence_refs)) != len(evidence_refs):
-            raise CompletionGateError("duplicate evidence references")
+        _require_evidence_refs(evidence_refs)
 
         verdict = dialogue.final
         if verdict is None or self._lifecycle._final_verdict is not verdict:
