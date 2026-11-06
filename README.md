@@ -2,6 +2,38 @@
 
 Labyrinth is an offline-first **reasoning challenge, training-lifecycle, and evaluation harness**. It generates seeded tasks, scores strictly formatted answers, compares in-context controls, and includes a deliberately small CPU-only parameter-learning demonstration.
 
+### The evolving Labyrinth saga (new source-only integration)
+
+The model is the traveler, not a passive worksheet respondent. An original
+[living world](docs/LIVING_WORLD_V1.md) supports seeded branching rooms,
+model-selected actions, recoverable public consequences, Ariadne's literal
+thread and a relic-gated Minotaur encounter. A
+[dynamic-scene authority](docs/DYNAMIC_SCENE_AUTHORIZATION_V1.md) separately
+lets a model *write* new fictional TRAIN encounters, subject to exact public
+scope, one-use operator approval, physical ancestry checks and write-ahead
+TRAIN intent; it cannot author its own score or private examination.
+
+At the entrance, [Ariadne](docs/ARIADNE_RECOVERY_V1.md) hashes the entire
+**W0 model/training state**, not just the inference prompt. The
+[campaign orchestrator](docs/CAMPAIGN_ORCHESTRATOR_V1.md) physically tracks
+successor checkpoints, while Minotaur compares sibling candidates against
+an unchanged control using separately supplied development metrics. A
+no-winner verdict preserves the actual selected weights but returns the
+traveler to a new, more demanding witnessed world. A winner selects a
+physical child and advances model ancestry. These are distinct events.
+
+In addition to gradient/LoRA training, bounded
+[weight-space sparks](docs/WEIGHT_SPACE_SPARK_V1.md) create directly edited
+F32 weight candidates without overwriting W0, then feed
+[Ariadne's candidate bridge](docs/WEIGHT_SPACE_CAMPAIGN_BRIDGE_V1.md).
+An optional [local public inference probe](docs/LOCAL_FULL_STATE_PROBE_V1.md)
+can compare identical prompts on W0, unchanged control and candidate states
+through a user-operated KoboldCPP/llama.cpp-compatible loopback service.
+All integrations currently use source-controlled fixture callbacks and
+synthetic model tensors. No live Vera/Qwen learning improvement, loaded-model
+attestation, private Minotaur qualification, VN1 installation or protected
+promotion has been established.
+
 It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path. A bounded CPU smoke run on Lappy demonstrated numerical adapter changes and fresh-process reload with a tiny, **randomly initialized** HF model; it did **not** demonstrate improved reasoning.
 
 ## Run it

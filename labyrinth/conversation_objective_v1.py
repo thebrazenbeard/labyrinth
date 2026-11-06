@@ -29,6 +29,15 @@ PERSONA = (
     "dialogue. Do not invent personal memories or claim proven consciousness."
 )
 _ID = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z", re.ASCII)
+_PUBLIC_DIFFICULTY_TASKS = (
+    "Also distinguish the most recent correction from an earlier claim; if no correction was given, say so.",
+    "State what remains uncertain rather than filling a memory gap with an invented detail.",
+    "Account for the character's current trust and any publicly stated commitment.",
+    "Reconcile conflicting obligations without claiming a promise was kept without evidence.",
+)
+_PUBLIC_DEPENDENCY_FOCI = (
+    "latest correction", "stated commitment", "character trust", "unresolved uncertainty",
+)
 
 
 def _identifier(value: object, label: str) -> None:
@@ -271,6 +280,8 @@ class ConversationObjectiveProvider:
     def public_train_beats(
         self, case_id: str, character_id: str, *,
         region_id: str = "vera-region", chapter_id: str = "vera-chapter",
+        minimum_difficulty: int = 1,
+        complexity_depth: int = 0, world_id: str = "world_1",
     ) -> tuple[DialogueBeat, ...]:
         """Pure authored TRAIN dialogue for external physical-training bridges.
 
@@ -284,10 +295,34 @@ class ConversationObjectiveProvider:
             ("chapter_id", chapter_id),
         ):
             _identifier(value, label)
+        if (type(minimum_difficulty) is not int
+                or not 1 <= minimum_difficulty <= 5):
+            raise ValueError("public TRAIN difficulty must be an integer in [1,5]")
+        _identifier(world_id, "world_id")
+        if (type(complexity_depth) is not int or complexity_depth < 0
+                or (complexity_depth and minimum_difficulty != 5)):
+            raise ValueError("bounded public quest complexity requires scene difficulty five")
+        challenge = " ".join(_PUBLIC_DIFFICULTY_TASKS[:minimum_difficulty - 1])
+        if complexity_depth:
+            variant = hashlib.sha256(
+                f"labyrinth-public-quest-v1\0{world_id}\0{case_id}\0{complexity_depth}"
+                .encode("utf-8")).hexdigest()[:16]
+            # Longer-term challenge grows via varied public dependency chains,
+            # with strict bounded prompt width and no false empirical score.
+            width = min(4, complexity_depth + 1)
+            chain = []
+            for stage in range(width):
+                focus = _PUBLIC_DEPENDENCY_FOCI[(complexity_depth + stage) % 4]
+                previous = ("Identify the " if stage == 0 else
+                            f"Using the answer from stage {stage}, reconsider the ")
+                chain.append(f"Stage {stage + 1}: {previous}{focus}; admit if unknown.")
+            challenge += f" Public multistage quest {variant}: " + " ".join(chain)
         digest = hashlib.sha256(case.case_id.encode()).hexdigest()[:16]
         return tuple(
             DialogueBeat(region_id, chapter_id, f"case-{digest}-{index}",
-                         character_id, case.skill, user_message)
+                         character_id, case.skill,
+                         user_message + (" " + challenge if challenge else ""),
+                         difficulty=minimum_difficulty)
             for index, user_message in enumerate(case.user_turns)
         )
 

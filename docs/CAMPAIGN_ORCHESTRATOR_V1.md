@@ -120,12 +120,23 @@ consumed effect. The orchestrator holds a blocked state on any partial failure
 and provides **no automatic process-death TRAIN resume**. An examiner failure
 likewise prevents selection; no failed examiner is converted into a passing
 result. If no candidate passes, the population retains the old parent, while
-no Ariadne `CANDIDATE_SELECTED` is emitted; the next attempt remains on that
-parent rather than pretending to advance neural generations.
-The operator may separately record an approved harder world/curriculum in
-Ariadne before retry, but this module does not invent harder scenes: the
-provider's allowed TRAIN beats and a stronger director policy must be
-approved coherently first.
+no Ariadne `CANDIDATE_SELECTED` is emitted. Instead Ariadne records a
+`NO_WINNER` event and a source-owned successor `WORLD_VERSION`: the
+**unchanged physical parent enters a harder maze**. The provider adds
+actual public reasoning demands to its TRAIN prompts as minimum difficulty
+increases, and Daedalus enforces that floor before any trainer effect.
+Old easy scenes fail preflight without consuming a training quantum.
+Fresh candidate IDs, fresh journals and unchanged W0/selected Wt are required
+for another attempt. `maze_attempt_index` advances with each maze; physical
+`next_generation_index` advances only with a winner.
+
+The source v1 scene floor is bounded to five levels. Subsequent failed
+attempts keep floor five but increment the distinct journaled
+`complexity_depth`, choosing deterministic world-specific multistage public
+quests with capped prompt width. The content changes, without inventing an
+out-of-range difficulty-six score or unbounded instructions. Stale scenes
+are rejected before trainer effects. This authored complexity is **not**
+proof of empirically harder tests, model learning or a private Minotaur exam.
 
 All outcomes are labeled
 `SOURCE_ONLY_SOCIAL_CAMPAIGN_NO_NEURAL_OR_INDEPENDENT_EXAM_PROOF`.

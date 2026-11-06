@@ -28,6 +28,19 @@ mounts, NAS filesystem durability or live VN1.
    subsequently recorded child world, not the pre-TRAIN branch-world ID.
    This derived pointer is rebuilt from the write-once event history on each
    readback; merely creating an unrelated proposed world cannot select it.
+   If a crash falls between champion selection and the child world event,
+   continuation reports `INDETERMINATE_WORLD_TRANSITION` and will not
+   authorize another training entrance from the stale predecessor world.
+   A `NO_WINNER` event after all current sibling candidates are rejected
+   starts an equally durable world transition while retaining the exact
+   physical parent. The child `WORLD_VERSION` increases the declared
+   TRAIN scene challenge and advances `maze_attempt_index`; after the
+   bounded scene floor reaches five, separate `complexity_depth` tracks
+   new world-specific multistage training demands. Only a
+   selected model advances `next_generation_index`.
+   A crash *before* that NO_WINNER intent, after rejecting the last sibling,
+   is reported as `INDETERMINATE_NO_WINNER_OUTCOME`. It does not quietly
+   reopen the old maze or reuse its consumed candidate IDs.
 3. Branch-specific observations, actions, outcomes and selected navigation
    path, bound to the currently selected physical parent and generation.
 4. Before-effect `TRAIN_PREPARED` with an unguessable effect token, complete
@@ -38,6 +51,17 @@ mounts, NAS filesystem durability or live VN1.
 6. Candidate evaluation metrics/evidence, explicit rejected candidates and
    exactly one selected candidate from a resolved cohort of at least two.
    The selected child becomes the *only* physical parent for the next round.
+
+Recovery distinguishes the ability to reload physical parent bytes from
+permission to start a **new developmental cohort**. A descriptor can report
+`status=READY_FOR_EXTERNAL_FULL_STATE_LOAD` while its separate
+`development_status=UNRESOLVED_CURRENT_COHORT` records unevaluated or
+examined siblings awaiting an explicit selection/rejection outcome.
+`CampaignOrchestrator.run_generation` refuses to start a new generation in
+that state, before any trainer effect. An existing bounded cohort may finish
+assembling unevaluated siblings; after examination has begun the lower-level
+dynamic scene bridge also refuses late sibling additions. These statuses are
+source state-machine claims, not independent model examiner custody.
 
 Each event records `schema`, strict integer `event_version=1`, sequence number, random event ID, unique
 idempotency key, event type, typed payload, previous event digest and its own
@@ -112,6 +136,13 @@ physical manifest path and the required external restore roles.
 `optimizer_loaded=False`, `rng_loaded=False`,
 `data_cursor_restored=False`, `restorable_training_state_proven=False`,
 `neural_update_proven=False`, and `graduation_authorized=False`.
+
+After all sibling outcomes have been durably rejected, the source may call
+`ariadne.record_no_winner(next_minimum_difficulty=2, idempotency_key="no_winner_world_1")`
+and then `record_world` with the same parent world and a version-two
+curriculum declaring minimum difficulty two. If the second event never
+arrives, the recovery descriptor is indeterminate; neither failed weights
+nor a stale world are silently promoted.
 
 If a process crashes after `TRAIN_PREPARED` but before `TRAIN_COMMITTED`,
 reopen returns `INDETERMINATE_TRAINER_EFFECT`. Any mutation except an original

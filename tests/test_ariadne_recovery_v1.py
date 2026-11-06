@@ -103,8 +103,11 @@ class AriadneRecoveryTests(unittest.TestCase):
                                 idempotency_key="genesis")
 
     def _world_branch(self, name: str):
+        # Branches inherit the current Ariadne-selected public world, not
+        # the founder's world after a champion has evolved the maze.
+        selected_world = self.journal.continuation_descriptor()["selected_world_id"]
         return self.journal.record_branch(
-            branch_id="branch_" + name, world_id="world_1",
+            branch_id="branch_" + name, world_id=selected_world,
             experience=_experience(name), selected_path=["entrance", "threshold", name],
             idempotency_key="branch_" + name)
 
@@ -137,6 +140,10 @@ class AriadneRecoveryTests(unittest.TestCase):
                                       idempotency_key="reject_left")
         self.journal.select_candidate(candidate_id="right", selection_reason="public score",
                                       idempotency_key="select_right")
+        self.journal.record_world(world_id="world_3", parent_world_id="world_1",
+                                  version=2, curriculum={"objective": "selected successor"},
+                                  world_state={"rooms": ["new entrance", "branch"]},
+                                  idempotency_key="world_3")
         # The next world's two siblings explicitly inherit the chosen full
         # physical state (not merely its adapter/weight hash).
         a, _ = self._candidate("g2_a", right)
@@ -145,6 +152,10 @@ class AriadneRecoveryTests(unittest.TestCase):
                                       idempotency_key="reject_g2_a")
         self.journal.select_candidate(candidate_id="g2_b", selection_reason="public score",
                                       idempotency_key="select_g2_b")
+        self.journal.record_world(world_id="world_4", parent_world_id="world_3",
+                                  version=3, curriculum={"objective": "next selected successor"},
+                                  world_state={"rooms": ["deeper chamber", "thread"]},
+                                  idempotency_key="world_4")
         expected_head = self.journal.continuation_descriptor()["event_head_sha256"]
         # A new Python interpreter independently reopens all manifests, and
         # validates every optimizer, RNG, scheduler, model and cursor file.
@@ -165,6 +176,7 @@ class AriadneRecoveryTests(unittest.TestCase):
                          {"SELECTED", "REJECTED"})
         self.assertEqual(recovered["branches"][-1]["selected_path"][-1], "g2_b")
         self.assertEqual(recovered["status"], "READY_FOR_EXTERNAL_FULL_STATE_LOAD")
+        self.assertEqual(recovered["selected_world_id"], "world_4")
         self.assertFalse(recovered["model_loaded"])
         self.assertFalse(recovered["optimizer_loaded"])
         self.assertFalse(recovered["restorable_training_state_proven"])

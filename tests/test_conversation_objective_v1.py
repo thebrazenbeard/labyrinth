@@ -180,8 +180,16 @@ class ConversationObjectiveTests(unittest.TestCase):
             sequence.append(("predict", request.turn_index))
             public_contexts.append(request.scene_context)
             self.assertNotIn("quality_score", repr(request))
-            self.assertNotIn("reaction", repr(request))
             self.assertNotIn("reference_claims", repr(request))
+            if request.turn_index == 0:
+                self.assertNotIn("last_public_reaction", request.scene_context)
+            else:
+                # A fictional character's *public response* is story memory,
+                # not the private quality score or examiner reference gold.
+                self.assertIn(
+                    '"last_public_reaction": "Miren warms to the exchange."',
+                    request.scene_context,
+                )
             return thoughtful_model(request)
         def trusted_effect(observation, exchange):
             sequence.append(("effect", len(sequence) // 2))

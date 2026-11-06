@@ -137,11 +137,18 @@ def _bind_checkpoint(manifest: dict, ref: CheckpointRef) -> None:
 
 
 def _world_state(characters: tuple[CharacterRelationship, ...]) -> dict:
+    for character in characters:
+        # A caller may mutate frozen records after session construction.
+        # Durable world provenance must not silently accept an invalid story.
+        CharacterRelationship.__post_init__(character)
     return {"characters": [{
         "character_id": c.character_id, "trust": c.trust,
         "interactions": c.interactions,
         "promises": [{"promise_id": p.promise_id, "description": p.description}
                      for p in c.outstanding_promises],
+        # Omit absent optional memory: preserves old W0/WORLD_VERSION hashes.
+        **({"last_public_reaction": c.last_public_reaction}
+           if c.last_public_reaction is not None else {}),
     } for c in characters]}
 
 
@@ -194,6 +201,9 @@ class CampaignOrchestrator:
         self._selected_world_hash = _hash_public(_world_state(self.selected_characters))
         self.current_world_id = world_id
         self.world_version = 1
+        self.minimum_difficulty = 1
+        self.complexity_depth = 0
+        self.maze_attempt_index = 1
         self._pending: GenerationPendingExam | None = None
         self._pending_world_hashes: dict[str, str] = {}
         self._pending_experience_hashes: dict[str, str] = {}
@@ -204,7 +214,9 @@ class CampaignOrchestrator:
         journal.initialize(
             w0_manifest_path=origin_manifest_path, world_id=world_id, version=1,
             curriculum={"objective_id": scope.objective_id,
-                        "train_only": True, "private_gold_included": False},
+                        "train_only": True, "private_gold_included": False,
+                        "minimum_difficulty": self.minimum_difficulty,
+                        "complexity_depth": self.complexity_depth},
             world_state=_world_state(characters), idempotency_key="campaign_genesis")
 
     def run_generation(self, *, launches: tuple[CandidateLaunch, ...],
@@ -224,6 +236,15 @@ class CampaignOrchestrator:
         descriptor = self.journal.continuation_descriptor()
         if descriptor["status"] != "READY_FOR_EXTERNAL_FULL_STATE_LOAD":
             raise CampaignBoundaryError("Ariadne has indeterminate physical TRAIN")
+        if descriptor["development_status"] != "NO_ACTIVE_COHORT":
+            raise CampaignBoundaryError(
+                "Ariadne has an unresolved current-world cohort; finish its "
+                "developmental outcome before starting another generation")
+        if (descriptor["maze_attempt_index"] != self.maze_attempt_index
+                or descriptor["minimum_scene_difficulty"] != self.minimum_difficulty
+                or descriptor["complexity_depth"] != self.complexity_depth
+                or descriptor["selected_world_id"] != self.current_world_id):
+            raise CampaignBoundaryError("maze attempt and difficulty disagree with durable Ariadne world")
         if _hash_public(_world_state(self.selected_characters)) != self._selected_world_hash:
             raise CampaignBoundaryError("selected public world was changed outside Ariadne")
         journal_world = next((item for item in descriptor["worlds"]
@@ -231,6 +252,11 @@ class CampaignOrchestrator:
         if (journal_world is None
                 or _hash_public(journal_world["world_state"]) != self._selected_world_hash):
             raise CampaignBoundaryError("selected world disagrees with durable Ariadne state")
+        next_world_id = f"world_{self.world_version + 1}"
+        if any(world["world_id"] == next_world_id for world in descriptor["worlds"]):
+            raise CampaignBoundaryError(
+                "next developmental world identity already exists; resolve "
+                "Ariadne world collision before physical TRAIN")
         previous_candidates = {item["candidate_id"] for item in descriptor["candidates"]}
         previous_branches = {item["branch_id"] for item in descriptor["branches"]}
         if (any(launch.candidate_id in previous_candidates
@@ -275,7 +301,10 @@ class CampaignOrchestrator:
             # or reference claim is passed into director, responder or trainer.
             approved = self.provider.public_train_beats(
                 launch.case_id, launch.character_id,
-                region_id=launch.region_id, chapter_id=launch.chapter_id)
+                region_id=launch.region_id, chapter_id=launch.chapter_id,
+                minimum_difficulty=self.minimum_difficulty,
+                complexity_depth=self.complexity_depth,
+                world_id=self.current_world_id)
             allowed = set(approved)
             if (not callable(getattr(launch.responder, "respond", None))
                     or not callable(getattr(launch.operator, "assess_train", None))
@@ -294,7 +323,8 @@ class CampaignOrchestrator:
             planning_world = SocialWorldSession(self.scope, self.selected_characters)
             planner = DaedalusSocialPlanner(
                 planning_world, launch.director,
-                SocialScenePolicy(minimum_difficulty=1, max_scenes=launch.max_beats))
+                SocialScenePolicy(minimum_difficulty=self.minimum_difficulty,
+                                  max_scenes=launch.max_beats))
             # Propose before durable TRAIN intent, but only an approved public
             # TRAIN beat may be trained; model-authored code is never executed.
             first = planner.propose_next()
@@ -436,6 +466,9 @@ class CampaignOrchestrator:
                 reason="comparative developmental thresholds not selected",
                 idempotency_key="reject_" + rejected)
         selected_characters = self.selected_characters
+        next_world = f"world_{self.world_version + 1}"
+        next_difficulty = self.minimum_difficulty
+        next_complexity = self.complexity_depth
         if decision.winner_id is not None:
             self.journal.select_candidate(
                 candidate_id=decision.winner_id,
@@ -443,16 +476,32 @@ class CampaignOrchestrator:
                 idempotency_key="select_" + decision.winner_id)
             selected_characters = copy.deepcopy(
                 self._pending_character_copies[decision.winner_id])
-            next_world = f"world_{self.world_version + 1}"
-            self.journal.record_world(
-                world_id=next_world, parent_world_id=self.current_world_id,
-                version=self.world_version + 1,
-                curriculum={"objective_id": self.scope.objective_id,
-                            "train_only": True},
-                world_state=_world_state(selected_characters),
-                idempotency_key="world_" + next_world)
-            self.world_version += 1
-            self.current_world_id = next_world
+        else:
+            if next_difficulty < 5:
+                next_difficulty += 1
+            else:
+                next_complexity += 1
+            self.journal.record_no_winner(
+                next_minimum_difficulty=next_difficulty,
+                next_complexity_depth=next_complexity,
+                idempotency_key="no_winner_" + self.current_world_id)
+        # A failed cohort advances the public challenge, never the model
+        # weight lineage. Both possible selection outcomes demand a durable
+        # successor world before another training entrance is considered.
+        self.journal.record_world(
+            world_id=next_world, parent_world_id=self.current_world_id,
+            version=self.world_version + 1,
+            curriculum={"objective_id": self.scope.objective_id,
+                        "train_only": True,
+                        "minimum_difficulty": next_difficulty,
+                        "complexity_depth": next_complexity},
+            world_state=_world_state(selected_characters),
+            idempotency_key="world_" + next_world)
+        self.world_version += 1
+        self.current_world_id = next_world
+        self.minimum_difficulty = next_difficulty
+        self.complexity_depth = next_complexity
+        self.maze_attempt_index += 1
         self.selected_characters = copy.deepcopy(selected_characters)
         self._selected_world_hash = _hash_public(_world_state(self.selected_characters))
         self._finished_generations += 1 if decision.winner_id else 0
@@ -466,6 +515,12 @@ class CampaignOrchestrator:
         if descriptor["selected_parent_state_sha256"] != decision.selected_state_sha256:
             self._blocked = True
             raise CampaignBoundaryError("Ariadne selected different physical parent")
+        if (descriptor["maze_attempt_index"] != self.maze_attempt_index
+                or descriptor["selected_world_id"] != self.current_world_id
+                or descriptor["minimum_scene_difficulty"] != self.minimum_difficulty
+                or descriptor["complexity_depth"] != self.complexity_depth):
+            self._blocked = True
+            raise CampaignBoundaryError("Ariadne successor world/maze attempt readback disagrees")
         return CampaignGenerationResult(
             decision, descriptor["event_head_sha256"], copy.deepcopy(selected_characters))
 

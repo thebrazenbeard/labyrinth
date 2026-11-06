@@ -237,7 +237,19 @@ class OrchestratorTests(unittest.TestCase):
             pending1, self._external_fixture_exams(pending1.population, 1))
         self.assertEqual(result1.decision.winner_id, "g1_right")
         self.assertEqual(result1.selected_characters[0].trust, 1)
+        self.assertEqual(result1.selected_characters[0].last_public_reaction,
+                         "Miren hears and trusts a little more.")
         self.assertFalse(self.journal.continuation_descriptor()["model_loaded"])
+        worlds_after_first = self.journal.continuation_descriptor()["worlds"]
+        # Pre-feature GENESIS shape is byte-compatible for absent reaction.
+        self.assertNotIn("last_public_reaction",
+                         worlds_after_first[0]["world_state"]["characters"][0])
+        self.assertEqual(
+            worlds_after_first[1]["world_state"]["characters"][0]["last_public_reaction"],
+            "Miren hears and trusts a little more.",
+        )
+        self.assertNotIn("quality_score",
+                         worlds_after_first[1]["world_state"]["characters"][0])
 
         selected_path = result1.decision.selected_manifest_path
         selected_root = Path(json.loads(selected_path.read_text())["adapter"]["root"]).parent
@@ -250,6 +262,8 @@ class OrchestratorTests(unittest.TestCase):
                          result1.decision.selected_state_sha256)
         self.assertEqual(second_responders[0].inputs[0].public_observation.character_context.count(
             "tentatively willing to open up"), 1)
+        self.assertIn("Miren hears and trusts a little more.",
+                      second_responders[0].inputs[0].public_observation.character_context)
         result2 = self.orchestrator.finalize_generation(
             pending2, self._external_fixture_exams(pending2.population, 2))
         self.assertEqual(result2.decision.winner_id, "g2_left")

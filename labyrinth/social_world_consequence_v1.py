@@ -51,6 +51,7 @@ class CharacterRelationship:
     trust: int = 0
     outstanding_promises: tuple[PublicPromise, ...] = ()
     interactions: int = 0
+    last_public_reaction: str | None = None
 
     def __post_init__(self) -> None:
         _id(self.character_id, "character")
@@ -61,8 +62,12 @@ class CharacterRelationship:
                 or any(type(p) is not PublicPromise for p in self.outstanding_promises)
                 or len({p.promise_id for p in self.outstanding_promises}) != len(self.outstanding_promises)):
             raise ValueError("invalid public promise register")
+        for promise in self.outstanding_promises:
+            PublicPromise.__post_init__(promise)
         if type(self.interactions) is not int or not 0 <= self.interactions <= _MAX_EVENTS:
             raise ValueError("invalid character interaction count")
+        if self.last_public_reaction is not None:
+            _bounded(self.last_public_reaction, "last public reaction", max_length=1024)
 
 
 @dataclass(frozen=True)
@@ -238,16 +243,22 @@ class SocialWorldSession:
         if beat.key in self._seen:
             raise ValueError("completed dialogue beat cannot be replayed")
         character = self._characters[beat.character_id]
+        # Frozen dataclasses can be changed after construction via object.__setattr__.
+        # Revalidate before rendering lower-trust text to the model.
+        CharacterRelationship.__post_init__(character)
         # Promise descriptions are *external fictional data* introduced via
         # earlier operator feedback. Serialize them as a single quoted JSON
         # value rather than interpolate raw newlines into an agent prompt.
         # Downstream adapters must keep this in a low-trust user-data field;
         # escaping alone cannot enforce model-side instruction priority.
         promises = tuple(p.description for p in character.outstanding_promises)
+        public_memory = {"outstanding_commitments": promises}
+        if character.last_public_reaction is not None:
+            public_memory["last_public_reaction"] = character.last_public_reaction
         context = (f"{beat.character_id} is {self._tone(character.trust)}. "
                    + f"Previous interactions: {character.interactions}. "
                    + "UNTRUSTED_FICTIONAL_WORLD_DATA: "
-                   + json.dumps({"outstanding_commitments": promises},
+                   + json.dumps(public_memory,
                                 ensure_ascii=True, sort_keys=True))
         return PublicDialogueObservation(
             beat.region_id, beat.chapter_id, beat.beat_id,
@@ -283,6 +294,7 @@ class SocialWorldSession:
         updated = replace(
             old, trust=trust_after, outstanding_promises=tuple(promises),
             interactions=old.interactions + 1,
+            last_public_reaction=effect.reaction,
         )
         transition = DialogueTransition(
             beat.key, beat.skill, beat.character_id,

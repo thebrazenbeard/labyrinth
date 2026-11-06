@@ -143,6 +143,9 @@ def _state():
         "worlds": {}, "branches": {}, "candidates": {},
         "selections": [], "pending": None, "generation_index": 0,
         "selected_world_id": None, "selected_world_transition_pending": False,
+        "world_transition_kind": None, "required_next_difficulty": None,
+        "required_next_complexity": None,
+        "maze_attempt_index": 1,
         "manifest_paths": {}, "idempotency": {}, "event_ids": set(),
     }
 
@@ -179,6 +182,8 @@ def _apply(state: dict[str, Any], event: dict[str, Any], *, fresh_process: bool)
         return
     if state["origin"] is None:
         raise LineageIntegrityError("first event must establish physical W0")
+    if state["selected_world_transition_pending"] and kind != "WORLD_VERSION":
+        raise LineageIntegrityError("world transition incomplete; no further TRAIN or selection")
     if kind == "WORLD_VERSION":
         p = _fields(payload, "world_id", "parent_world_id", "version",
                     "curriculum", "world_state")
@@ -199,8 +204,50 @@ def _apply(state: dict[str, Any], event: dict[str, Any], *, fresh_process: bool)
             if p["parent_world_id"] != state["selected_world_id"]:
                 raise LineageIntegrityError(
                     "selected champion's successor world must extend its current world")
+            if state["world_transition_kind"] == "NO_WINNER":
+                if (p["curriculum"].get("minimum_difficulty")
+                        != state["required_next_difficulty"]
+                        or p["curriculum"].get("complexity_depth")
+                        != state["required_next_complexity"]):
+                    raise LineageIntegrityError(
+                        "no-winner successor must enforce changed bounded curriculum complexity")
             state["selected_world_id"] = p["world_id"]
             state["selected_world_transition_pending"] = False
+            state["world_transition_kind"] = None
+            state["required_next_difficulty"] = None
+            state["required_next_complexity"] = None
+            state["maze_attempt_index"] += 1
+    elif kind == "NO_WINNER":
+        p = _fields(payload, "world_id", "generation_index", "attempt_index",
+                    "parent_state_sha256", "next_minimum_difficulty",
+                    "next_complexity_depth")
+        _identifier(p["world_id"], "failed maze world")
+        _hex(p["parent_state_sha256"], "failed maze parent")
+        current_world = state["worlds"][state["selected_world_id"]]
+        floor = current_world["curriculum"].get("minimum_difficulty", 1)
+        complexity = current_world["curriculum"].get("complexity_depth", 0)
+        cohort = [c for c in state["candidates"].values()
+                  if c["generation_index"] == state["generation_index"]
+                  and state["branches"][c["branch_id"]]["world_id"]
+                  == state["selected_world_id"]]
+        if (p["world_id"] != state["selected_world_id"]
+                or p["generation_index"] != state["generation_index"]
+                or p["attempt_index"] != state["maze_attempt_index"]
+                or p["parent_state_sha256"] != state["parent"]["state_sha256"]
+                or type(floor) is not int or not 1 <= floor <= 5
+                or type(complexity) is not int or complexity < 0
+                or type(p["next_minimum_difficulty"]) is not int
+                or p["next_minimum_difficulty"] != min(5, floor + 1)
+                or type(p["next_complexity_depth"]) is not int
+                or p["next_complexity_depth"] != complexity + (1 if floor == 5 else 0)
+                or state["pending"] is not None or len(cohort) < 2
+                or any(c["fate"] != "REJECTED" for c in cohort)):
+            raise LineageIntegrityError(
+                "no-winner requires rejected sibling cohort and a strictly harder next world")
+        state["selected_world_transition_pending"] = True
+        state["world_transition_kind"] = "NO_WINNER"
+        state["required_next_difficulty"] = min(5, floor + 1)
+        state["required_next_complexity"] = complexity + (1 if floor == 5 else 0)
     elif kind == "BRANCH_EXPERIENCE":
         p = _fields(payload, "branch_id", "world_id", "generation_index",
                     "parent_state_sha256", "experience", "selected_path")
@@ -214,7 +261,7 @@ def _apply(state: dict[str, Any], event: dict[str, Any], *, fresh_process: bool)
                 or any(type(x) is not str or not x for x in p["selected_path"])):
             raise LineageIntegrityError("branch lacks typed experience or selected path")
         if (state["pending"] is not None or p["branch_id"] in state["branches"]
-                or p["world_id"] not in state["worlds"]
+                or p["world_id"] != state["selected_world_id"]
                 or p["generation_index"] != state["generation_index"]
                 or p["parent_state_sha256"] != state["parent"]["state_sha256"]):
             raise LineageIntegrityError("branch diverges from current selected parent")
@@ -355,6 +402,7 @@ def _apply(state: dict[str, Any], event: dict[str, Any], *, fresh_process: bool)
         state["parent"] = _manifest(state["parent_path"], fresh_process=False)
         state["generation_index"] += 1
         state["selected_world_transition_pending"] = True
+        state["world_transition_kind"] = "CHAMPION_SELECTED"
     else:
         raise LineageIntegrityError("unknown Ariadne event kind")
 
@@ -593,6 +641,40 @@ class AriadneJournal:
             "candidate_id": candidate_id, "selection_reason": selection_reason,
         }, idempotency_key)
 
+    def record_no_winner(self, *, next_minimum_difficulty: int,
+                         next_complexity_depth: int | None = None,
+                         idempotency_key: str) -> dict[str, Any]:
+        """Persist a failed cohort without promoting its physical Wt.
+
+        The following WORLD_VERSION must materialize its successor challenge;
+        otherwise a new process reports an indeterminate world transition.
+        """
+        fd = self._locked()
+        try:
+            _, state = self._read(fresh_process=False)
+            if state["origin"] is None:
+                raise LineageIntegrityError("cannot fail a maze before genesis")
+            selected_curriculum = state["worlds"][state["selected_world_id"]]["curriculum"]
+            floor = selected_curriculum.get("minimum_difficulty", 1)
+            depth = selected_curriculum.get("complexity_depth", 0)
+            if type(floor) is not int or not 1 <= floor <= 5 or type(depth) is not int or depth < 0:
+                raise LineageIntegrityError("invalid selected world difficulty/complexity")
+            next_depth = depth + (1 if floor == 5 else 0)
+            if next_complexity_depth is not None and next_complexity_depth != next_depth:
+                raise LineageIntegrityError("no-winner complexity cannot be manually forged")
+            payload = {
+                "world_id": state["selected_world_id"],
+                "generation_index": state["generation_index"],
+                "attempt_index": state["maze_attempt_index"],
+                "parent_state_sha256": state["parent"]["state_sha256"],
+                "next_minimum_difficulty": next_minimum_difficulty,
+                "next_complexity_depth": next_depth,
+            }
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+        return self._append("NO_WINNER", payload, idempotency_key)
+
     def events(self) -> tuple[dict[str, Any], ...]:
         fd = self._locked()
         try:
@@ -616,15 +698,47 @@ class AriadneJournal:
                 raise LineageIntegrityError("journal head differs from external witness: rollback/fork")
             pending = state["pending"]
             selected = state["selections"]
+            current_cohort = [
+                candidate for candidate in state["candidates"].values()
+                if candidate["generation_index"] == state["generation_index"]
+                and state["branches"][candidate["branch_id"]]["world_id"]
+                == state["selected_world_id"]
+            ]
+            # A crash after rejecting the final sibling but before the
+            # NO_WINNER event must not advertise the old, easy world as a
+            # clean new entrance. This is an unresolved development outcome,
+            # not a pending neural effect or permission to replay candidates.
+            missing_no_winner_intent = (
+                len(current_cohort) >= 2
+                and all(c["fate"] == "REJECTED" for c in current_cohort)
+                and not state["selected_world_transition_pending"]
+            )
             return {
                 "schema": SCHEMA,
                 "status": ("INDETERMINATE_TRAINER_EFFECT" if pending else
+                           "INDETERMINATE_WORLD_TRANSITION"
+                           if state["selected_world_transition_pending"] else
+                           "INDETERMINATE_NO_WINNER_OUTCOME"
+                           if missing_no_winner_intent else
                            "READY_FOR_EXTERNAL_FULL_STATE_LOAD"),
+                # Physical parent bytes can remain loadable even when a
+                # developmental cohort has not reached a selection decision.
+                # Callers must treat this separately from restore readiness.
+                "development_status": (
+                    "TRAIN_EFFECT_PENDING" if pending else
+                    "UNRESOLVED_CURRENT_COHORT" if current_cohort else
+                    "NO_ACTIVE_COHORT"),
                 "origin_state_sha256": state["origin"],
                 "next_generation_index": state["generation_index"],
                 "selected_parent_state_sha256": state["parent"]["state_sha256"],
                 "selected_parent_manifest_path": state["parent_path"],
                 "selected_world_id": state["selected_world_id"],
+                "maze_attempt_index": state["maze_attempt_index"],
+                "minimum_scene_difficulty": state["worlds"][
+                    state["selected_world_id"]]["curriculum"].get("minimum_difficulty", 1),
+                "complexity_depth": state["worlds"][
+                    state["selected_world_id"]]["curriculum"].get("complexity_depth", 0),
+                "world_transition_kind": state["world_transition_kind"],
                 "worlds": list(state["worlds"].values()),
                 "branches": list(state["branches"].values()),
                 "candidates": list(state["candidates"].values()),

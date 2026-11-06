@@ -24,6 +24,28 @@ The relationship changes; later chapters observe whether a character is
 wary, receptive, guarded or trusting and which obligations remain unresolved.
 The feedback is **operator development observation, not a verified grade**.
 
+The most recent **public fictional character reaction** now survives in the
+corresponding `CharacterRelationship.last_public_reaction` (up to 1,024
+characters) and is included in the next scene involving that character.
+Before any such response exists, the optional reaction field is omitted
+entirely; an empty `null` property must not leak into pristine TRAIN prompts.
+This repairs the former gap where a transition receipt had the character's
+actual words and behavior, but the learner saw only coarse trust and promises
+on return. Only the latest reaction is retained, and characters never share
+their reaction register. The model-facing context encodes commitments and the
+reaction together as JSON under `UNTRUSTED_FICTIONAL_WORLD_DATA` with escaped
+newlines, not as instructions. The private operator `quality_score` remains
+excluded. JSON quoting does **not** provide prompt-injection immunity: callers
+must preserve the lower-trust role boundary. `preview()` revalidates even
+previously frozen character and nested promise objects after possible hostile
+post-construction mutation.
+
+When the campaign orchestrator is the owner, a non-null reaction also enters
+the public `WORLD_VERSION.world_state` ancestry recorded by Ariadne; a null
+reaction leaves the previous schema shape untouched for old W0 hash
+compatibility. This record contains public fictional reaction text, not the
+operator-only `quality_score`, examiner rubrics or neural-weight evidence.
+
 ```python
 from labyrinth.social_world_consequence_v1 import (
     CharacterRelationship, DialogueBeat, OperatorDialogueEffect,
@@ -75,12 +97,20 @@ private evaluator custody.
 
 `python -m unittest -q tests.test_social_world_consequence_v1`
 
-The six tests show: identical initial state diverges after distinct scored
+The original tests show: identical initial state diverges after distinct scored
 dialogue effects; an obligation made in one region alters a later chapter;
 the obligation can be fulfilled; 12 distinct regional beats are possible;
 exam-split/unknown-skill/replayed beats are rejected; invalid effects have
 no mutation. **They do not prove** that a model learned, that the scorer was
 independent, or that real social partners would respond in the scripted way.
+
+Additional source-only tests verify reaction replacement and character
+isolation, absence of private operator-score metadata in a subsequent public
+scene, non-effectful rejected promise operations, and fail-closed rejection of
+oversized reactions or nested promises mutated after construction. This
+integration adapts [Draft PR #131](https://github.com/thebrazenbeard/labyrinth/pull/131)
+to the existing stronger JSON-serialized low-trust context; that separate
+stacked draft remains open, unmerged and unmodified.
 
 > **Hostile challenge:** The current operator can claim a reply increased
 > trust or deserved quality 2 without independent evidence. A model could
