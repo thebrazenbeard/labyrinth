@@ -24,6 +24,22 @@ The relationship changes; later chapters observe whether a character is
 wary, receptive, guarded or trusting and which obligations remain unresolved.
 The feedback is **operator development observation, not a verified grade**.
 
+The latest **public character reaction** is now retained in the corresponding
+`CharacterRelationship.last_public_reaction` register and rendered (JSON-quoted)
+in that character's next public scene. Previously, the `reaction` was stored
+in a transition receipt but silently lost from subsequent dialogue context:
+the learner saw only a coarse trust tone and promise count, not what the
+character actually said or did. The register is bounded to 1,024 characters,
+replaces its prior value on the next interaction, and does not cross between
+characters. It does not inject the operator-only `quality_score` or claim
+long-term autobiographical memory. The reaction text is fictional, untrusted
+narrative data; quotation is a formatting boundary, not prompt-injection
+immunity. A model-facing caller must maintain role and authority isolation.
+Because frozen dataclass fields can still be changed via `object.__setattr__`,
+the model-facing `preview()` revalidates each character and its nested public
+promises immediately before rendering; stale post-construction mutations fail
+closed instead of exposing unbounded reaction/commitment text.
+
 ```python
 from labyrinth.social_world_consequence_v1 import (
     CharacterRelationship, DialogueBeat, OperatorDialogueEffect,
@@ -75,12 +91,22 @@ private evaluator custody.
 
 `python -m unittest -q tests.test_social_world_consequence_v1`
 
-The six tests show: identical initial state diverges after distinct scored
+The original six tests show: identical initial state diverges after distinct scored
 dialogue effects; an obligation made in one region alters a later chapter;
 the obligation can be fulfilled; 12 distinct regional beats are possible;
 exam-split/unknown-skill/replayed beats are rejected; invalid effects have
 no mutation. **They do not prove** that a model learned, that the scorer was
 independent, or that real social partners would respond in the scripted way.
+
+Additional source tests establish that a prior public reaction survives into
+the next chapter, is superseded by the next one, never crosses character
+boundaries, does not automatically disclose operator score metadata, and is
+unchanged after a rejected promise operation. The three extra tests are
+synthetic protocol checks, not evidence of real Vera voice or empathy.
+Independent hostile review also found that a caller could mutate a frozen
+character **after** it had been passed into `SocialWorldSession`, bypassing
+constructor-time checks. Two additional tests reproduce and reject that
+post-construction reaction/promise mutation at the public prompt boundary.
 
 > **Hostile challenge:** The current operator can claim a reply increased
 > trust or deserved quality 2 without independent evidence. A model could

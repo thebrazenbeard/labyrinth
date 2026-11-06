@@ -55,8 +55,13 @@ class SocialWorldTests(unittest.TestCase):
         later = self.world.preview(second)
         self.assertIn("tentatively willing", later.character_context)
         self.assertIn("Listen before giving advice", later.character_context)
+        self.assertIn('Last public reaction (narrative data): "Miren relaxes and begins explaining."',
+                      later.character_context)
+        self.assertNotIn("quality_score", later.character_context)
         self.assertNotEqual(before.character_context, later.character_context)
         self.assertEqual(self.world.characters[0].outstanding_promises, (promise,))
+        self.assertEqual(self.world.characters[0].last_public_reaction,
+                         "Miren relaxes and begins explaining.")
 
         self.world.record_training_response(
             second,
@@ -66,7 +71,66 @@ class SocialWorldTests(unittest.TestCase):
         third = beat("archive", "new-season", "miren-archive")
         self.assertIn("open and increasingly willing", self.world.preview(third).character_context)
         self.assertNotIn("Listen before giving advice", self.world.preview(third).character_context)
+        self.assertIn("Miren trusts the conversation enough to continue.",
+                      self.world.preview(third).character_context)
+        self.assertNotIn("Miren relaxes and begins explaining.",
+                         self.world.preview(third).character_context)
         self.assertEqual(len(self.world.events), 2)
+
+    def test_reaction_memory_is_character_scoped_and_does_not_leak_operator_score(self):
+        world = SocialWorldSession(self.scope,
+                                   (CharacterRelationship("miren"), CharacterRelationship("tala")))
+        scene = beat()
+        observed = 'Miren says: "I need a minute".\nShe steps away.'
+        world.record_training_response(
+            scene, "I can wait.", OperatorDialogueEffect(0, 2, observed),
+        )
+        next_miren = world.preview(beat("riverbank", "next", "miren-return"))
+        self.assertIn('Miren says: \\"I need a minute\\".', next_miren.character_context)
+        self.assertIn("\\nShe steps away.", next_miren.character_context)
+        self.assertNotIn("quality_score", next_miren.character_context)
+        self.assertNotIn("OPERATOR_DEVELOPMENT_ONLY", next_miren.character_context)
+        tala_beat = DialogueBeat("riverbank", "next", "tala-first", "tala",
+                                 "perspective_taking", "Do you know my story?")
+        next_tala = world.preview(tala_beat)
+        self.assertNotIn("Miren says", next_tala.character_context)
+        self.assertNotIn("Last public reaction", next_tala.character_context)
+        self.assertEqual(world.characters[0].last_public_reaction, observed)
+        self.assertIsNone(world.characters[1].last_public_reaction)
+
+    def test_reaction_record_does_not_mutate_on_invalid_promise(self):
+        original = self.world.characters[0]
+        with self.assertRaisesRegex(ValueError, "absent"):
+            self.world.record_training_response(
+                beat(), "I kept my word.",
+                OperatorDialogueEffect(2, 2, "Miren smiles.", "fulfill",
+                                       PublicPromise("missing", "A missing commitment")),
+            )
+        self.assertEqual(self.world.characters[0], original)
+        self.assertEqual(self.world.events, ())
+
+    def test_reaction_register_revalidates_mutated_frozen_character(self):
+        corrupted = CharacterRelationship("miren", last_public_reaction="Miren nods.")
+        object.__setattr__(corrupted, "last_public_reaction", "x" * 1025)
+        with self.assertRaisesRegex(ValueError, "last public reaction"):
+            SocialWorldSession(self.scope, (corrupted,))
+
+    def test_post_construction_reaction_mutation_fails_before_public_prompt(self):
+        seed = CharacterRelationship("miren")
+        world = SocialWorldSession(self.scope, (seed,))
+        object.__setattr__(seed, "last_public_reaction", "ATTACK-" + "x" * 2020)
+        with self.assertRaisesRegex(ValueError, "last public reaction"):
+            world.preview(beat())
+        self.assertEqual(world.events, ())
+
+    def test_post_construction_nested_promise_mutation_fails_closed(self):
+        promise = PublicPromise("old-word", "Be there at noon")
+        character = CharacterRelationship("miren", outstanding_promises=(promise,))
+        world = SocialWorldSession(self.scope, (character,))
+        object.__setattr__(promise, "description", "x" * 2048)
+        with self.assertRaisesRegex(ValueError, "promise description"):
+            world.preview(beat())
+        self.assertEqual(world.events, ())
 
     def test_counterfactual_model_answers_have_different_world_consequences(self):
         first = beat()
