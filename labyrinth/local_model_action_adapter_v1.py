@@ -27,6 +27,11 @@ _SYSTEM = (
     "The public JSON may include your own previous valid choices; they are "
     "history, NOT extra allowed actions. Avoid repeatedly inspecting an "
     "unchanged room when a currently allowed take or move can advance the quest. "
+    "The allowed_action_json field supplies complete legal JSON objects, "
+    "one per visible action token. Choose exactly ONE of those object values "
+    "without inventing kind or target. If the public quest phase is "
+    "return_to_atrium, retrace (when offered) follows Ariadne's thread "
+    "one step home and uses an EMPTY target string. "
     "No Markdown, no explanation, no score, no test answers, no tools. "
     "The source world decides all actual effects."
 )
@@ -145,6 +150,29 @@ def parse_model_action(raw: object, observation: PublicWorldObservation) -> Worl
     return action
 
 
+def _allowed_action_json(observation: PublicWorldObservation) -> dict[str, dict[str, str]]:
+    """Source action-token grammar -> exact legal request objects, no grader data."""
+    tokens = observation.allowed_actions
+    if type(tokens) is not tuple or not 1 <= len(tokens) <= 32:
+        raise ModelActionBoundaryError("bounded public allowed action tokens required")
+    options: dict[str, dict[str, str]] = {}
+    for token in tokens:
+        if type(token) is not str or not 1 <= len(token) <= 128 or token in options:
+            raise ModelActionBoundaryError("duplicate or invalid public action token")
+        kind, separator, target = token.partition(":")
+        if not separator:
+            target = ""
+        try:
+            action = WorldAction(kind, target)
+        except ValueError as exc:
+            raise ModelActionBoundaryError("public action token has invalid typed form") from exc
+        roundtrip = action.kind + (":" + action.target if action.target else "")
+        if roundtrip != token:
+            raise ModelActionBoundaryError("public action token is not canonical")
+        options[token] = {"kind": action.kind, "target": action.target}
+    return options
+
+
 class LocalModelWorldActor:
     """Actual model-capable adapter, safely unusable without a transport.
 
@@ -182,6 +210,7 @@ class LocalModelWorldActor:
             self._bound_world_sha256 = observation.world_sha256
         public_observation = observation.as_user_message()
         public_data = json.loads(public_observation)
+        public_data["allowed_action_json"] = _allowed_action_json(observation)
         # The last source action's outcome is context *about* this scene,
         # not a change to the scene itself (e.g. repeated inspect). Compare
         # stable public room/inventory/exits/mementos, not the event receipt.
@@ -193,8 +222,10 @@ class LocalModelWorldActor:
             public_data["own_recent_valid_choices"] = list(self._recent_choices)
             public_data["scene_same_as_previous_choice"] = (
                 self._last_public_scene == scene_signature)
-            public_observation = json.dumps(
-                public_data, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        # The literal action objects must be present even on the FIRST turn,
+        # before any valid choice can have populated the actor's history.
+        public_observation = json.dumps(
+            public_data, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         payload = {
             "model": self.config.model,
             "temperature": 0,
@@ -220,9 +251,9 @@ class LocalModelWorldActor:
                     "content": (
                         "Your previous action was rejected as malformed or not "
                         "publicly allowed. Retry with exactly the two string "
-                        "keys kind and target, using an allowed_action_tokens "
-                        "entry from the public JSON. For an untargeted action "
-                        "use an empty target string. No other fields or prose."
+                        "keys kind and target. Copy exactly one object VALUE "
+                        "from allowed_action_json in the public JSON; for "
+                        "retrace use an empty target string. No other fields or prose."
                     ),
                 })
             response = self.transport.complete(

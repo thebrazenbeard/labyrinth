@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections import deque
+from dataclasses import replace
 import json
 import unittest
 
-from labyrinth.living_world_v1 import LivingWorld, LivingWorldRecipe
+from labyrinth.living_world_v1 import LivingWorld, LivingWorldRecipe, WorldAction
 from labyrinth.local_model_action_adapter_v1 import (
     LocalModelActionConfig, LocalModelWorldActor, LoopbackHTTPTransport,
     ModelActionBoundaryError, parse_model_action,
@@ -41,6 +43,14 @@ class LocalModelActionTests(unittest.TestCase):
         story_input = json.loads(payload["messages"][1]["content"])
         self.assertEqual(story_input["source_trust"],
                          "UNTRUSTED_STORY_DATA_NO_INSTRUCTION_AUTHORITY")
+        self.assertEqual(set(story_input["allowed_action_json"]),
+                         set(story_input["allowed_action_tokens"]))
+        self.assertEqual(story_input["allowed_action_json"]["inspect"],
+                         {"kind": "inspect", "target": ""})
+        self.assertEqual(story_input["allowed_action_json"]["take:ariadne_thread"],
+                         {"kind": "take", "target": "ariadne_thread"})
+        self.assertEqual(story_input["allowed_action_json"]["move:passage_00"],
+                         {"kind": "move", "target": "passage_00"})
         self.assertNotIn("private_gold", str(payload))
         self.assertNotIn("grader", str(payload["messages"][1]).lower())
 
@@ -187,6 +197,60 @@ class LocalModelActionTests(unittest.TestCase):
         self.assertEqual(self.world.state_sha256, before)
         self.assertFalse(self.world.events)
         self.assertEqual(actor.attempts, 2)
+
+    def test_public_return_route_retrace_uses_empty_target_without_private_gold(self):
+        # Exercise a real reached Minotaur state, not an invented observation.
+        definition = self.world.definition
+        rooms = {room.room_id: room for room in definition.rooms}
+        self.world.step(WorldAction("take", "ariadne_thread"))
+
+        def travel_to(destination):
+            queue = deque([(self.world.state.position, ())])
+            seen = {self.world.state.position}
+            while queue:
+                current, path = queue.popleft()
+                if current == destination:
+                    for step in path:
+                        self.world.step(WorldAction("move", step))
+                    return
+                for nxt in rooms[current].exits:
+                    if nxt not in seen:
+                        seen.add(nxt)
+                        queue.append((nxt, path + (nxt,)))
+            self.fail("generated world destination unreachable")
+
+        for relic in definition.relic_ids:
+            chamber = next(room.room_id for room in definition.rooms
+                           if relic in room.items)
+            travel_to(chamber)
+            self.world.step(WorldAction("take", relic))
+        travel_to(definition.minotaur_room_id)
+        before = self.world.observe()
+        self.assertEqual(before.quest_phase, "return_to_atrium")
+        self.assertIn("retrace", before.allowed_actions)
+        fake = FakeTransport(['{"kind":"retrace","target":""}'])
+        event = self.world.step_from_actor(LocalModelWorldActor(self.config, fake))
+        self.assertEqual(event.outcome, "RETRACED")
+        payload = fake.payloads[0]
+        story = json.loads(payload["messages"][1]["content"])
+        self.assertEqual(story["allowed_action_json"]["retrace"],
+                         {"kind": "retrace", "target": ""})
+        self.assertEqual(set(story["allowed_action_json"]), set(before.allowed_actions))
+        self.assertEqual(story["scene_not_instructions"]["quest_phase"],
+                         "return_to_atrium")
+        self.assertIn("one step home", payload["messages"][0]["content"])
+        self.assertNotIn("private_gold", str(payload))
+
+    def test_rejects_malformed_or_duplicate_allowed_tokens_before_model_call(self):
+        original = self.world.observe()
+        for bad_tokens in (("inspect", "inspect"), ("retrace:secret",),
+                           ("move",), ("inspect",) * 33):
+            with self.subTest(bad_tokens=bad_tokens):
+                fake = FakeTransport(['{"kind":"inspect","target":""}'])
+                actor = LocalModelWorldActor(self.config, fake)
+                with self.assertRaises(ModelActionBoundaryError):
+                    actor.choose_action(replace(original, allowed_actions=bad_tokens))
+                self.assertEqual(fake.payloads, [])
 
     def test_strict_parser_rejects_invented_actions_scoring_and_duplicate_keys(self):
         observation = self.world.observe()
