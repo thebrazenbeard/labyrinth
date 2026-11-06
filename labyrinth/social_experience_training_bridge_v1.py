@@ -10,7 +10,7 @@ never an assertion of neural learning, private exam success or graduation.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 import os
@@ -314,6 +314,13 @@ class SocialExperienceTrainingBridge:
             self.scope.objective_id, copy.deepcopy(beat),
             copy.deepcopy(model_input), response, copy.deepcopy(assessment.feedback),
         )
+        # A frozen dataclass is not a write-protected capsule:
+        # object.__setattr__ can mutate even nested approval/response fields
+        # while the external trainer holds this callback argument. Bind every
+        # supervised training byte-field before its potentially irreversible
+        # effect; a changed case must never yield a valid source TRAIN receipt.
+        case_sha256 = _sha(json.dumps(
+            asdict(case), sort_keys=True, separators=(",", ":"), ensure_ascii=True))
         self._verify_retained()
         old = self.checkpoint
         index = len(self.training_sparks)
@@ -342,9 +349,11 @@ class SocialExperienceTrainingBridge:
         # Never let the adapter silently start again from W0. Each training
         # spark receives the exact physically retained Wt predecessor.
         supplied_artifact = self.trainer.train_supervised(case, old)
-        if (beat_fingerprint(case.beat) != beat_fingerprint(beat)
+        if (_sha(json.dumps(asdict(case), sort_keys=True,
+                            separators=(",", ":"), ensure_ascii=True)) != case_sha256
+                or beat_fingerprint(case.beat) != beat_fingerprint(beat)
                 or _sha(case.model_input.as_user_message()) != approved_prompt_sha256):
-            raise ValueError("trainer changed the approved TRAIN input after effect")
+            raise ValueError("trainer changed the approved TRAIN case after effect")
         if type(supplied_artifact) is CheckpointPaths:
             physical_paths = supplied_artifact
             manifest_path = None

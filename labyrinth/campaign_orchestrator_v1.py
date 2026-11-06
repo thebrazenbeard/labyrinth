@@ -7,7 +7,8 @@ sandbox, authenticated examiner, independent evaluation or neural proof.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import copy
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 from pathlib import Path
@@ -19,7 +20,7 @@ from .conversation_objective_v1 import ConversationObjectiveProvider
 from .daedalus_social_director_v1 import DaedalusSocialPlanner, SocialScenePolicy
 from .evolutionary_population_v1 import (
     Candidate, Decision, EvaluationPlan, Examination, MutationKind, Population,
-    deterministic_seed, prepare_population, select_generation,
+    _check_plan, deterministic_seed, prepare_population, select_generation,
 )
 from .model_saga_runtime import CheckpointPaths, CheckpointRef, capture_checkpoint
 from .social_experience_training_bridge_v1 import (
@@ -27,7 +28,7 @@ from .social_experience_training_bridge_v1 import (
     SocialExperienceTrainingBridge, SocialTrainingReceipt,
 )
 from .social_world_consequence_v1 import (
-    CharacterRelationship, DialogueBeat, PublicPromise,
+    CharacterRelationship, DialogueBeat, PublicPromise, SocialWorldSession,
 )
 from .training_scope import TrainingScopeSpec
 
@@ -149,6 +150,18 @@ def _hash_public(value: object) -> str:
                                      ensure_ascii=True).encode()).hexdigest()
 
 
+def _experience_hash(experience: CandidateExperience) -> str:
+    """Snapshot every public receipt and training-identity field at issuance."""
+    return _hash_public({
+        "candidate_id": experience.candidate_id,
+        "manifest_path": str(experience.manifest_path),
+        "checkpoint": asdict(experience.checkpoint),
+        "social_receipt": asdict(experience.social_receipt),
+        "ariadne_commit_sha256": experience.ariadne_commit_sha256,
+        "submitted_beats": [asdict(beat) for beat in experience.submitted_beats],
+    })
+
+
 class CampaignOrchestrator:
     """One active, fail-closed development campaign in a single host process.
 
@@ -177,10 +190,15 @@ class CampaignOrchestrator:
         self.origin_manifest_path = origin_manifest_path
         self.scope = scope
         self.provider = provider
-        self.selected_characters = characters
+        self.selected_characters = copy.deepcopy(characters)
+        self._selected_world_hash = _hash_public(_world_state(self.selected_characters))
         self.current_world_id = world_id
         self.world_version = 1
         self._pending: GenerationPendingExam | None = None
+        self._pending_world_hashes: dict[str, str] = {}
+        self._pending_experience_hashes: dict[str, str] = {}
+        self._pending_experience_ids: tuple[str, ...] = ()
+        self._pending_character_copies: dict[str, tuple[CharacterRelationship, ...]] = {}
         self._blocked = False
         self._finished_generations = 0
         journal.initialize(
@@ -203,10 +221,24 @@ class CampaignOrchestrator:
                 or any(type(launch) is not CandidateLaunch for launch in launches)
                 or len({launch.candidate_id for launch in launches}) != len(launches)):
             raise CampaignBoundaryError("two to eight distinct operator candidate launches required")
-        self._blocked = True  # Crash/replay cannot silently duplicate effects.
         descriptor = self.journal.continuation_descriptor()
         if descriptor["status"] != "READY_FOR_EXTERNAL_FULL_STATE_LOAD":
             raise CampaignBoundaryError("Ariadne has indeterminate physical TRAIN")
+        if _hash_public(_world_state(self.selected_characters)) != self._selected_world_hash:
+            raise CampaignBoundaryError("selected public world was changed outside Ariadne")
+        journal_world = next((item for item in descriptor["worlds"]
+                              if item["world_id"] == self.current_world_id), None)
+        if (journal_world is None
+                or _hash_public(journal_world["world_state"]) != self._selected_world_hash):
+            raise CampaignBoundaryError("selected world disagrees with durable Ariadne state")
+        previous_candidates = {item["candidate_id"] for item in descriptor["candidates"]}
+        previous_branches = {item["branch_id"] for item in descriptor["branches"]}
+        if (any(launch.candidate_id in previous_candidates
+                or "branch_" + launch.candidate_id in previous_branches
+                for launch in launches)):
+            raise CampaignBoundaryError(
+                "previously attempted candidate and branch IDs cannot be retried; "
+                "choose fresh IDs for the next maze")
         parent_path = Path(descriptor["selected_parent_manifest_path"])
         parent = _manifest(parent_path)
         origin = _manifest(self.origin_manifest_path)
@@ -217,8 +249,23 @@ class CampaignOrchestrator:
         generation = self._finished_generations + 1
         if descriptor["next_generation_index"] != self._finished_generations:
             raise CampaignBoundaryError("development generation disagrees with selected Ariadne ancestry")
-        experiences: list[CandidateExperience] = []
-        candidates: list[Candidate] = []
+        # No TRAIN side effect is allowed before the unchanged control and
+        # *every* sibling's authorizations, scene and callback preflight pass.
+        # This prevents a bad last sibling or missing control from consuming
+        # the first sibling's irreversible GPU training quantum.
+        control = _manifest(control_manifest_path)
+        if (control["state_sha256"] != parent["state_sha256"]
+                or control["family"] != parent["family"]
+                or control["mutation_kind"] != parent["mutation_kind"]):
+            raise CampaignBoundaryError("unchanged parent control failed pre-effect validation")
+        # Keep the original preregistered examiner cohort detached from all
+        # callback-held caller objects, including frozen-but-mutable dataclasses.
+        sealed_plan = replace(evaluation_plan) if type(evaluation_plan) is EvaluationPlan else evaluation_plan
+        _check_plan(sealed_plan, {l.trainer_id for l in launches}
+                    | {l.candidate_id for l in launches})
+        preflight: list[tuple[CandidateLaunch, DaedalusSocialPlanner,
+                              DialogueBeat, set[DialogueBeat]]] = []
+        seen_journal_dirs: set[Path] = set()
         for launch in launches:
             if (not callable(launch.manifest_builder)
                     or type(launch.max_beats) is not int
@@ -230,20 +277,43 @@ class CampaignOrchestrator:
                 launch.case_id, launch.character_id,
                 region_id=launch.region_id, chapter_id=launch.chapter_id)
             allowed = set(approved)
-            bridge = SocialExperienceTrainingBridge(
-                self.scope, characters=self.selected_characters,
-                checkpoint=parent_checkpoint,
-                responder=launch.responder, operator=launch.operator,
-                trainer=launch.trainer,
-                journal_directory=launch.bridge_journal_directory)
+            if (not callable(getattr(launch.responder, "respond", None))
+                    or not callable(getattr(launch.operator, "assess_train", None))
+                    or not callable(getattr(launch.trainer, "train_supervised", None))):
+                raise CampaignBoundaryError("all sibling callback adapters must be callable")
+            journal_dir = launch.bridge_journal_directory
+            if (not isinstance(journal_dir, Path) or not journal_dir.is_absolute()
+                    or journal_dir.exists() or not journal_dir.parent.is_dir()
+                    or journal_dir in seen_journal_dirs):
+                raise CampaignBoundaryError("all sibling journals need distinct fresh absolute paths")
+            seen_journal_dirs.add(journal_dir)
+            # Model scene proposals are made exactly once in a pure,
+            # side-effect-free public world before *any* journal directory
+            # creation or training. The chosen scene is later adopted by the
+            # identical fresh physical TRAIN world.
+            planning_world = SocialWorldSession(self.scope, self.selected_characters)
             planner = DaedalusSocialPlanner(
-                bridge.world, launch.director,
+                planning_world, launch.director,
                 SocialScenePolicy(minimum_difficulty=1, max_scenes=launch.max_beats))
             # Propose before durable TRAIN intent, but only an approved public
             # TRAIN beat may be trained; model-authored code is never executed.
             first = planner.propose_next()
             if first not in allowed:
                 raise CampaignBoundaryError("Daedalus proposed unapproved Vera TRAIN case")
+            preflight.append((replace(launch), planner, first, allowed))
+        experiences: list[CandidateExperience] = []
+        candidates: list[Candidate] = []
+        for launch, planner, first, allowed in preflight:
+            bridge = SocialExperienceTrainingBridge(
+                self.scope, characters=self.selected_characters,
+                checkpoint=parent_checkpoint,
+                responder=launch.responder, operator=launch.operator,
+                trainer=launch.trainer,
+                journal_directory=launch.bridge_journal_directory)
+            planner.world = bridge.world  # same state, one approved proposal
+            # From the first branch event onward, errors can imply an
+            # ambiguous external TRAIN; never auto-replay those effects.
+            self._blocked = True
             branch_id = "branch_" + launch.candidate_id
             self.journal.record_branch(
                 branch_id=branch_id, world_id=self.current_world_id,
@@ -302,8 +372,25 @@ class CampaignOrchestrator:
             origin_manifest_path=self.origin_manifest_path,
             parent_manifest_path=parent_path,
             control_manifest_path=control_manifest_path,
-            candidates=tuple(candidates), plan=evaluation_plan)
+            candidates=tuple(candidates), plan=sealed_plan)
         pending = GenerationPendingExam(generation, population, tuple(experiences))
+        # Receipt objects are frozen by convention, NOT immutable to a Python
+        # callback using object.__setattr__. Retain a separate pre-examination
+        # source snapshot so a caller cannot forge the world inherited by the
+        # selected learner after receiving the pending campaign receipt.
+        self._pending_world_hashes = {
+            experience.candidate_id: _hash_public(_world_state(experience.social_receipt.characters))
+            for experience in experiences
+        }
+        self._pending_experience_hashes = {
+            experience.candidate_id: _experience_hash(experience)
+            for experience in experiences
+        }
+        self._pending_experience_ids = tuple(x.candidate_id for x in experiences)
+        self._pending_character_copies = {
+            experience.candidate_id: copy.deepcopy(experience.social_receipt.characters)
+            for experience in experiences
+        }
         self._pending = pending
         self._blocked = False
         return pending
@@ -319,6 +406,15 @@ class CampaignOrchestrator:
                 or type(pending) is not GenerationPendingExam):
             raise CampaignBoundaryError("generation must be locally pending and unfinalized")
         self._blocked = True
+        if tuple(x.candidate_id for x in pending.experiences) != self._pending_experience_ids:
+            raise CampaignBoundaryError("pending candidate roster integrity changed")
+        for experience in pending.experiences:
+            if _experience_hash(experience) != self._pending_experience_hashes[experience.candidate_id]:
+                raise CampaignBoundaryError("pending TRAIN receipt integrity changed")
+            expected_hash = self._pending_world_hashes.get(experience.candidate_id)
+            observed_hash = _hash_public(_world_state(experience.social_receipt.characters))
+            if expected_hash is None or expected_hash != observed_hash:
+                raise CampaignBoundaryError("pending social world receipt integrity changed")
         decision = select_generation(pending.population, examinations)
         by_id = {exam.subject_id: exam for exam in examinations}
         for experience in pending.experiences:
@@ -345,9 +441,8 @@ class CampaignOrchestrator:
                 candidate_id=decision.winner_id,
                 selection_reason="source_only_comparative_development_fixture",
                 idempotency_key="select_" + decision.winner_id)
-            chosen = next(experience for experience in pending.experiences
-                          if experience.candidate_id == decision.winner_id)
-            selected_characters = chosen.social_receipt.characters
+            selected_characters = copy.deepcopy(
+                self._pending_character_copies[decision.winner_id])
             next_world = f"world_{self.world_version + 1}"
             self.journal.record_world(
                 world_id=next_world, parent_world_id=self.current_world_id,
@@ -358,16 +453,21 @@ class CampaignOrchestrator:
                 idempotency_key="world_" + next_world)
             self.world_version += 1
             self.current_world_id = next_world
-        self.selected_characters = selected_characters
+        self.selected_characters = copy.deepcopy(selected_characters)
+        self._selected_world_hash = _hash_public(_world_state(self.selected_characters))
         self._finished_generations += 1 if decision.winner_id else 0
         self._pending = None
+        self._pending_world_hashes = {}
+        self._pending_experience_hashes = {}
+        self._pending_experience_ids = ()
+        self._pending_character_copies = {}
         self._blocked = False
         descriptor = self.journal.continuation_descriptor()
         if descriptor["selected_parent_state_sha256"] != decision.selected_state_sha256:
             self._blocked = True
             raise CampaignBoundaryError("Ariadne selected different physical parent")
         return CampaignGenerationResult(
-            decision, descriptor["event_head_sha256"], selected_characters)
+            decision, descriptor["event_head_sha256"], copy.deepcopy(selected_characters))
 
 
 __all__ = ["CampaignBoundaryError", "CandidateLaunch", "CandidateExperience",

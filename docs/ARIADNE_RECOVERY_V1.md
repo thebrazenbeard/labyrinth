@@ -24,6 +24,10 @@ mounts, NAS filesystem durability or live VN1.
    weights), optimizer, scheduler, RNG and data cursor.
 2. Versioned curriculum worlds and their full JSON world states; each world
    version names a known parent world/version.
+   The recovery descriptor's `selected_world_id` follows a champion's
+   subsequently recorded child world, not the pre-TRAIN branch-world ID.
+   This derived pointer is rebuilt from the write-once event history on each
+   readback; merely creating an unrelated proposed world cannot select it.
 3. Branch-specific observations, actions, outcomes and selected navigation
    path, bound to the currently selected physical parent and generation.
 4. Before-effect `TRAIN_PREPARED` with an unguessable effect token, complete

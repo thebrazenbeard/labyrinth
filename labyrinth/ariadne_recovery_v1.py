@@ -142,6 +142,7 @@ def _state():
         "origin": None, "parent": None, "parent_path": None,
         "worlds": {}, "branches": {}, "candidates": {},
         "selections": [], "pending": None, "generation_index": 0,
+        "selected_world_id": None, "selected_world_transition_pending": False,
         "manifest_paths": {}, "idempotency": {}, "event_ids": set(),
     }
 
@@ -174,6 +175,7 @@ def _apply(state: dict[str, Any], event: dict[str, Any], *, fresh_process: bool)
             "version": p["version"], "curriculum": p["curriculum"],
             "world_state": p["world_state"],
         }
+        state["selected_world_id"] = p["world_id"]
         return
     if state["origin"] is None:
         raise LineageIntegrityError("first event must establish physical W0")
@@ -190,6 +192,15 @@ def _apply(state: dict[str, Any], event: dict[str, Any], *, fresh_process: bool)
         _object(p["curriculum"], "curriculum")
         _object(p["world_state"], "world state")
         state["worlds"][p["world_id"]] = p
+        # An evolved world becomes the selected learner's next entrance
+        # ONLY when it extends the world of the just-selected champion.
+        # Merely creating a possible world must not change the lineage.
+        if state["selected_world_transition_pending"]:
+            if p["parent_world_id"] != state["selected_world_id"]:
+                raise LineageIntegrityError(
+                    "selected champion's successor world must extend its current world")
+            state["selected_world_id"] = p["world_id"]
+            state["selected_world_transition_pending"] = False
     elif kind == "BRANCH_EXPERIENCE":
         p = _fields(payload, "branch_id", "world_id", "generation_index",
                     "parent_state_sha256", "experience", "selected_path")
@@ -343,6 +354,7 @@ def _apply(state: dict[str, Any], event: dict[str, Any], *, fresh_process: bool)
         state["parent_path"] = candidate["child_manifest_path"]
         state["parent"] = _manifest(state["parent_path"], fresh_process=False)
         state["generation_index"] += 1
+        state["selected_world_transition_pending"] = True
     else:
         raise LineageIntegrityError("unknown Ariadne event kind")
 
@@ -604,8 +616,6 @@ class AriadneJournal:
                 raise LineageIntegrityError("journal head differs from external witness: rollback/fork")
             pending = state["pending"]
             selected = state["selections"]
-            last_world = (state["branches"][selected[-1]["branch_id"]]["world_id"]
-                          if selected else next(iter(state["worlds"])))
             return {
                 "schema": SCHEMA,
                 "status": ("INDETERMINATE_TRAINER_EFFECT" if pending else
@@ -614,7 +624,7 @@ class AriadneJournal:
                 "next_generation_index": state["generation_index"],
                 "selected_parent_state_sha256": state["parent"]["state_sha256"],
                 "selected_parent_manifest_path": state["parent_path"],
-                "selected_world_id": last_world,
+                "selected_world_id": state["selected_world_id"],
                 "worlds": list(state["worlds"].values()),
                 "branches": list(state["branches"].values()),
                 "candidates": list(state["candidates"].values()),

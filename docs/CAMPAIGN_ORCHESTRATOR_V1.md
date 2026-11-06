@@ -53,6 +53,17 @@ director may propose only one of the public TRAIN beats independently
 whitelisted by the operator's conversation provider. The response and
 operator feedback never receive evaluation gold.
 
+Before any TRAIN effect or bridge-directory allocation, the orchestrator
+checks the unchanged physical control, predeclared development examiner plan,
+all sibling IDs, callback capabilities, TRAIN-only scene authorization, and
+every fresh journal path. Scene directors propose once against a source-owned
+planning world; their approved proposals are carried into the physical world
+without calling the director again. Bad later-sibling metadata can be fixed
+and retried without consuming the first sibling's training effect. Examiner
+plan fields are copied before callbacks, so later model/trainer adapters cannot
+rewrite the recorded precommit cohort. Previously consumed candidate and branch
+IDs are rejected *before* any effect; a new maze requires fresh identifiers.
+
 For each sibling:
 
 | Boundary | Durable proof class |
