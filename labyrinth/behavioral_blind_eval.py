@@ -62,7 +62,11 @@ def _exact_sha(value: Any) -> str:
 
 
 def _canonical_digest(value: Any) -> str:
-    return sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+    try:
+        payload = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except UnicodeError as error:
+        raise ValueError("invalid Unicode scalar in evaluation input") from error
+    return sha256(payload).hexdigest()
 
 
 def _check_record(record: Mapping[str, Any], *, actual_required: bool) -> None:
