@@ -29,10 +29,30 @@ F32 weight candidates without overwriting W0, then feed
 An optional [local public inference probe](docs/LOCAL_FULL_STATE_PROBE_V1.md)
 can compare identical prompts on W0, unchanged control and candidate states
 through a user-operated KoboldCPP/llama.cpp-compatible loopback service.
-All integrations currently use source-controlled fixture callbacks and
-synthetic model tensors. No live Vera/Qwen learning improvement, loaded-model
-attestation, private Minotaur qualification, VN1 installation or protected
-promotion has been established.
+The [read-only GGUF entrance](docs/GGUF_ENTRANCE_FINGERPRINT_V1.md) and
+[dual-track W0 inspector](docs/DUAL_TRACK_W0_ENTRANCE_V1.md) keep runtime
+quantized model files distinct from a trainable HF checkpoint. An
+[opt-in local model actor](docs/LOCAL_MODEL_ACTION_ADAPTER_V1.md) can ask a
+user-managed loopback server to choose a strictly bounded public world action;
+its real-model route has **not** been run or attested. The
+[conversation quality screen](docs/VERA_GGUF_CONVERSATION_QUALITY_V1.md)
+compares public Vera dialogue with an unchanged control, without requiring
+outside reviewers for development. A runnable
+[two-cycle saga fixture](docs/SOURCE_ONLY_LIVING_SAGA_DEMO_V1.md) now has a
+[reverified human-readable chronicle and discovered-route maps](docs/SAGA_REPLAY_V1.md):
+
+```bash
+python -m labyrinth.source_only_saga_demo_v1
+python -m labyrinth.saga_replay_v1
+```
+
+The separate [host broker dry-run](docs/TRAININGDAY_OWNER_BROKER_DRYRUN_V1.md)
+checks a possible owner-bound local launch protocol but explicitly does not
+grant physical GPU training. The two-cycle fixture actor is a deterministic
+planner, its dialogue writer a template, its tensor edits toy bytes, and its
+examiner metrics fabricated. No live Vera/Qwen learning improvement,
+loaded-model attestation, private Minotaur qualification, VN1 installation
+or protected promotion has been established.
 
 It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path. A bounded CPU smoke run on Lappy demonstrated numerical adapter changes and fresh-process reload with a tiny, **randomly initialized** HF model; it did **not** demonstrate improved reasoning.
 
