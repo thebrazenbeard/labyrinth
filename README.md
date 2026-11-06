@@ -45,6 +45,17 @@ one free-text physical proposal rather than an `allowed_action_json` menu,
 and separates physical outcome from ex-ante reasoning and Minotaur appeals.
 This is a small, source-only logic fixture with an opt-in local-model actor,
 not demonstrated reasoning transfer or independently witnessed judgment. The
+[Kobayashi Maru encounter contract](docs/KOBAYASHI_MARU_V1.md) requires one
+near-constant, believed-unwinnable adversarial test within each maze. An
+**opt-in source-level wrapper** now implements the encounter for wrapped
+`LivingWorld` mazes; legacy runners are not automatically migrated. A separate
+opt-in local-model runner can traverse the public maze and request one
+free-text Kobayashi intervention through a configured model transport, but
+its presence does not attest real host inference. The encounter's local loss
+does **not** fail the larger Labyrinth; Minotaur may refute known proposals,
+while unfamiliar proposals remain open to evidence-based challenge. No
+trained Minotaur weights, real model learning, or general-world impossibility
+are established. The
 [conversation quality screen](docs/VERA_GGUF_CONVERSATION_QUALITY_V1.md)
 compares public Vera dialogue with an unchanged control, without requiring
 outside reviewers for development. A runnable
