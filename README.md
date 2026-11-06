@@ -34,7 +34,11 @@ The [read-only GGUF entrance](docs/GGUF_ENTRANCE_FINGERPRINT_V1.md) and
 quantized model files distinct from a trainable HF checkpoint. An
 [opt-in local model actor](docs/LOCAL_MODEL_ACTION_ADAPTER_V1.md) can ask a
 user-managed loopback server to choose a strictly bounded public world action;
-its real-model route has **not** been run or attested. The
+an [opt-in public-world episode runner](docs/LOCAL_MODEL_WORLD_RUNNER_V1.md)
+now records the resulting source-owned actions, states, and trace SHA-256.
+An operator-loopback smoke probe obtained **one valid action from a real local
+model**; an entire neural-driven episode and the loaded model's artifact
+identity are **not yet attested**. The
 [conversation quality screen](docs/VERA_GGUF_CONVERSATION_QUALITY_V1.md)
 compares public Vera dialogue with an unchanged control, without requiring
 outside reviewers for development. A runnable
@@ -44,6 +48,10 @@ outside reviewers for development. A runnable
 ```bash
 python -m labyrinth.source_only_saga_demo_v1
 python -m labyrinth.saga_replay_v1
+# On the machine hosting your already-running OpenAI-compatible local model:
+python -m labyrinth.local_model_world_runner_v1 --allow-local-inference \
+  --model YOUR_LOCAL_MODEL --port 11434 --reasoning-effort none \
+  --json-mode --max-completion-tokens 128 --max-actions 48
 ```
 
 The separate [host broker dry-run](docs/TRAININGDAY_OWNER_BROKER_DRYRUN_V1.md)

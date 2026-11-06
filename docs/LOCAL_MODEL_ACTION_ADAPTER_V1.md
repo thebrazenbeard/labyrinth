@@ -3,7 +3,9 @@
 `labyrinth/local_model_action_adapter_v1.py` implements the missing
 `ModelWorldActor.choose_action` seam for a **user-managed, OpenAI-compatible
 local chat endpoint**. This is only a source feature; no model is running,
-installed, loaded or verified by its presence in Git.
+installed, loaded or verified *merely by its presence in Git*. A bounded
+operator-host probe has separately obtained a real model's valid public
+action, but has not demonstrated a full neural-driven episode or weight update.
 
 The actor receives **only** `LivingWorld.observe()` public story JSON (known
 room, visible exits/items, public mementos, allowed action tokens). It never
@@ -18,7 +20,9 @@ be one strict JSON object like:
 The adapter rejects duplicate JSON keys, code fences, extra grading fields,
 unknown action types, invented targets and actions absent from the exact
 public observation. On malformed model output it retries at most twice (three
-attempts total); failure leaves the world unchanged. Only `LivingWorld.step`
+attempts total), including a static source-owned schema correction that never
+echoes model text; truncated/non-normal completions are rejected. Failure
+leaves the world unchanged. Only `LivingWorld.step`
 changes public game state. The model does **not** supply an effect or grade.
 
 ## Using the source adapter
@@ -34,7 +38,10 @@ world = LivingWorld(LivingWorldRecipe(
 
 # Explicit operator decision required for actual loopback HTTP.
 actor = LocalModelWorldActor(
-    LocalModelActionConfig(port=5001, model="local-model", retries=1),
+    LocalModelActionConfig(
+        port=11434, model="local-model", retries=1,
+        reasoning_effort="none", json_mode=True, max_tokens=128,
+    ),
     LoopbackHTTPTransport(allow_http=True),
 )
 
@@ -50,6 +57,13 @@ environment proxies disabled, bounded 16-KiB request / 64-KiB response,
 0.5–30-second timeout, and restricted retry budget. It is compatible in
 principle with local servers offering OpenAI chat completions, including
 KoboldCPP variants that support that API; **specific builds are not verified**.
+The compatibility settings in this example are optional: `reasoning_effort`
+and `response_format=json_object` are used only when a particular local
+server supports them. They remain absent in the default payload to avoid
+silently assuming all OpenAI-compatible servers implement Ollama controls.
+Completion tokens are bounded to 32..256; values outside this range are
+rejected. The [episode runner](LOCAL_MODEL_WORLD_RUNNER_V1.md) exposes the
+same controls at its CLI.
 
 ```bash
 python -m unittest -q tests.test_local_model_action_adapter_v1

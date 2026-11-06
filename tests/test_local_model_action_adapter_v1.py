@@ -51,6 +51,59 @@ class LocalModelActionTests(unittest.TestCase):
         self.assertEqual(event.outcome, "OBSERVED")
         self.assertEqual(actor.attempts, 2)
         self.assertEqual(len(actor.rejections), 1)
+        self.assertEqual(len(fake.payloads[0]["messages"]), 2)
+        self.assertEqual(len(fake.payloads[1]["messages"]), 3)
+        self.assertIn("two string keys kind and target",
+                      fake.payloads[1]["messages"][2]["content"])
+
+    def test_explicit_ollama_compatibility_controls_are_bounded(self):
+        config = LocalModelActionConfig(
+            port=11434, model="vera-qwen35:trial-20261029", retries=1,
+            reasoning_effort="none", json_mode=True, max_tokens=128)
+        fake = FakeTransport(['{"action":"take","target":"ariadne_thread"}',
+                              '{"kind":"take","target":"ariadne_thread"}'])
+        event = self.world.step_from_actor(LocalModelWorldActor(config, fake))
+        self.assertEqual(event.outcome, "ACQUIRED")
+        self.assertEqual(fake.payloads[0]["reasoning_effort"], "none")
+        self.assertEqual(fake.payloads[0]["response_format"], {"type": "json_object"})
+        self.assertEqual(fake.payloads[0]["max_tokens"], 128)
+        self.assertIn("schema", fake.payloads[1]["messages"][1]["content"])
+        for changes in ({"reasoning_effort": "xhigh"},
+                        {"reasoning_effort": False}, {"json_mode": 1},
+                        {"max_tokens": 1024}, {"max_tokens": True}):
+            with self.subTest(changes=changes):
+                with self.assertRaises(ModelActionBoundaryError):
+                    LocalModelActionConfig(port=11434, model="local", **changes)
+
+    def test_truncated_thinking_completion_is_rejected_and_retried(self):
+        class LengthFirst(FakeTransport):
+            def complete(self, config, payload):
+                value = super().complete(config, payload)
+                if len(self.payloads) == 1:
+                    value["choices"][0]["finish_reason"] = "length"
+                return value
+
+        fake = LengthFirst(['{"kind":"inspect","target":""}',
+                            '{"kind":"take","target":"ariadne_thread"}'])
+        actor = LocalModelWorldActor(self.config, fake)
+        self.assertEqual(self.world.step_from_actor(actor).outcome, "ACQUIRED")
+        self.assertIn("completion budget", actor.rejections[0])
+
+    def test_other_abnormal_finish_rejected_without_mutating_world(self):
+        class ToolFinish(FakeTransport):
+            def complete(self, config, payload):
+                value = super().complete(config, payload)
+                value["choices"][0]["finish_reason"] = "tool_calls"
+                return value
+
+        actor = LocalModelWorldActor(
+            LocalModelActionConfig(port=5001, model="fake", retries=0),
+            ToolFinish(['{"kind":"take","target":"ariadne_thread"}']))
+        original = self.world.state_sha256
+        with self.assertRaisesRegex(ModelActionBoundaryError, "exhausted"):
+            self.world.step_from_actor(actor)
+        self.assertIn("without a normal stop", actor.rejections[0])
+        self.assertEqual(self.world.state_sha256, original)
 
     def test_invalid_attempts_do_not_modify_world_state(self):
         before = self.world.state_sha256

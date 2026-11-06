@@ -40,6 +40,11 @@ class LocalModelActionConfig:
     host: str = "127.0.0.1"
     timeout_seconds: float = 10.0
     retries: int = 1
+    # Optional local-server compatibility controls. 'none' can keep a
+    # thinking model from exhausting its entire completion on hidden thought.
+    reasoning_effort: str | None = None
+    json_mode: bool = False
+    max_tokens: int = 64
 
     def __post_init__(self):
         if (type(self.host) is not str or self.host not in ("127.0.0.1", "::1")
@@ -47,7 +52,12 @@ class LocalModelActionConfig:
                 or type(self.model) is not str or not _MODEL.fullmatch(self.model)
                 or type(self.timeout_seconds) not in (float, int)
                 or not 0.5 <= self.timeout_seconds <= 30.0
-                or type(self.retries) is not int or not 0 <= self.retries <= 2):
+                or type(self.retries) is not int or not 0 <= self.retries <= 2
+                or self.reasoning_effort not in (None, "none", "minimal", "low",
+                                                 "medium", "high")
+                or type(self.json_mode) is not bool
+                or type(self.max_tokens) is not int
+                or not 32 <= self.max_tokens <= 256):
             raise ModelActionBoundaryError("local action model must have bounded literal loopback settings")
 
 
@@ -158,16 +168,35 @@ class LocalModelWorldActor:
         payload = {
             "model": self.config.model,
             "temperature": 0,
-            "max_tokens": 64,
+            "max_tokens": self.config.max_tokens,
             "stream": False,
             "messages": [
                 {"role": "system", "content": _SYSTEM},
                 {"role": "user", "content": observation.as_user_message()},
             ],
         }
+        if self.config.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.config.reasoning_effort
+        if self.config.json_mode:
+            payload["response_format"] = {"type": "json_object"}
         for attempt in range(self.config.retries + 1):
             self.attempts += 1
-            response = self.transport.complete(self.config, payload)
+            # Each retry gets a new payload. Failure feedback is source-owned
+            # and does not quote untrusted model output or expose any grade.
+            messages = list(payload["messages"])
+            if attempt:
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "Your previous action was rejected as malformed or not "
+                        "publicly allowed. Retry with exactly the two string "
+                        "keys kind and target, using an allowed_action_tokens "
+                        "entry from the public JSON. For an untargeted action "
+                        "use an empty target string. No other fields or prose."
+                    ),
+                })
+            response = self.transport.complete(
+                self.config, {**payload, "messages": messages})
             try:
                 if (type(response) is not dict
                         or type(response.get("choices")) is not list
@@ -175,6 +204,11 @@ class LocalModelWorldActor:
                         or type(response["choices"][0]) is not dict
                         or type(response["choices"][0].get("message")) is not dict):
                     raise ModelActionBoundaryError("malformed local chat-completion shape")
+                reason = response["choices"][0].get("finish_reason")
+                if reason == "length":
+                    raise ModelActionBoundaryError("model exhausted its completion budget")
+                if reason not in (None, "stop"):
+                    raise ModelActionBoundaryError("model completion ended without a normal stop")
                 raw = response["choices"][0]["message"].get("content")
                 return parse_model_action(raw, observation)
             except ModelActionBoundaryError as exc:
