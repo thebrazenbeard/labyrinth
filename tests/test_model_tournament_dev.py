@@ -4,9 +4,9 @@ import copy
 import unittest
 
 from labyrinth.model_tournament_dev import (
-    adjudicate_two_model_dev,
+    adjudicate_two_model_dev as _adjudicate,
     canonical_digest,
-    prepare_two_model_packets,
+    prepare_two_model_packets as _prepare,
 )
 
 
@@ -17,6 +17,19 @@ CASES = {
 }
 M1 = "1" * 64
 M2 = "2" * 64
+
+
+def plan(bank, repeats=(0,)):
+    return {case: list(repeats) for case in bank}
+
+
+def prepare_two_model_packets(rows, bank, *, seed):
+    return _prepare(rows, bank, seed=seed, repeat_plan=plan(bank))
+
+
+def adjudicate_two_model_dev(packets, custody, grades, *, bank):
+    return _adjudicate(packets, custody, grades, bank=bank,
+                       repeat_plan=plan(bank))
 
 
 def trials():
@@ -215,6 +228,71 @@ class TwoModelDevTests(unittest.TestCase):
                   "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
                   "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
         with self.assertRaisesRegex(ValueError, "model chat-template drift"):
+            adjudicate_two_model_dev(masked, key, grades, bank=CASES)
+
+    def test_entire_repeat_deletion_rejected_against_external_plan(self):
+        with self.assertRaisesRegex(ValueError, "external repeat plan"):
+            _prepare(self.rows, CASES, seed=8,
+                     repeat_plan=plan(CASES, repeats=(0, 1)))
+        two_repeat_rows = trials() + copy.deepcopy(trials())
+        for row in two_repeat_rows[len(self.rows):]:
+            row["repeat"] = 1
+        original_plan = plan(CASES, repeats=(0, 1))
+        masked, key = _prepare(two_repeat_rows, CASES, seed=8,
+                               repeat_plan=original_plan)
+        masked["packets"] = [p for p in masked["packets"] if p["repeat"] != 1]
+        key["key"] = {pid: m for pid, m in key["key"].items() if m["repeat"] != 1}
+        key["packet_manifest_sha256"] = canonical_digest(masked)
+        grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
+                  "scores": {p["packet_id"]: 4 for p in masked["packets"]}}
+        with self.assertRaisesRegex(ValueError, "repeat plan"):
+            _adjudicate(masked, key, grades, bank=CASES, repeat_plan=original_plan)
+
+    def test_rehashed_overlong_system_rejected_at_adjudication(self):
+        masked, key = prepare_two_model_packets(self.rows, CASES, seed=8)
+        p = masked["packets"][0]
+        p["system"] = "s" * 4097
+        key["key"][p["packet_id"]]["input_sha256"] = canonical_digest(
+            {"system": p["system"], "prompt": p["prompt"]})
+        key["packet_manifest_sha256"] = canonical_digest(masked)
+        grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
+                  "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
+        with self.assertRaisesRegex(ValueError, "system context"):
+            adjudicate_two_model_dev(masked, key, grades, bank=CASES)
+
+    def test_rehashed_ansi_packet_id_rejected(self):
+        masked, key = prepare_two_model_packets(self.rows, CASES, seed=8)
+        p = masked["packets"][0]
+        old_id = p["packet_id"]
+        p["packet_id"] = "T\x1b[31m"
+        key["key"][p["packet_id"]] = key["key"].pop(old_id)
+        key["packet_manifest_sha256"] = canonical_digest(masked)
+        grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
+                  "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
+        with self.assertRaisesRegex(ValueError, "packet IDs"):
+            adjudicate_two_model_dev(masked, key, grades, bank=CASES)
+
+    def test_stop_reason_is_preserved_in_custody_without_unmasking_packets(self):
+        before, key_before = prepare_two_model_packets(self.rows, CASES, seed=8)
+        second_rows = copy.deepcopy(self.rows)
+        second_rows[0]["stop_reason"] = "eos"
+        after, key_after = prepare_two_model_packets(second_rows, CASES, seed=8)
+        self.assertEqual(before, after)
+        self.assertNotEqual(key_before, key_after)
+        self.assertEqual({m["stop_reason"] for m in key_after["key"].values()}, {"stop", "eos"})
+        self.assertTrue(all("stop_reason" not in p for p in after["packets"]))
+
+    def test_adjudicator_rejects_relabel_to_truncation_after_prepare(self):
+        masked, key = prepare_two_model_packets(self.rows, CASES, seed=8)
+        packet_id = masked["packets"][0]["packet_id"]
+        key["key"][packet_id]["stop_reason"] = "length"
+        grades = {"packet_manifest_sha256": key["packet_manifest_sha256"],
+                  "reviewer": {"identity": "reviewer-X", "evidence_class": "HUMAN_REVIEW"},
+                  "scores": {packet["packet_id"]: 4 for packet in masked["packets"]}}
+        with self.assertRaisesRegex(ValueError, "complete response"):
             adjudicate_two_model_dev(masked, key, grades, bank=CASES)
 
     def test_bad_bank_and_bool_values_rejected(self):
