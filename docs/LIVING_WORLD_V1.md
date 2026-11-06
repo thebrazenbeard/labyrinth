@@ -108,20 +108,39 @@ and retraced to `ariadne_atrium`; no model actions were rejected. The complete
 returned JSON's canonical `trace_sha256` was
 `d77c058dccc3c107567f4db9d53719f6e01f99ef1067fd84eaaaacde23e6677a`.
 The source-owned terminal state reported `met_minotaur=true` and
-`completed=true`.
+`completed=true`. Two further real loopback runs against the **same model and
+code head**, changing only the public maze configuration and action ceiling,
+also finished:
+
+| Public seed | Difficulty | Action ceiling | Actual actions | Result | Trace SHA-256 |
+| --- | --- | --- | --- | --- | --- |
+| 71 | 1 | 64 | 48 | PUBLIC_QUEST_COMPLETED | `d77c058dccc3c107567f4db9d53719f6e01f99ef1067fd84eaaaacde23e6677a` |
+| 72 | 1 | 64 | 46 | PUBLIC_QUEST_COMPLETED | `7359511e13bf768cdf32bef725e41209adb0aebf271c69a8a9f2ec852f8f16b4` |
+| 73 | 2 | 96 | 40 | PUBLIC_QUEST_COMPLETED | `daff01abc0eb32dceb3c1060f8a3fa10a4890deb82f004fca97b36be60adb130` |
+
+The difficulty-2 seed required two separate seals. Every run observed a
+physical Minotaur encounter and returned to `ariadne_atrium` with zero rejected
+actions. For seed 72 append `--seed 72` to the command and retain 64 steps;
+for seed 73 append `--seed 73 --difficulty 2 --max-actions 96` (the last flag
+overrides the earlier `--max-actions 64`). The 40/46/48 counts are **measured
+steps**, not enforced route templates or fabricated offline-simulator actions.
+The host tool returned condensed results and source-computed digests; **raw
+full action transcripts, authenticated host signatures and independent model
+server attestations have not yet been deposited into durable custody**.
 
 Earlier bounded attempts provide essential negatives: an 8-action run had
 repeated inspections; subsequent navigation runs improved partial progress;
 the first 24-action run using the exact public JSON-action mapping exhausted
 its budget before reaching the Minotaur. Raising the action ceiling to 64
 enabled the 48-action completion, including numerous unnecessary detours.
-**One successful bounded episode does not establish reliability across seeds,
+**Three successful bounded episodes do not establish broad reliability,
 learned policy improvement, weight changes, or private Minotaur examination.**
 
 ## Unfinished real-world integration
 
-- Multi-seed independent local-model navigation evaluation with unchanged
-  control, time/step efficiency measures, retries and full trace custody.
+- Freeze an unchanged model, adapter and 64-action ceiling for at least ten
+  unseen seeds; run ablations and unchanged controls, measure success and
+  detours, and put full host-authenticated traces into durable custody.
 - Authentic operator approval and case separation for newly generated
   dialogue scenes. Model-authored story data must never be promoted to
   high-priority instructions or executable code.
