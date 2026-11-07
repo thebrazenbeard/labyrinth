@@ -35,6 +35,14 @@ The effective semantic sample size is **one mechanical family within TRAIN**
 and **one within HELDOUT**, even if thousands of seeds are evaluated. Neither
 group can be reclassified as a set of independent graduation families.
 
+A deterministic 100-seed control sweep (seeds `0..99`, zero neural updates)
+demonstrates the danger: a frozen table memorized for TRAIN seed 0 still wins
+**6/100 TRAIN relabelings** because some permutations produce the same visible
+transition map. It wins **0/100 HELDOUT** cases. The public-observation
+symbolic explorer wins **100/100 TRAIN** and **100/100 HELDOUT** cases within
+the action budget. These are synthetic solver/control scores, not model
+learning results, and the 100 relabelings are not 100 independent families.
+
 ## Controls and oracle
 
 - `symbolic_explorer`: a **non-learning**, deterministic graph learner uses

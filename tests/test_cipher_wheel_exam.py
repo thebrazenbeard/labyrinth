@@ -367,6 +367,19 @@ class CipherWheelHostileTests(unittest.TestCase):
             self.assertEqual(receipt["verdict"], "VERIFIED_FAILURE")
             self.assertTrue(verify_receipt_replay(receipt))
 
+    def test_100_seed_no_update_control_shows_relabeling_collision_not_learning(self):
+        counts = {}
+        for heldout in (False, True):
+            wins = 0
+            for seed in range(100):
+                receipt = memorized_control(dut.CandidateSession(
+                    dut.make_world(seed, heldout=heldout)))
+                wins += int(receipt["verdict"] == "VERIFIED_WIN")
+            counts[heldout] = wins
+        # Six equivalent surface mappings accidentally match the frozen
+        # answer; no new structural mechanism was learned in those cases.
+        self.assertEqual(counts, {False: 6, True: 0})
+
     def test_public_only_symbolic_explorer_solves_many_relabels_and_both_mechanics(self):
         for heldout in (False, True):
             for seed in range(25):
