@@ -80,7 +80,8 @@ class CrossFamilyTrials(unittest.TestCase):
     def test_optional_candidate_is_blocked_without_separate_authorization(self):
         spy = UnattestedSpyAdapter()
         with self.assertRaises(PermissionError):
-            run_cross_exam((ExamSpec("oracle", 0),), candidate_factory=lambda _: spy)
+            run_cross_exam((ExamSpec("oracle", 0),), candidate_factory=lambda _: spy,
+                           trust_host_python_factory=True)
         self.assertEqual(spy.requests, [])
 
     def test_authorized_mock_candidate_gets_public_only_input_and_no_false_credit(self):
@@ -90,7 +91,8 @@ class CrossFamilyTrials(unittest.TestCase):
             factory_inputs.append(public)
             return spy
         results = run_cross_exam((ExamSpec("oracle", 0),), candidate_factory=factory,
-                                 authorize_local_adapter=True)
+                                 authorize_local_adapter=True,
+                                 trust_host_python_factory=True)
         self.assertEqual(len(factory_inputs), 1)
         self.assertEqual(set(factory_inputs[0]),
                          {"prompt", "questions", "remaining_queries", "submissions", "answers"})
@@ -106,7 +108,8 @@ class CrossFamilyTrials(unittest.TestCase):
     def test_oracle_can_make_five_queries_then_one_final_claim(self):
         policy = QueryThenPolicyAdapter()
         result = run_cross_exam((ExamSpec("oracle", 0),), candidate_factory=lambda _: policy,
-                                authorize_local_adapter=True)[0]
+                                authorize_local_adapter=True,
+                                trust_host_python_factory=True)[0]
         self.assertEqual(policy.index, 6)
         self.assertEqual(len(result.candidate.turns), 6)
         self.assertEqual(result.candidate.final_verdict, "VERIFIED_WIN")
@@ -117,7 +120,8 @@ class CrossFamilyTrials(unittest.TestCase):
     def test_oracle_sixth_model_response_does_not_grant_sixth_query(self):
         script = FixedActionAdapter(("alpha",) * 6)
         result = run_cross_exam((ExamSpec("oracle", 0),),
-                                candidate_factory=lambda _: script)[0]
+                                candidate_factory=lambda _: script,
+                                trust_host_python_factory=True)[0]
         self.assertEqual(len(result.candidate.turns), 6)
         self.assertEqual(result.candidate.final_verdict, "ACTION_BUDGET_EXCEEDED")
         self.assertFalse(result.candidate.verified_escape)
@@ -127,14 +131,16 @@ class CrossFamilyTrials(unittest.TestCase):
             public["prompt"] = "rewritten by untrusted factory"
             return UnattestedSpyAdapter()
         results = run_cross_exam((ExamSpec("oracle", 0),), candidate_factory=malicious,
-                                 authorize_local_adapter=True)
+                                 authorize_local_adapter=True,
+                                 trust_host_python_factory=True)
         self.assertTrue(results[0].baseline_policy_verified)
         self.assertNotIn("rewritten", results[0].candidate.public_start_json)
 
     def test_candidate_fixed_control_remains_zero_update_comparison(self):
         candidate = FixedActionAdapter(("north", "east", "take", "west", "north", "offer", "leave"),
                                        model_id="fixed:candidate-memorized")
-        results = run_cross_exam((ExamSpec("constant", 0),), candidate_factory=lambda _: candidate)
+        results = run_cross_exam((ExamSpec("constant", 0),), candidate_factory=lambda _: candidate,
+                                 trust_host_python_factory=True)
         self.assertIsNotNone(results[0].candidate)
         self.assertEqual(results[0].candidate.adapter_provenance, "DETERMINISTIC_CONTROL")
         self.assertTrue(results[0].candidate.verified_escape)
