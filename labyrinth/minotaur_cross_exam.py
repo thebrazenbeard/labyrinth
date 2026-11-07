@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import re
+import secrets
 from typing import Any, Callable, Mapping
 
 from .adapters import ModelAdapter
@@ -259,6 +260,11 @@ def run_cross_exam(specs: tuple[ExamSpec, ...], *,
     results = []
     for spec in specs:
         public, session_factory = make_public_case(spec)
+        # Hidden examiner seed and model-sampling seed are separate. Exposing
+        # the former lets a candidate reconstruct deterministic private cases
+        # from public source, even across an OS process boundary.
+        # Use one independent draw for both matched arms, receipt-bound.
+        model_rng_seed = secrets.randbelow(2**31)
         # A provider/factory may be untrusted; never give it ExamSpec (whose
         # sealed control and seed are host-side), Case, or the session factory.
         # The copied candidate view is exactly the public JSON projection.
@@ -269,11 +275,12 @@ def run_cross_exam(specs: tuple[ExamSpec, ...], *,
             from .adapters import ReplayAdapter
             if type(candidate) not in (FixedActionAdapter, ReplayAdapter):
                 raise PermissionError("unattested candidate requires separate local adapter authorization")
-        candidate_receipt = (run_candidate(public, session_factory, candidate, seed=spec.seed,
+        candidate_receipt = (run_candidate(public, session_factory, candidate,
+                                          seed=model_rng_seed,
                                           authorize_local_adapter=authorize_local_adapter)
                              if candidate is not None else None)
         baseline = run_candidate(public, session_factory, PublicZeroUpdateAdapter(spec.family),
-                                 seed=spec.seed, authorize_local_adapter=True)
+                                 seed=model_rng_seed, authorize_local_adapter=True)
         results.append(CrossCaseReceipt(
             family=spec.family, seed=spec.seed, baseline_kind="ZERO_UPDATE_PUBLIC_ONLY",
             baseline=baseline, candidate=candidate_receipt,
