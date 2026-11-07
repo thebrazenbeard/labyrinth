@@ -7,6 +7,16 @@ match is therefore not evidence that it was inferred from experience.
 Observation coverage can itself be scripted or memorized, and the posterior
 uses only the declared 242-conjunction hypothesis language. Neither a narrow
 posterior nor this module authorizes Minotaur graduation or model promotion.
+
+Bounded independent dynamic programming over every legal action prefix of
+length <=10 finds the strongest rebound-world posterior still contains four
+conjunctions. Thus the `OBSERVATIONALLY_IDENTIFIED_WITHIN_DSL` guard is
+unreachable for this particular fixed world and budget. That is a formal
+finite-DSL, finite-budget statement, not proof that an overlooked real-world
+solution is impossible. The executable certificate is in the separate
+`test_minotaur_identifiability_bound` regression.
+Independent hypothetical thirteen-action analysis can narrow this DSL to one
+rule, but thirteen actions are forbidden by the actual ten-action exam.
 """
 
 from __future__ import annotations
