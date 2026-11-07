@@ -25,7 +25,7 @@ import time
 from typing import Any
 
 from labyrinth.minotaur_process_adapter import ProcessModelAdapter
-from labyrinth.switchback_circuit import MAX_PROBES, make_case
+from labyrinth.switchback_circuit import MAX_MOVES, MAX_PROBES, make_case
 from labyrinth.switchback_oracle import verify_receipt_replay
 from scripts.switchback_model_trial import (
     CommandProcessAdapter, TrialConfig, _canonical, _git_source_commit,
@@ -37,8 +37,87 @@ SCHEMA = "labyrinth.switchback-batch-process.v1"
 MAX_CASES = 32
 MAX_BATCH_CALLS = MAX_CASES * (MAX_PROBES + 1)
 CASE_ADMISSION_OVERHEAD_SECONDS = 1.0
+
+
 def _sha(value: object) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def _source_commit_shape_valid(source: object) -> bool:
+    """Check claimed source metadata shape; this is NOT Git attestation."""
+    if type(source) is not dict or set(source) != {"sha", "worktree_dirty"}:
+        return False
+    rev = source["sha"]
+    dirty = source["worktree_dirty"]
+    if rev is None:
+        return dirty is None
+    return (type(rev) is str and len(rev) == 40 and
+            all(char in "0123456789abcdef" for char in rev) and
+            type(dirty) is bool)
+
+
+def _batch_decision_from_wire(raw: str, max_output_bytes: int) -> dict[str, object]:
+    """Reparse child bytes without trusting the lower runner's decision field.
+
+    This independently interprets an already bounded wire response. It does
+    not attest an OS process, private model, or signed custody.
+    """
+    if type(raw) is not str or len(raw.encode("utf-8")) > max_output_bytes:
+        raise ValueError("unbounded child response")
+
+    def unique_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        obj: dict[str, object] = {}
+        for key, value in pairs:
+            if key in obj:
+                raise ValueError("duplicate child JSON key")
+            obj[key] = value
+        return obj
+
+    def reject_nonfinite(_raw: str) -> object:
+        raise ValueError("nonfinite child JSON")
+
+    def bounded_float(raw_float: str) -> float:
+        number = float(raw_float)
+        if not math.isfinite(number):
+            raise ValueError("nonfinite child JSON float")
+        return number
+
+    parsed = json.JSONDecoder(object_pairs_hook=unique_fields,
+                              parse_constant=reject_nonfinite,
+                              parse_float=bounded_float).decode(raw)
+    if type(parsed) is not dict or type(parsed.get("kind")) is not str:
+        raise ValueError("child decision must be an object with kind")
+    kind = parsed["kind"]
+    if kind == "ACTION":
+        if (set(parsed) != {"kind", "action"} or
+                type(parsed["action"]) is not str or
+                parsed["action"] not in ("0", "1", "WAIT", "RESET")):
+            raise ValueError("bad raw child action")
+    elif kind == "PLAN":
+        if (set(parsed) != {"kind", "actions"} or
+                type(parsed["actions"]) is not list or
+                not 1 <= len(parsed["actions"]) <= MAX_MOVES or
+                any(type(item) is not str or
+                    item not in ("0", "1", "WAIT", "COMMIT")
+                    for item in parsed["actions"])):
+            raise ValueError("bad raw child plan")
+    elif kind in ("ABSTAIN", "CLAIM_UNSAT"):
+        if set(parsed) != {"kind"}:
+            raise ValueError("bad raw child terminal claim")
+    elif kind == "NOVEL_RULE":
+        if (set(parsed) != {"kind", "description"} or
+                type(parsed["description"]) is not str or
+                not 0 < len(parsed["description"]) <= 2000):
+            raise ValueError("bad raw child rule narrative")
+    elif kind == "CLAIM":
+        if (set(parsed) != {"kind", "claim"} or
+                type(parsed["claim"]) is not dict or
+                parsed["claim"] != {"kind": "ABSTAIN", "assessment": "UNKNOWN"}):
+            raise ValueError("bad raw child structured claim")
+        return {"kind": "ABSTAIN"}
+    else:
+        raise ValueError("unsupported raw child decision")
+    return parsed
 
 
 @dataclass(frozen=True)
@@ -219,6 +298,7 @@ def _trial_reverified(raw: object, case_seed: int, generation_seed: int,
         return False, "NOT_A_PROCESS_TRIAL_RECEIPT"
     if (type(raw.get("case_seed_host_only")) is not int or
             raw["case_seed_host_only"] != case_seed or
+            not _source_commit_shape_valid(raw.get("source_commit")) or
             raw.get("mode") != adapter_spec.mode or
             raw.get("trial_binding_valid") is not True or
             raw.get("source_receipt_replay_valid") is not True or
@@ -227,10 +307,12 @@ def _trial_reverified(raw: object, case_seed: int, generation_seed: int,
             raw.get("generalization_qualified") is not False):
         return False, "TRIAL_CUSTODY_OR_CASE_MISMATCH"
     if (type(raw.get("configuration")) is not dict or
-            raw["configuration"].get("case_seed") != case_seed or
+            type(raw["configuration"].get("case_seed")) is not int or
+            raw["configuration"]["case_seed"] != case_seed or
             type(raw["configuration"].get("generation_seed")) is not int or
             raw["configuration"]["generation_seed"] != generation_seed or
-            raw["configuration"].get("max_model_calls") != authorized_calls or
+            type(raw["configuration"].get("max_model_calls")) is not int or
+            raw["configuration"]["max_model_calls"] != authorized_calls or
             raw["configuration"].get("call_timeout_seconds") != timeout or
             raw["configuration"].get("max_output_bytes") != max_output_bytes or
             raw.get("config_sha256") != _sha(raw["configuration"])):
@@ -245,7 +327,8 @@ def _trial_reverified(raw: object, case_seed: int, generation_seed: int,
         return False, "INVALID_PROCESS_RECEIPT_SERIALIZATION"
     turns = raw.get("turns")
     if (type(turns) is not list or len(turns) > authorized_calls or
-            raw.get("process_calls") != len(turns)):
+            type(raw.get("process_calls")) is not int or
+            raw["process_calls"] != len(turns)):
         return False, "MODEL_CALL_BUDGET_OR_TRANSCRIPT_MISMATCH"
     observations: list[str] = []
     terminal_decision: dict[str, object] | None = None
@@ -258,6 +341,16 @@ def _trial_reverified(raw: object, case_seed: int, generation_seed: int,
                                 max_output_bytes):
             return False, "CHILD_PROCESS_WIRE_UNRECONSTRUCTIBLE_OR_MISMATCH"
         decision = turn.get("decision")
+        try:
+            wire_decision = _batch_decision_from_wire(
+                turn["raw_response"], max_output_bytes)
+        except (ValueError, TypeError, UnicodeError, OverflowError,
+                RecursionError):
+            return False, "CHILD_PROCESS_RAW_DECISION_INVALID"
+        if (type(decision) is not dict or
+                _canonical(decision) != _canonical(wire_decision) or
+                turn.get("status") != "PARSED"):
+            return False, "CHILD_PROCESS_DECISION_DOES_NOT_MATCH_RAW_BYTES"
         if decision is None:
             continue
         if type(decision) is not dict or type(decision.get("kind")) is not str:
@@ -415,6 +508,7 @@ def run_batch(config: BatchConfig, adapter_spec: AdapterSpec) -> dict[str, objec
 def verify_batch_receipt(batch: object) -> bool:
     if (type(batch) is not dict or batch.get("schema") != SCHEMA or
             type(batch.get("batch_receipt_sha256")) is not str or
+            not _source_commit_shape_valid(batch.get("source_commit")) or
             type(batch.get("manifest")) is not dict or
             type(batch.get("cases")) is not list or
             type(batch.get("aggregate")) is not dict):
