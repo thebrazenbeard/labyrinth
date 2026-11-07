@@ -78,9 +78,11 @@ def benchmark_reasoning_gym(
     response_digests: list[str] = []
     for index in range(size):
         case = dataset[index]
-        if not isinstance(case, dict) or not isinstance(case.get("question"), str):
+        # Check and send the same retrieved value. A dict subclass may return
+        # a sanitized `.get()` value but leak a private answer via `[]`.
+        question = case.get("question") if isinstance(case, dict) else None
+        if type(question) is not str:
             raise ValueError("Reasoning Gym dataset returned a malformed question")
-        question = case["question"]
         if not 1 <= len(question) <= 64_000:
             raise ValueError("Reasoning Gym question violates length limits")
         # Deliberately pass only the public question. The object holding gold
