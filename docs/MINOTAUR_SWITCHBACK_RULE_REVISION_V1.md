@@ -4,10 +4,14 @@
 held-out test, neural learning result, host qualification, signed evaluator,
 or authorized graduation artifact.
 
-Build source: Labyrinth combined v7 tree `140840be58b9a8cf1df93dafea744306d4c03a06`,
-whose Git tree matched the earlier lost local combined checkpoint. New code is
-isolated in `labyrinth/switchback_{circuit,oracle,controls,cli}.py` with
-`tests/test_switchback_circuit_exam.py`. No production service is involved.
+Initial integration baseline: Labyrinth combined v7 commit
+`140840be58b9a8cf1df93dafea744306d4c03a06` (reconstructed from the
+earlier local checkpoint). Final source-only author freeze:
+`f36ee55eb003692091904f6e9cc4f7f75a119558`. The reviewable version is
+stacked on draft PR #154 as draft PR #155, including independent hostile tests.
+Executable code is isolated in `labyrinth/switchback_{circuit,oracle,controls,cli}.py`.
+These identifiers establish source provenance, not a qualified host runtime.
+No production service is involved.
 
 ## Mechanics and the changing rules
 
