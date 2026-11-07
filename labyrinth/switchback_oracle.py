@@ -3,14 +3,40 @@
 from __future__ import annotations
 
 from collections import deque
+from contextvars import ContextVar
 from copy import deepcopy
+from dataclasses import dataclass
 from functools import lru_cache
 from hashlib import sha256
 from itertools import product
 import json
 import math
+from threading import get_ident
 
 from .switchback_circuit import Case, Rule, State, MAX_MOVES, MAX_PROBES
+
+
+def _case_fields(case: Case) -> tuple[object, ...]:
+    """Typed primitive fingerprint: never equate bool/float with integer 0/1."""
+    fields = (type(case), type(case.before), type(case.after),
+              case.seed, case.initial, case.target, case.switch_at, case.max_pulses,
+              case.before.family, case.before.mask, case.before.bias,
+              case.before.threshold, case.after.family, case.after.mask,
+              case.after.bias, case.after.threshold,
+              case.mechanic_signature, case.case_id)
+    return tuple((type(value), value) for value in fields)
+
+
+@dataclass
+class _CanonicalParityScope:
+    case: Case
+    fields: tuple[object, ...]
+    owner_thread: int
+    active: bool = True
+
+
+_PARITY_SCOPE: ContextVar[_CanonicalParityScope | None] = ContextVar(
+    "labyrinth.switchback.parity_scope", default=None)
 
 
 def oracle_case(seed: int) -> Case:
@@ -81,7 +107,12 @@ def _rule_output(register: int, bit: int, rule: Rule) -> int:
 
 
 def oracle_step(case: Case, state: State, action: str) -> State:
-    if not _valid_case(case) or type(state) is not State or type(action) is not str:
+    active = _PARITY_SCOPE.get()
+    trusted_in_invocation = (active is not None and active.active and
+                             active.owner_thread == get_ident() and
+                             active.case is case and _case_fields(case) == active.fields)
+    if ((not trusted_in_invocation and not _valid_case(case)) or
+            type(state) is not State or type(action) is not str):
         raise ValueError("invalid oracle input")
     if state.committed or state.ticks >= MAX_MOVES or action not in ("0", "1", "WAIT", "COMMIT"):
         return state
@@ -296,22 +327,36 @@ def independent_transition_parity(case: Case) -> bool:
                 for bit in (0, 1):
                     if dut.kernel(register, bit, rule) != _rule_output(register, bit, rule):
                         return False
-        initial = State(case.initial)
-        frontier = deque([initial])
-        visited = {_state_key(initial)}
-        while frontier:
-            state = frontier.popleft()
-            for action in ("0", "1", "WAIT", "COMMIT"):
-                evolved = dut.step(case, state, action)
-                evolved_key = _state_key(evolved)
-                compared_key = _state_key(oracle_step(case, state, action))
-                if evolved_key != compared_key:
-                    return False
-                if (not evolved.committed and evolved_key not in visited and
-                        evolved_key != _state_key(state)):
-                    visited.add(evolved_key)
-                    frontier.append(evolved)
-        return True
+        # Earlier DUT construction/truth-table calls are not in the trusted
+        # context. Revalidate immediately before capturing the exact fields;
+        # a single-function mutator in dut.kernel cannot smuggle a changed
+        # Case through an identity-only shortcut.
+        if not _valid_case(case):
+            return False
+        scope = _CanonicalParityScope(case, _case_fields(case), get_ident())
+        token = _PARITY_SCOPE.set(scope)
+        try:
+            initial = State(case.initial)
+            frontier = deque([initial])
+            visited = {_state_key(initial)}
+            while frontier:
+                state = frontier.popleft()
+                for action in ("0", "1", "WAIT", "COMMIT"):
+                    evolved = dut.step(case, state, action)
+                    evolved_key = _state_key(evolved)
+                    compared_key = _state_key(oracle_step(case, state, action))
+                    if evolved_key != compared_key:
+                        return False
+                    if (not evolved.committed and evolved_key not in visited and
+                            evolved_key != _state_key(state)):
+                        visited.add(evolved_key)
+                        frontier.append(evolved)
+            return True
+        finally:
+            # A copied Context retains the record object; invalidating it
+            # BEFORE reset prevents stale trusted scope in copied tasks.
+            scope.active = False
+            _PARITY_SCOPE.reset(token)
     except Exception:
         return False
 
