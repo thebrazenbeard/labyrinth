@@ -6,8 +6,11 @@ not physical escape). A deterministic baseline for each consumes only public
 rules and observations. None trains or launches a model or proves transfer.
 
 An authorized caller may inject an existing ModelAdapter through the same
-public JSON bridge. That optional callback is UNATTESTED for locality, exact
-weights and provider; in-process Python remains unsuitable for blind custody.
+public JSON bridge. The candidate_factory MUST be trusted host-side Python:
+passing only a public dictionary does NOT prevent it from inspecting caller
+frames and recovering private Case/ExamSpec data. Adapter locality, exact
+weights and provider also remain UNATTESTED; in-process Python is unsuitable
+for blind custody.
 """
 
 from __future__ import annotations
@@ -265,9 +268,10 @@ def run_cross_exam(specs: tuple[ExamSpec, ...], *,
         # from public source, even across an OS process boundary.
         # Use one independent draw for both matched arms, receipt-bound.
         model_rng_seed = secrets.randbelow(2**31)
-        # A provider/factory may be untrusted; never give it ExamSpec (whose
-        # sealed control and seed are host-side), Case, or the session factory.
-        # The copied candidate view is exactly the public JSON projection.
+        # candidate_factory executes in this host Python frame and MUST BE
+        # TRUSTED. Its copied dictionary has public fields only, but malicious
+        # Python can inspect this caller frame and steal private `spec`/Case.
+        # Use a config-only trusted launcher for untrusted candidate execution.
         candidate = (candidate_factory(json.loads(json.dumps(public, allow_nan=False)))
                      if candidate_factory is not None else None)
         if candidate is not None and not authorize_local_adapter:
