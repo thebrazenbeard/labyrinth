@@ -94,9 +94,24 @@ def _reject_nonfinite(_value: str) -> Any:
     raise ValueError("non-finite JSON number")
 
 
+def _finite_json_float(value: str) -> float:
+    # JSON permits large exponents (e.g. 1e999), but Python's default
+    # decoder silently converts them to infinity without parse_constant.
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("non-finite JSON number")
+    return parsed
+
+
 def _read_json(raw: bytes) -> Any:
-    return json.loads(raw.decode("utf-8", errors="strict"),
-                      object_pairs_hook=_unique_pairs, parse_constant=_reject_nonfinite)
+    try:
+        return json.loads(raw.decode("utf-8", errors="strict"),
+                          object_pairs_hook=_unique_pairs, parse_constant=_reject_nonfinite,
+                          parse_float=_finite_json_float)
+    except RecursionError as error:
+        # An attacker can stay below MAX_PROMPT_BYTES yet exceed the JSON
+        # decoder's nesting limit. Normalize this into a prelaunch rejection.
+        raise ValueError("JSON nesting exceeds decoder limit") from error
 
 
 def _child_environment() -> dict[str, str]:
@@ -196,6 +211,7 @@ class ProcessModelAdapter:
         if len(request) > MAX_REQUEST_BYTES:
             raise ValueError("child request exceeds byte limit")
         started = time.monotonic()
+        deadline = started + self.timeout_seconds
         process: subprocess.Popen[bytes] | None = None
         response = b""
         child_pid: int | None = None
@@ -252,15 +268,36 @@ class ProcessModelAdapter:
             reader.start()
             writer.start()
             try:
-                process.wait(timeout=self.timeout_seconds)
+                process.wait(timeout=max(0.0, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
                 status = "TIMEOUT"
+                try:
+                    process.kill()
+                except OSError:
+                    pass  # The child may have exited while the timeout fired.
+                try:
+                    # Reaping is best-effort; never make a second unbounded
+                    # wait after a deadline has already expired.
+                    process.wait(timeout=max(0.0, deadline - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    # Retain a strong child reference until the OS reaps it;
+                    # otherwise Popen.__del__ may warn or strand a zombie.
+                    # This daemon is best-effort cleanup, NOT an OS sandbox or
+                    # a guarantee that an unkillable child will terminate.
+                    def reap_in_background(child: subprocess.Popen[bytes]) -> None:
+                        try:
+                            child.wait()
+                        except OSError:
+                            pass
+
+                    Thread(target=reap_in_background, args=(process,),
+                           name="minotaur-child-reaper", daemon=True).start()
                 raise ProcessAdapterFailure(status)
             finally:
-                reader.join(timeout=1)
-                writer.join(timeout=1)
+                # All cleanup consumes the SAME wall-clock budget. A child
+                # may exit while a daemon pipe writer is still blocked.
+                reader.join(timeout=max(0.0, deadline - time.monotonic()))
+                writer.join(timeout=max(0.0, deadline - time.monotonic()))
                 if process.stdout is not None:
                     process.stdout.close()
             response = bytes(output)
@@ -268,7 +305,7 @@ class ProcessModelAdapter:
                 status = "OVERSIZE"
                 raise ProcessAdapterFailure(status)
             if reader.is_alive() or writer.is_alive():
-                status = "CHILD_ERROR"
+                status = "TIMEOUT"
                 raise ProcessAdapterFailure(status)
             if process.returncode != 0:
                 status = "CHILD_ERROR"

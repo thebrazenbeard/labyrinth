@@ -98,10 +98,12 @@ class UntrustedBoundaryAttack(unittest.TestCase):
         self.assertEqual(type(view), tuple)
         self.assertEqual(len(view), 1)
         self.assertEqual(set(view[0]), {
-            "family", "candidate_verdict", "candidate_escape_verified",
-            "baseline_escape_verified", "candidate_kind",
+            "family", "host_reported_candidate_verdict",
+            "host_reported_candidate_escape", "host_reported_baseline_escape",
+            "candidate_kind", "evidence_status",
         })
         self.assertEqual(view[0]["family"], "oracle")
+        self.assertEqual(view[0]["evidence_status"], "UNATTESTED_HOST_SELF_HASH")
         encoded = json.dumps(view)
         for forbidden in ("seed", "transcript", "process_calls", "case_id",
                           "receipt_sha256", "generation_seed"):

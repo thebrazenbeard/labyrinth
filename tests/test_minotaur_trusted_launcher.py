@@ -39,9 +39,11 @@ class TrustedLauncherTests(unittest.TestCase):
         summaries = candidate_public_summary(result)
         self.assertEqual(len(summaries), 1)
         self.assertEqual(set(summaries[0]), {
-            "family", "candidate_verdict", "candidate_escape_verified",
-            "baseline_escape_verified", "candidate_kind",
+            "family", "host_reported_candidate_verdict",
+            "host_reported_candidate_escape", "host_reported_baseline_escape",
+            "candidate_kind", "evidence_status",
         })
+        self.assertEqual(summaries[0]["evidence_status"], "UNATTESTED_HOST_SELF_HASH")
         raw = json.dumps(summaries)
         for private in ('"seed"', '"case_id"', '"receipt_sha256"',
                         '"generation_seed"', '"public_start_json"'):
