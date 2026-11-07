@@ -162,6 +162,12 @@ def _state_key(state: State) -> tuple[int, int, int, int, int, int, int, bool, b
             state.committed, state.won)
 
 
+def _independent_initial_tuple(case: Case) -> tuple[int, int, int, int, int, int, int, bool, bool, bool]:
+    """Build the reference state from primitive case fields, never State()."""
+    return (case.initial_left, case.initial_right, case.initial_orientation,
+            0, 0, 0, 0, False, False, False)
+
+
 def _independent_advance(case: Case, state: tuple[object, ...],
                          action: str) -> tuple[object, ...]:
     """Separate primitive-state physics: never call step, _deliver or _load_payload.
@@ -212,7 +218,7 @@ def _independent_plan_verdict(case: Case, actions: object) -> str:
             any(type(action) is not str or action not in PLAN_ACTIONS
                 for action in actions)):
         return "VERIFIED_FAILURE"
-    current = _state_key(initial_state(case))
+    current = _independent_initial_tuple(case)
     for action in actions:
         try:
             current = _independent_advance(case, current, action)
@@ -242,7 +248,7 @@ def _independent_closure_witness(case: Case) -> list[str] | None:
                 return (action,) + suffix
         return None
 
-    found = extend(_state_key(initial_state(case)))
+    found = extend(_independent_initial_tuple(case))
     return list(found) if found is not None else None
 
 
@@ -450,6 +456,68 @@ def adjudicate(case: Case, proposal: object) -> dict[str, object]:
     return result
 
 
+def _core_is_bound_to_session(case: Case, proposal: object, core: object) -> bool:
+    """A source receipt is not authority merely because adjudicate returned it.
+
+    The in-process parent independently checks exact provenance and the
+    primitive finite-state verdict before promoting a session success.
+    These checks assume an intact parent interpreter; they are not a signer.
+    """
+    if type(core) is not dict or type(proposal) is not dict:
+        return False
+    try:
+        if (set(core) != {"schema", "evidence_class", "source_commit",
+                          "private_custody", "neural_learning_verified",
+                          "graduation_eligible", "case_id", "seed", "verdict",
+                          "verified_success", "reason", "counterexample",
+                          "proposal", "sha256"} or
+                core["schema"] != "labyrinth.novel-router-receipt.v1" or
+                core["evidence_class"] != "SOURCE_PUBLIC_SYNTHETIC" or
+                core["source_commit"] != "UNBOUND" or
+                core["private_custody"] is not False or
+                core["neural_learning_verified"] is not False or
+                core["graduation_eligible"] is not False or
+                type(core["seed"]) is not int or core["seed"] != case.seed or
+                core["case_id"] != case.case_id or
+                type(core["verdict"]) is not str or
+                type(core["verified_success"]) is not bool or
+                core["verified_success"] is not (core["verdict"] == "VERIFIED_WIN") or
+                core["sha256"] != sha256(_canonical({
+                    key: value for key, value in core.items() if key != "sha256"
+                }).encode()).hexdigest() or
+                _canonical(core["proposal"]) != _canonical(proposal)):
+            return False
+        kind = proposal.get("kind")
+        if kind == "PLAN" and set(proposal) == {"kind", "actions"}:
+            return core["verdict"] == _independent_plan_verdict(case, proposal["actions"])
+        if kind == "CLAIM_UNSAT" and set(proposal) == {"kind"}:
+            no_witness = _independent_closure_witness(case) is None
+            return (core["verdict"] in (
+                ("PROVEN_UNSAT_UNDER_DECLARED_RULES", "NO_KNOWN_WIN")
+                if no_witness else ("VERIFIED_FAILURE", "NO_KNOWN_WIN")))
+        if (kind == "NOVEL_RULE" and set(proposal) == {"kind", "description"} and
+                type(proposal["description"]) is str and
+                0 < len(proposal["description"]) <= 2000):
+            return core["verdict"] == "NOVEL_RULESET_CHALLENGE"
+        return core["verdict"] == "UNKNOWN"
+    except (KeyError, TypeError, ValueError, OverflowError, RecursionError):
+        return False
+
+
+def _session_disagreement_core(case: Case) -> dict[str, object]:
+    core: dict[str, object] = {
+        "schema": "labyrinth.novel-router-receipt.v1",
+        "evidence_class": "SOURCE_PUBLIC_SYNTHETIC", "source_commit": "UNBOUND",
+        "private_custody": False, "neural_learning_verified": False,
+        "graduation_eligible": False, "case_id": case.case_id, "seed": case.seed,
+        "verdict": "UNKNOWN", "verified_success": False,
+        "reason": "SESSION_CORE_DISAGREEMENT", "counterexample": None,
+        "proposal": {"kind": "ABSTAIN"},
+    }
+    core["sha256"] = sha256(_canonical(core).encode()).hexdigest()
+    return core
+
+
 class ProbeSession:
     """In-process educational observations, never a private host boundary."""
 
@@ -458,6 +526,8 @@ class ProbeSession:
             raise ValueError("noncanonical generated case")
         self._case = case
         self._state = initial_state(case)
+        if _state_key(self._state) != _independent_initial_tuple(case):
+            raise ValueError("production state genesis diverged from primitive case")
         self._trace: list[dict[str, object]] = []
         self._finished = False
         self._receipt: dict[str, object] | None = None
@@ -496,21 +566,51 @@ class ProbeSession:
         applied = False
         if valid:
             if action == "RESET":
-                self._state = initial_state(self._case)
+                try:
+                    reset_state = initial_state(self._case)
+                    if _state_key(reset_state) != _independent_initial_tuple(self._case):
+                        raise ValueError("noncanonical reset state")
+                except Exception:
+                    self._trace.append({"action": action, "valid": True,
+                                        "applied": False, "before": before,
+                                        "after": None})
+                    self._finished = True
+                    self._receipt = {"verdict": "UNKNOWN",
+                                     "reason": "INDEPENDENT_RESET_DISAGREEMENT",
+                                     "verified_success": False}
+                    return self.view()
+                self._state = reset_state
                 applied = True
             else:
                 prior = _state_key(self._state)
+                independent_failed = False
+                production_failed = False
                 try:
                     expected = _independent_advance(self._case, prior, action)
                 except ValueError:
                     expected = None
+                except Exception:
+                    expected = None
+                    independent_failed = True
                 try:
                     evolved = step(self._case, self._state, action)
                 except ValueError:
                     evolved = None
-                if ((expected is None) != (evolved is None) or
+                except Exception:
+                    evolved = None
+                    production_failed = True
+                if evolved is not None:
+                    try:
+                        evolved_key = _state_key(evolved)
+                    except Exception:
+                        evolved_key = None
+                        production_failed = True
+                else:
+                    evolved_key = None
+                if (independent_failed or production_failed or
+                        (expected is None) != (evolved is None) or
                         (expected is not None and evolved is not None and
-                         _state_key(evolved) != expected)):
+                         evolved_key != expected)):
                     # Both physical and independent source oracles must agree.
                     # A modified shared step must not inject a fabricated
                     # public observation or grant an uncharged retry.
@@ -535,7 +635,12 @@ class ProbeSession:
             return deepcopy(self._receipt) if self._receipt is not None else {
                 "verdict": "UNKNOWN", "verified_success": False}
         self._finished = True
-        core = adjudicate(self._case, proposal)
+        try:
+            core = adjudicate(self._case, proposal)
+        except Exception:
+            core = None
+        if not _core_is_bound_to_session(self._case, proposal, core):
+            core = _session_disagreement_core(self._case)
         result = {"schema": "labyrinth.novel-router-session.v1",
                   "evidence_class": "SOURCE_PUBLIC_SYNTHETIC",
                   "private_custody": False,
