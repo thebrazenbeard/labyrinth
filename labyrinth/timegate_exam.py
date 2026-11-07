@@ -166,6 +166,13 @@ def search(case: Case, *, max_expansions: int | None = None) -> SearchResult:
         expansions += 1
         if state.room == "outside":
             if len(path) <= MAX_ACTIONS:
+                # The local BFS is a candidate, not its own independent
+                # witness. A mutant transition can invent an escape.
+                from .timegate_oracle import verify_attempts
+                if verify_attempts(case, path) != "VERIFIED_WIN":
+                    return SearchResult("EVALUATOR_DISAGREEMENT", path,
+                                        frozenset(seen), expansions,
+                                        "independent replay rejected local witness")
                 return SearchResult("VERIFIED_WIN", path, frozenset(seen), expansions)
             over_budget = True
             continue
@@ -177,6 +184,14 @@ def search(case: Case, *, max_expansions: int | None = None) -> SearchResult:
     if over_budget:
         return SearchResult("NO_KNOWN_WIN", reachable=frozenset(seen),
                             expansions=expansions, detail="no victory within attempt budget")
+    from .timegate_oracle import verify_unsat
+    state_tuples = frozenset((ROOMS.index(state.room), state.phase,
+                              int(state.carrying), int(state.available), state.energy)
+                             for state in seen)
+    if not verify_unsat(case, state_tuples).valid:
+        return SearchResult("EVALUATOR_DISAGREEMENT", reachable=frozenset(seen),
+                            expansions=expansions,
+                            detail="independent verifier rejected local no-goal closure")
     return SearchResult("PROVEN_UNSAT_UNDER_DECLARED_RULES",
                         reachable=frozenset(seen), expansions=expansions,
                         detail="complete closure under exactly six declared actions")
@@ -193,7 +208,8 @@ class CandidateSession:
         self._integrity_fault: str | None = None
 
     def view(self) -> dict[str, object]:
-        from .timegate_oracle import replay_snapshot, verify_attempts
+        from .timegate_oracle import replay_snapshot, replay_observation, verify_attempts
+        oracle = None
         try:
             oracle = replay_snapshot(self._case, self._attempts)
             local = (ROOMS.index(self._state.room), self._state.phase,
@@ -207,6 +223,8 @@ class CandidateSession:
             observation = observe(self._case, self._state)
             if type(observation) is not str or not observation.strip():
                 raise TypeError("observation must be nonempty text")
+            if oracle is None or observation != replay_observation(self._case, oracle):
+                self._integrity_fault = "independent replay observation mismatch"
         except Exception:
             observation = "Observation unavailable due to evaluator disagreement."
             self._integrity_fault = "observation unavailable"

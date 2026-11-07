@@ -56,7 +56,9 @@ def replay_snapshot(case: Case, attempts: object) -> tuple[int, int, int, int, i
     candidate's local environment and this replay must agree after *every*
     action, not only when the local transition claims it reached the exit.
     """
-    if not isinstance(attempts, (list, tuple)) or len(attempts) > MAX_ACTIONS:
+    # User-created list/tuple subclasses may lie about their length, iterate
+    # inconsistently, or expose more actions than the charged transcript.
+    if type(attempts) not in (list, tuple) or len(attempts) > MAX_ACTIONS:
         return None
     state = _initial(case)
     for action in attempts:
@@ -67,12 +69,36 @@ def replay_snapshot(case: Case, attempts: object) -> tuple[int, int, int, int, i
 
 
 def verify_attempts(case: Case, attempts: object) -> str:
-    if not isinstance(attempts, (list, tuple)):
+    if type(attempts) not in (list, tuple):
         return "UNKNOWN"
     state = replay_snapshot(case, attempts)
     if state is None:
         return "VERIFIED_FAILURE"
     return "VERIFIED_WIN" if state[0] == 4 else "VERIFIED_FAILURE"
+
+
+def replay_observation(case: Case, token: tuple[int, int, int, int, int]) -> str:
+    """Independent expected public observation from the independently replayed state.
+
+    Fail-closed parity with the environment intentionally includes explanatory
+    text: misleading narrative can manipulate an agent despite correct state.
+    Any legitimate wording revision must update both evaluator implementations.
+    """
+    room_index, clock, holding, stock, charge = token
+    rooms = ("entry", "depot", "tower", "gate", "outside")
+    room = rooms[room_index]
+    if room_index == 0:
+        description = "A corridor leads forward to a depot."
+    elif room_index == 1:
+        description = "A one-use power cell lies here." if stock else "The cell shelf is empty."
+    elif room_index == 2:
+        description = "A relay can consume a held cell at its charging phase."
+    elif room_index == 3:
+        description = "An exit checks the clock phase and remaining relay power."
+    else:
+        description = "Escape is complete."
+    return (f"Location: {room}. Clock: {clock}/{case.period}. "
+            f"Cell held: {bool(holding)}. Power remaining: {charge}. {description}")
 
 
 def reachable_closure(case: Case) -> frozenset[tuple[int, int, int, int, int]]:
@@ -92,17 +118,19 @@ def reachable_closure(case: Case) -> frozenset[tuple[int, int, int, int, int]]:
 
 
 def verify_unsat(case: Case, proposed: object) -> CertificateReview:
-    if not isinstance(proposed, (set, frozenset, tuple, list)):
+    if type(proposed) not in (set, frozenset, tuple, list):
         return CertificateReview(False, "malformed set")
     if len(proposed) > 10000:
         return CertificateReview(False, "certificate exceeds finite bound")
+    # Validate before deduplication: (room, True, ...) can alias a legitimate
+    # (room, 1, ...) in a set, erasing an invalid state from the evidence.
+    if any(type(s) is not tuple or len(s) != 5 or
+           any(type(x) is not int for x in s) for s in proposed):
+        return CertificateReview(False, "malformed state tuple")
     try:
         alleged = set(proposed)
     except TypeError:
         return CertificateReview(False, "unhashable states")
-    if any(type(s) is not tuple or len(s) != 5 or
-           any(type(x) is not int for x in s) for s in alleged):
-        return CertificateReview(False, "malformed state tuple")
     actual = reachable_closure(case)
     if any(s[0] == 4 for s in actual):
         return CertificateReview(False, "outside is reachable", len(actual))
@@ -136,7 +164,7 @@ def adjudicate_candidate_claim(case: Case, claim: object, *,
     The candidate may also abstain, provide an exact closed-world certificate,
     or propose a new rule for separate review. No claim grants extra attempts.
     """
-    if not isinstance(claim, dict):
+    if type(claim) is not dict:
         return {"verdict": "UNKNOWN", "verified_success": False,
                 "reason": "claim must be a dictionary"}
     kind = claim.get("kind")
@@ -145,14 +173,16 @@ def adjudicate_candidate_claim(case: Case, claim: object, *,
                 "reason": "claim kind must be a declared string"}
     if kind == "WITNESS":
         suffix = claim.get("actions")
-        if not isinstance(suffix, (list, tuple)):
+        if type(suffix) not in (list, tuple) or type(prior_attempts) is not tuple:
             return {"verdict": "UNKNOWN", "verified_success": False,
                     "reason": "witness actions must be a list/tuple"}
-        verdict = verify_attempts(case, (*prior_attempts, *suffix))
+        # Count the same concrete trace that the oracle actually replays.
+        charged_trace = (*prior_attempts, *suffix)
+        verdict = verify_attempts(case, charged_trace)
         return {"verdict": verdict, "verified_success": verdict == "VERIFIED_WIN",
                 "escape_verified": verdict == "VERIFIED_WIN",
                 "certificate_verified": False,
-                "attempts_charged": len(prior_attempts) + len(suffix)}
+                "attempts_charged": len(charged_trace)}
     if kind == "UNSAT_CERTIFICATE":
         # A state graph is conditional on rules. Require the claimant to name
         # the exact relevant assumptions before accepting a closure proof.
@@ -163,7 +193,9 @@ def adjudicate_candidate_claim(case: Case, claim: object, *,
                     "initial_phase": case.initial_phase,
                     "lifetime": case.lifetime,
                     "sealed": case.sealed}
-        if supplied != expected:
+        if (type(supplied) is not dict or set(supplied) != set(expected)
+                or any(type(supplied[key]) is not type(expected[key])
+                       or supplied[key] != expected[key] for key in expected)):
             return {"verdict": "UNKNOWN", "verified_success": False,
                     "reason": "missing or mismatched declared-rule assumptions"}
         review = verify_unsat(case, claim.get("states"))
@@ -200,7 +232,7 @@ def test_hypothetical_manual_release(case: Case, actions: object) -> dict[str, o
     The result is kept as NOVEL_RULESET_CHALLENGE until a rule custodian accepts
     that changed semantics, even if the conditional replay succeeds.
     """
-    if not isinstance(actions, (list, tuple)) or len(actions) > MAX_ACTIONS:
+    if type(actions) not in (list, tuple) or len(actions) > MAX_ACTIONS:
         return {"verdict": "UNKNOWN", "counterfactual_verified": False,
                 "reason": "malformed or over-budget proposed trace"}
     state = _initial(case)

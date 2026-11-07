@@ -343,7 +343,7 @@ class TimegateHostileTests(unittest.TestCase):
 
         with mock.patch.object(dut, "transition", side_effect=broken_seal):
             claimed = dut.search(sealed)
-        self.assertEqual(claimed.verdict, "VERIFIED_WIN")
+        self.assertEqual(claimed.verdict, "EVALUATOR_DISAGREEMENT")
         self.assertEqual(verify_attempts(sealed, claimed.witness), "VERIFIED_FAILURE")
 
 
