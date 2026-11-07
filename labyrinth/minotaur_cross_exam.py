@@ -6,8 +6,13 @@ not physical escape). A deterministic baseline for each consumes only public
 rules and observations. None trains or launches a model or proves transfer.
 
 An authorized caller may inject an existing ModelAdapter through the same
-public JSON bridge. That optional callback is UNATTESTED for locality, exact
-weights and provider; in-process Python remains unsuitable for blind custody.
+public JSON bridge. The candidate_factory MUST be trusted host-side Python:
+passing only a public dictionary does NOT prevent it from inspecting caller
+frames and recovering private Case/ExamSpec data. Adapter locality, exact
+weights and provider also remain UNATTESTED; in-process Python is unsuitable
+for blind custody. Legacy factory execution is fail-closed unless the caller
+explicitly declares trusted host Python with `trust_host_python_factory=True`.
+This declaration is NOT independent authentication or a security sandbox.
 """
 
 from __future__ import annotations
@@ -243,14 +248,26 @@ def _feedback_flag(receipt: RunReceipt, name: str) -> bool:
 
 def run_cross_exam(specs: tuple[ExamSpec, ...], *,
                    candidate_factory: Callable[[Mapping[str, Any]], ModelAdapter] | None = None,
-                   authorize_local_adapter: bool = False) -> tuple[CrossCaseReceipt, ...]:
+                   authorize_local_adapter: bool = False,
+                   trust_host_python_factory: bool = False) -> tuple[CrossCaseReceipt, ...]:
     """Run separate public-only baseline and optional candidate, no host launch.
 
     Each arm receives the same case's public view, deterministic generation
     seed and a newly constructed examiner session. This is source-level input
     matching; no GPU-time, token-budget, model-weight or private-set custody is
     attested. The baseline is pure code and explicitly zero-update.
+
+    `authorize_local_adapter` only governs adapter execution; it does NOT
+    authorize a host Python callback. The separate trust_host_python_factory
+    declaration explicitly admits that unsafe legacy path for trusted test
+    fixtures. For actual untrusted candidates use the config-only launcher.
     """
+    if type(trust_host_python_factory) is not bool:
+        raise ValueError("host factory trust declaration must be boolean")
+    if candidate_factory is not None and not trust_host_python_factory:
+        # Fail BEFORE constructing the private case or putting it on the
+        # stack; a hostile Python candidate_factory can inspect its caller.
+        raise PermissionError("host Python candidate_factory requires explicit trusted-host declaration")
     if type(specs) is not tuple or not specs or len(specs) > 64:
         raise ValueError("specs must be a bounded nonempty tuple")
     if len(set(specs)) != len(specs):
@@ -265,9 +282,10 @@ def run_cross_exam(specs: tuple[ExamSpec, ...], *,
         # from public source, even across an OS process boundary.
         # Use one independent draw for both matched arms, receipt-bound.
         model_rng_seed = secrets.randbelow(2**31)
-        # A provider/factory may be untrusted; never give it ExamSpec (whose
-        # sealed control and seed are host-side), Case, or the session factory.
-        # The copied candidate view is exactly the public JSON projection.
+        # candidate_factory executes in this host Python frame and MUST BE
+        # TRUSTED. Its copied dictionary has public fields only, but malicious
+        # Python can inspect this caller frame and steal private `spec`/Case.
+        # Use a config-only trusted launcher for untrusted candidate execution.
         candidate = (candidate_factory(json.loads(json.dumps(public, allow_nan=False)))
                      if candidate_factory is not None else None)
         if candidate is not None and not authorize_local_adapter:
