@@ -83,7 +83,9 @@ def _valid_case(case: object) -> bool:
         canonical = oracle_case(case.seed)
     except (ValueError, TypeError):
         return False
-    return case == canonical
+    # Dataclass equality is caller-overridable, even for frozen classes.
+    # Admit only the exact canonical typed primitives, independent of __eq__.
+    return _case_fields(case) == _case_fields(canonical)
 
 
 def _rule_output(register: int, bit: int, rule: Rule) -> int:
