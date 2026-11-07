@@ -79,6 +79,47 @@ def _decode(policy: dict[str, object], bits: str) -> int | None:
     return winners[0] if len(winners) == 1 else None
 
 
+def _declarative_policy(policy: object) -> bool:
+    """Reject executable Python objects at the public strategy boundary.
+
+    The examiner is intentionally declarative: arbitrary dictionary keys may
+    execute custom equality/hash code and spy on verifier-local truth.
+    """
+    if type(policy) is not dict:
+        return False
+    if any(type(key) is not str for key in policy):
+        return False
+    keys = set(policy)
+    if keys not in ({"questions", "decoder"}, {"query_tree", "decoder"}):
+        return False
+    if "questions" in policy:
+        questions = policy["questions"]
+        if (type(questions) not in (list, tuple) or len(questions) != MAX_QUERIES
+                or any(type(q) is not str or q not in _TABLE for q in questions)):
+            return False
+    else:
+        tree = policy["query_tree"]
+        if type(tree) is not dict:
+            return False
+        for prefix, question in tree.items():
+            if (type(prefix) is not str or len(prefix) >= MAX_QUERIES
+                    or any(bit not in "01" for bit in prefix)
+                    or type(question) is not str or question not in _TABLE):
+                return False
+    decoder = policy["decoder"]
+    if type(decoder) is str:
+        return decoder == "nearest_codeword" and "questions" in policy
+    if type(decoder) is not dict:
+        return False
+    for transcript, secret in decoder.items():
+        if (type(transcript) is not str or len(transcript) != MAX_QUERIES
+                or any(bit not in "01" for bit in transcript)
+                or (secret is not None and
+                    (type(secret) is not int or secret not in SECRETS))):
+            return False
+    return True
+
+
 def verify_policy(lie_budget: int, policy: object) -> PolicyReview:
     """Attack a declared strategy against EVERY secret and lie-placement choice.
 
@@ -87,8 +128,8 @@ def verify_policy(lie_budget: int, policy: object) -> PolicyReview:
     """
     if type(lie_budget) is not int or lie_budget not in (1, 2):
         return PolicyReview("UNKNOWN", 0, "unsupported lie-budget ruleset")
-    if type(policy) is not dict:
-        return PolicyReview("UNKNOWN", 0, "policy must be declarative dictionary")
+    if not _declarative_policy(policy):
+        return PolicyReview("UNKNOWN", 0, "policy must contain exact declarative primitives")
     checked = 0
     for secret in SECRETS:
         for lies in _lie_patterns(lie_budget):

@@ -103,6 +103,10 @@ class CandidateSession:
         self._submission: dict[str, object] | None = None
         self._fault: str | None = None
 
+    def public_start(self) -> dict[str, object]:
+        """Host-side complete public rules; never expose hidden case fields."""
+        return candidate_view(self._case)
+
     def view(self) -> dict[str, object]:
         from .oracle_chamber_verifier import replay_answers
         try:
