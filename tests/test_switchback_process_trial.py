@@ -222,10 +222,11 @@ class SwitchbackProcessTrialTests(unittest.TestCase):
         self.assertEqual(report["source_verdict"], "UNKNOWN")
         self.assertIsNone(report["turns"][0]["decision"])
 
-    def test_cli_fixed_mode_emits_single_receipt_no_model_install(self):
+    def test_cli_explicit_private_stdout_emits_single_receipt_no_model_install(self):
         stdout = io.StringIO()
         with redirect_stdout(stdout):
-            code = trial.main(["--seed", "0", "--mode", "fixed", "--max-calls", "1",
+            code = trial.main(["--seed", "0", "--mode", "fixed",
+                               "--emit-private-json-stdout", "--max-calls", "1",
                                "--fixed-actions", "0"])
         self.assertEqual(code, 2)
         parsed = json.loads(stdout.getvalue())
