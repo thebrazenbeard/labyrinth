@@ -18,9 +18,11 @@ from copy import deepcopy
 from hashlib import sha256
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 from threading import Thread
 import time
 from typing import Any
@@ -36,6 +38,7 @@ from labyrinth.switchback_oracle import verify_receipt_replay
 
 
 SCHEMA = "labyrinth.switchback-real-model-trial.v1"
+PUBLIC_SUMMARY_SCHEMA = "labyrinth.switchback-real-model-trial-public-summary.v1"
 PUBLIC_SCHEMA = "labyrinth.switchback-public-turn.v1"
 MAX_PROMPT_BYTES = 16000
 MAX_OUTPUT_BYTES = 8192
@@ -694,6 +697,56 @@ def _git_source_commit(root: Path) -> dict[str, object]:
         return {"sha": None, "worktree_dirty": None}
 
 
+def _public_summary(report: dict[str, object], *, private_report_saved: bool = False,
+                    private_report_save_failed: bool = False) -> dict[str, object]:
+    """Only source-public source-claimed aggregate outcome, never private transcript."""
+    return {
+        "schema": PUBLIC_SUMMARY_SCHEMA,
+        "evidence_class": "SOURCE_PUBLIC_UNQUALIFIED_SUMMARY",
+        "private_report_included": False,
+        "private_report_saved": private_report_saved,
+        "private_report_save_failed": private_report_save_failed,
+        "full_receipt_replayable_from_stdout": False,
+        "trial_receipt_sha256": report.get("receipt_sha256"),
+        "terminal_reason": report.get("terminal_reason"),
+        "source_verdict": report.get("source_verdict"),
+        "source_receipt_replay_valid": report.get("source_receipt_replay_valid") is True,
+        "verified_success": report.get("verified_success") is True,
+        "model_neural_identity_verified": False,
+        "model_weight_update_verified": False,
+        "generalization_qualified": False,
+    }
+
+
+def _write_private_report_exclusive(report: dict[str, object], path: str) -> None:
+    """Finish a mode-0600 host-private report before atomic exclusive publish.
+
+    An existing final filename (including a symlink) is never replaced. This
+    does not isolate another process running under the same OS account.
+    """
+    if type(path) is not str or not Path(path).is_absolute():
+        raise ValueError("private report target must be an absolute path")
+    destination = Path(path)
+    payload = _canonical(report) + b"\n"
+    descriptor, staged_path = tempfile.mkstemp(
+        prefix=".minotaur-trial-private-", suffix=".tmp",
+        dir=str(destination.parent))
+    try:
+        try:
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                descriptor = -1
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.link(staged_path, destination)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+    finally:
+        os.unlink(staged_path)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, required=True)
@@ -706,10 +759,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fixed-actions", nargs="*", default=[])
     parser.add_argument("--model", default=None)
     parser.add_argument("--model-file", default=None)
+    export = parser.add_mutually_exclusive_group()
+    export.add_argument("--private-report-file", metavar="ABSOLUTE_PATH",
+                        help="write full private receipt exclusively as a 0600 file")
+    export.add_argument("--emit-private-json-stdout", action="store_true",
+                        help="UNSAFE opt-in: print full private receipt to stdout")
     parser.add_argument("--authorize-local-model", action="store_true")
     parser.add_argument("--authorize-command", action="store_true")
     parser.add_argument("--command", nargs=argparse.REMAINDER, default=[])
     args = parser.parse_args(argv)
+    if args.private_report_file is not None and not Path(
+            args.private_report_file).is_absolute():
+        parser.error("--private-report-file requires an absolute path")
     config = TrialConfig(args.seed, args.generation_seed, args.mode,
                          args.max_calls, args.timeout, args.total_timeout,
                          args.max_output_bytes)
@@ -738,7 +799,19 @@ def main(argv: list[str] | None = None) -> int:
                                         timeout_seconds=config.call_timeout_seconds,
                                         max_output_bytes=config.max_output_bytes)
     result = run_trial(config, adapter, model_artifact_path=args.model_file)
-    print(_canonical(result).decode("utf-8"))
+    if args.emit_private_json_stdout:
+        print(_canonical(result).decode("utf-8"))
+    elif args.private_report_file is not None:
+        try:
+            _write_private_report_exclusive(result, args.private_report_file)
+        except (OSError, TypeError, ValueError):
+            print(_canonical(_public_summary(
+                result, private_report_save_failed=True)).decode("utf-8"))
+            return 2
+        print(_canonical(_public_summary(
+            result, private_report_saved=True)).decode("utf-8"))
+    else:
+        print(_canonical(_public_summary(result)).decode("utf-8"))
     return 0 if result["terminal_reason"] == "SUBMITTED" and result[
         "source_receipt_replay_valid"] else 2
 
