@@ -1,8 +1,10 @@
 """Kobayashi/Minotaur source tests: no actual independent model or judge."""
 
 from dataclasses import FrozenInstanceError, replace
+import os
 from os import link as hardlink
 from pathlib import Path
+from stat import S_ISDIR
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 import unittest
@@ -146,6 +148,55 @@ class KobayashiMinotaurTests(unittest.TestCase):
                 self.assertIsNone(corpus.lookup(candidate))
         exact_only = KobayashiCorpus("canonical-exact", (_case(claim, exact_claim=True),))
         self.assertIsNone(exact_only.lookup(_claim(text="I rotate the emergency valve.")))
+
+    def test_distinct_exact_claims_for_one_action_remain_independently_reviewable(self) -> None:
+        first_claim = _claim(text="I turn the valve and guarantee the city survives.")
+        second_claim = _claim(text="I turn the valve but predict pressure failure.")
+        self.assertEqual(first_claim.action_sha256, second_claim.action_sha256)
+        self.assertNotEqual(first_claim.claim_sha256, second_claim.claim_sha256)
+        first_case = _case(first_claim, exact_claim=True)
+        second_case = _case(second_claim, exact_claim=True, category="PHYSICAL_CONTRADICTION")
+
+        # New evidence about a distinct explanation must not require or imply
+        # superseding another claim merely because the action is identical.
+        corpus = KobayashiCorpus("separate-explanations", (first_case, second_case))
+        self.assertIs(corpus.lookup(first_claim), first_case)
+        self.assertIs(corpus.lookup(second_claim), second_case)
+
+        corrected_second = replace(
+            second_case, category="INSUFFICIENT_EVIDENCE", evidence_sha256=_h(701),
+            supersedes_case_sha256=second_case.case_sha256,
+        )
+        revised = corpus.append_revision((corrected_second,))
+        self.assertIs(revised.lookup(first_claim), first_case)
+        self.assertIs(revised.lookup(second_claim), corrected_second)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "revisions.json"
+            revised.persist(path)
+            reloaded = KobayashiCorpus.load(path)
+            self.assertEqual(reloaded.lookup(first_claim).case_sha256,
+                             first_case.case_sha256)
+            self.assertEqual(reloaded.lookup(second_claim).case_sha256,
+                             corrected_second.case_sha256)
+        with self.assertRaisesRegex(KobayashiError, "supersession"):
+            corpus.append_revision((replace(
+                second_case, supersedes_case_sha256=first_case.case_sha256,
+                evidence_sha256=_h(702),
+            ),))
+
+    def test_exact_claim_carveout_preserves_generic_rebuttal_for_other_wording(self) -> None:
+        first_claim = _claim()
+        alternative = _claim(text="I rotate the valve despite uncertain pressure.")
+        generic = _case(first_claim)
+        exact = RebuttalCase(
+            generic.scenario_sha256, generic.world_sha256, generic.action_sha256,
+            first_claim.claim_sha256, "INSUFFICIENT_EVIDENCE", "REFUTED", _h(702),
+            "This statement received a different, exact-claim evidence review.",
+            supersedes_case_sha256=generic.case_sha256,
+        )
+        corpus = KobayashiCorpus("carveout", (generic, exact))
+        self.assertIs(corpus.lookup(first_claim), exact)
+        self.assertIs(corpus.lookup(alternative), generic)
 
     def test_known_mechanism_reused_across_cosmetic_scenes_without_world_wildcard(self) -> None:
         a = KobayashiWorld(variant_seed=0)
@@ -519,7 +570,10 @@ class KobayashiMinotaurTests(unittest.TestCase):
         )
         narrowed = first.append_revision((exact_only_superseding,))
         self.assertIs(narrowed.lookup(original), exact_only_superseding)
-        self.assertIsNone(narrowed.lookup(_claim(text="The same action in other words.")))
+        # Reviewing one exact statement must not silently erase the generic
+        # action rebuttal for an independently phrased claim.
+        self.assertIs(narrowed.lookup(_claim(text="The same action in other words.")),
+                      first_case)
 
         with TemporaryDirectory() as directory:
             first_file = Path(directory) / "first.json"
@@ -578,6 +632,46 @@ class KobayashiMinotaurTests(unittest.TestCase):
             with self.assertRaisesRegex(KobayashiError, "another commitment"):
                 later.persist(destination)
             self.assertEqual(destination.read_bytes(), canonical_bytes)
+
+    @unittest.skipUnless(os.name == "posix", "parent-directory fsync is a POSIX boundary")
+    def test_corpus_new_canonical_name_is_fsynced_in_parent_directory(self) -> None:
+        corpus = KobayashiCorpus("canonical", (_case(_claim()),))
+        with TemporaryDirectory() as directory:
+            destination = Path(directory) / "corpus.json"
+            actual_fsync = os.fsync
+            observed = []
+
+            def track_fsync(fd: int) -> None:
+                observed.append(S_ISDIR(os.fstat(fd).st_mode))
+                actual_fsync(fd)
+
+            with patch("labyrinth.kobayashi_minotaur_v1.os.fsync", side_effect=track_fsync):
+                corpus.persist(destination)
+            self.assertEqual(observed, [False, True])
+            self.assertEqual(KobayashiCorpus.load(destination).corpus_sha256,
+                             corpus.corpus_sha256)
+
+    @unittest.skipUnless(os.name == "posix", "parent-directory fsync is a POSIX boundary")
+    def test_corpus_directory_fsync_failure_is_never_reported_as_success(self) -> None:
+        corpus = KobayashiCorpus("canonical", (_case(_claim()),))
+        with TemporaryDirectory() as directory:
+            destination = Path(directory) / "corpus.json"
+            actual_fsync = os.fsync
+
+            def fail_directory_fsync(fd: int) -> None:
+                if S_ISDIR(os.fstat(fd).st_mode):
+                    raise OSError("injected parent-directory durability failure")
+                actual_fsync(fd)
+
+            with patch("labyrinth.kobayashi_minotaur_v1.os.fsync",
+                       side_effect=fail_directory_fsync):
+                with self.assertRaisesRegex(KobayashiError, "directory fsync failed"):
+                    corpus.persist(destination)
+            # Publication may have created the name before the durability
+            # failure; do not silently remove it or claim a completed commit.
+            self.assertTrue(destination.exists())
+            self.assertEqual(KobayashiCorpus.load(destination).corpus_sha256,
+                             corpus.corpus_sha256)
 
     def test_corpus_loader_rejects_ambiguous_duplicate_json_keys(self) -> None:
         corpus = KobayashiCorpus("canonical", (_case(_claim()),))

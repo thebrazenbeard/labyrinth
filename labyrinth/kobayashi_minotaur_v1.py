@@ -175,7 +175,10 @@ class KobayashiCorpus:
             _validate_hash(self.parent_corpus_sha256, "parent_corpus_sha256")
         if type(self.cases) is not tuple or len(self.cases) > 1024:
             raise KobayashiError("corpus must contain a tuple with at most 1024 cases")
-        latest: dict[tuple[str | None, str, str], RebuttalCase] = {}
+        # The *claim*, not merely its proposed physical action, is the unit
+        # being adjudicated. Different explanations of one action may have
+        # different, independently reviewable evidence and conclusions.
+        latest: dict[tuple[str | None, str, str, str | None], RebuttalCase] = {}
         seen_digests = set()
         for case in self.cases:
             if type(case) is not RebuttalCase:
@@ -184,15 +187,21 @@ class KobayashiCorpus:
             if case.case_sha256 in seen_digests:
                 raise KobayashiError("duplicate rebuttal case digest")
             seen_digests.add(case.case_sha256)
-            # An append may explicitly supersede the active case at the same
-            # scenario/world/action key. Old evidence remains in the immutable
-            # snapshot and can be audited; only the last chain tip is active.
-            key = (case.scenario_sha256, case.world_sha256, case.action_sha256)
+            # New exact-claim reviews coexist with other claims about the same
+            # action. A revision may replace only its own exact scope. An
+            # explicit exact-claim carve-out may cite a generic action case,
+            # but that generic case continues to cover other formulations.
+            key = (case.scenario_sha256, case.world_sha256,
+                   case.action_sha256, case.claim_sha256)
             previous = latest.get(key)
             if previous is None and case.supersedes_case_sha256 is not None:
-                raise KobayashiError("orphan rebuttal supersession")
+                generic_key = (*key[:3], None)
+                generic = latest.get(generic_key) if case.claim_sha256 is not None else None
+                if (generic is None
+                        or case.supersedes_case_sha256 != generic.case_sha256):
+                    raise KobayashiError("orphan or cross-claim rebuttal supersession")
             if previous is not None and case.supersedes_case_sha256 != previous.case_sha256:
-                raise KobayashiError("same action requires exact prior-case supersession")
+                raise KobayashiError("same claim scope requires exact prior-case supersession")
             latest[key] = case
 
     def verify(self) -> None:
@@ -204,7 +213,8 @@ class KobayashiCorpus:
         claim.verify()
         active = {}
         for case in self.cases:
-            active[(case.scenario_sha256, case.world_sha256, case.action_sha256)] = case
+            active[(case.scenario_sha256, case.world_sha256,
+                    case.action_sha256, case.claim_sha256)] = case
         matching = [
             case for case in active.values()
             if (case.scenario_sha256 is None or case.scenario_sha256 == claim.scenario_sha256)
@@ -212,10 +222,16 @@ class KobayashiCorpus:
             and case.action_sha256 == claim.action_sha256
             and (case.claim_sha256 is None or case.claim_sha256 == claim.claim_sha256)
         ]
-        # Exact public scene takes precedence over canon-world cross-cosmetic
-        # entry. The immutable world SHA guards against unrelated scenarios.
-        exact = [case for case in matching if case.scenario_sha256 == claim.scenario_sha256]
-        return (exact or matching)[-1] if matching else None
+        # Scenario-exact rebuttals outrank reusable cross-cosmetic canon. An
+        # exact statement overrides the generic physical-action explanation,
+        # while the latter remains available to different statements.
+        return max(
+            matching,
+            key=lambda case: (
+                case.scenario_sha256 == claim.scenario_sha256,
+                case.claim_sha256 == claim.claim_sha256,
+            ),
+        ) if matching else None
 
     def append_revision(self, cases: tuple[RebuttalCase, ...]) -> "KobayashiCorpus":
         """Host-only source API: new append-only snapshot, never in-place edit.
@@ -246,8 +262,10 @@ class KobayashiCorpus:
         atomic hard-link publishes the canonical name. A process interruption
         during serialization cannot leave a partial *canonical* file. A host
         filesystem lacking same-directory hard links fails closed instead of
-        falling back to an overwrite-prone rename. Interrupted processes may
-        leave an uncommitted temporary sibling requiring host cleanup.
+        falling back to an overwrite-prone rename. On POSIX, the containing
+        directory is also fsynced after a successful link so the new name is
+        not acknowledged solely from file-content durability. Interrupted
+        processes may leave an uncommitted temporary sibling requiring cleanup.
         """
         self.verify()
         destination = Path(path)
@@ -288,6 +306,25 @@ class KobayashiCorpus:
             except OSError as exc:
                 raise KobayashiError(
                     "atomic create-once corpus publication is unsupported") from exc
+            else:
+                if os.name == "posix":
+                    # The file's fsync alone cannot establish that its newly
+                    # published directory entry survives sudden power loss.
+                    # The host still owns rollback-resistant custody.
+                    try:
+                        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                        directory_fd = os.open(destination.parent, flags)
+                        try:
+                            if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
+                                raise KobayashiError("corpus parent must be a directory")
+                            os.fsync(directory_fd)
+                        finally:
+                            os.close(directory_fd)
+                    except OSError as exc:
+                        # The link may already exist. Never erase a canonical
+                        # name to hide an unqualified durability outcome.
+                        raise KobayashiError(
+                            "canonical corpus directory fsync failed after publication") from exc
         finally:
             if temporary is not None:
                 os.unlink(temporary)

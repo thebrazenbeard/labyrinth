@@ -1,9 +1,13 @@
 """Public source-only world-session tests: no real model or host authority."""
 
 import unittest
+from queue import Queue
+from threading import Barrier, Thread
 
 from labyrinth.kobayashi_canon_v1 import KobayashiAction, KobayashiWorld
-from labyrinth.kobayashi_completion_gate_v1 import KobayashiCompletionLedger
+from labyrinth.kobayashi_completion_gate_v1 import (
+    CompletionGateError, KobayashiCompletionLedger,
+)
 from labyrinth.kobayashi_minotaur_v1 import (
     BoundClaim, EvidenceAssessment, KobayashiCorpus, MinotaurDialogue,
 )
@@ -68,6 +72,41 @@ def _host_bound_appeal(lifecycle):
 
 
 class HostOwnedKobayashiSessionTests(unittest.TestCase):
+    def test_same_instance_race_rejects_loser_before_model_transport(self):
+        ledger = KobayashiCompletionLedger()
+        start = Barrier(3)
+        outcomes = Queue()
+
+        def travel(index):
+            guided, actor, proposal, config = _actor()
+            try:
+                start.wait(timeout=5)
+                run_host_owned_kobayashi_world(
+                    _recipe(), actor, config, proposal, variant_seed=2,
+                    max_maze_actions=128, host_appeal=_host_bound_appeal,
+                    completion_ledger=ledger, maze_id="shared-race",
+                    scenario_instance_sha256="9" * 64)
+                status = "ACCEPTED"
+            except CompletionGateError:
+                status = "REJECTED"
+            except BaseException as exc:
+                status = f"UNEXPECTED:{type(exc).__name__}:{exc}"
+            outcomes.put((index, status, len(guided.requests), len(proposal.requests)))
+
+        workers = [Thread(target=travel, args=(index,)) for index in range(2)]
+        for worker in workers:
+            worker.start()
+        start.wait(timeout=5)
+        for worker in workers:
+            worker.join(timeout=10)
+            self.assertFalse(worker.is_alive(), "race worker did not finish")
+        results = [outcomes.get_nowait() for _ in workers]
+        self.assertCountEqual([row[1] for row in results], ["ACCEPTED", "REJECTED"])
+        denied = next(row for row in results if row[1] == "REJECTED")
+        self.assertEqual(denied[2:], (0, 0), "loser called a model before reservation denial")
+        accepted = ledger.lookup("shared-race", "9" * 64)
+        self.assertIsNotNone(accepted)
+
     def test_public_world_factory_refuses_unjudged_path_before_any_model_call(self):
         guided, actor, proposal, config = _actor()
         with self.assertRaisesRegex(ModelActionBoundaryError, "host.*appeal"):

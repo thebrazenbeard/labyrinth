@@ -60,7 +60,19 @@ _NON_ACTION_FIRST_VERBS = frozenset({
 _EXPLANATORY_FIRST_VERBS = _NON_ACTION_FIRST_VERBS | frozenset({
     "observe", "observed", "infer", "estimate", "reason", "note", "explain",
     "understand", "conclude", "calculate", "acknowledge", "describe",
-    "see", "am", "shall", "can", "cannot", "may",
+    "see", "am", "shall", "can", "cannot", "may", "test", "check",
+    "verify", "report", "record", "document", "evaluate", "compare",
+    "measure", "inspect", "monitor", "read", "argue", "defend",
+})
+# These verbs identify plainly executable clauses, not a whitelist of
+# permitted Kobayashi solutions. Unfamiliar committed actions remain
+# reviewable; no new verb here is assigned a physical outcome.
+_PHYSICAL_FIRST_VERBS = frozenset(_VERBS) | frozenset({
+    "turn", "pull", "cut", "push", "open", "close", "rotate", "twist",
+    "sever", "press", "wedge", "shim", "jam", "bridge", "activate",
+    "energize", "rewire", "insulate", "strike", "attach", "snip",
+    "weld", "flood", "vent", "disconnect", "remove", "insert", "bend",
+    "break", "drain", "seal", "release", "stabilize", "neutralize",
 })
 _NO_COMMITMENT = re.compile(r"\b(?:if|maybe|perhaps|might|could|should|would|not|never|don't|won't)\b", re.I)
 _LABEL_GROUP = {
@@ -154,8 +166,81 @@ def _proposal_parts(raw_text: str) -> dict[str, tuple[str, ...]]:
     return {key: tuple(values) for key, values in extracted.items()}
 
 
+def _committed_operations(text: str) -> int:
+    """Count *explicit* actor commitments, not hypothetical consequences.
+
+    The proposed action is bounded by the whole answer, including Mechanism:
+    and Prediction: labels. Recognized verbs are merely syntactic hints here:
+    the check never adjudicates whether a novel physical mechanism succeeds.
+    Counting verb positions avoids double-counting "I will then pull" via
+    both the actor and sequence rules.
+    """
+    words = _words(text)
+    committed: set[int] = set()
+    for i, word in enumerate(words):
+        if word in ("i", "we"):
+            # "If I pulled ..." and "I will not pull ..." are explanations,
+            # not a second committed manipulation. A conditional intervention
+            # may still need separate review, but it is not an executed act.
+            if i and words[i - 1] in ("if", "whether", "unless"):
+                continue
+            j = i + 1
+            future = False
+            if words[j:j + 1] in (("will",), ("shall",)):
+                future = True
+                j += 1
+            elif words[j:j + 3] == ("am", "going", "to"):
+                future = True
+                j += 3
+            elif words[j:j + 2] in (("intend", "to"), ("choose", "to"),
+                                     ("decide", "to"), ("plan", "to")):
+                future = True
+                j += 2
+            if j < len(words) and words[j] in ("not", "never"):
+                continue
+            while j < len(words) and words[j] in ("then", "also", "next", "afterward", "afterwards"):
+                j += 1
+            if j >= len(words):
+                continue
+            verb = words[j]
+            arm_use = (verb == "use" and "to" in words[j + 1:j + 9]
+                       and "arm" in words[j + 1:j + 9])
+            if (verb in _PHYSICAL_FIRST_VERBS or arm_use
+                    or (future and verb not in _EXPLANATORY_FIRST_VERBS
+                        and verb not in ("have", "need", "try", "get", "use"))):
+                committed.add(j)
+        elif word in ("then", "next", "afterward", "afterwards", "subsequently"):
+            j = i + 1
+            if j < len(words) and words[j] in ("i", "we"):
+                j += 1
+            if j < len(words) and words[j] in ("will", "shall"):
+                j += 1
+            if j < len(words) and words[j] in ("not", "never"):
+                continue
+            if j < len(words) and words[j] in ("then", "also"):
+                j += 1
+            if j < len(words) and words[j] in _PHYSICAL_FIRST_VERBS:
+                committed.add(j)
+    # A bare imperative is a commitment when it starts the segment, e.g.
+    # "Then sever the cable" under a Mechanism: label.
+    j = 0
+    while j < len(words) and words[j] in ("then", "next", "afterward", "afterwards"):
+        j += 1
+    if j < len(words) and words[j] in _PHYSICAL_FIRST_VERBS:
+        committed.add(j)
+    # A semicolon or sentence boundary can introduce a bare imperative with
+    # no repeated first-person subject: "I turn the valve; pull the breaker".
+    # Sequence-marked imperatives ("then pull") are already counted above.
+    bare_followups = sum(
+        bool(fragment_words and fragment_words[0] in _PHYSICAL_FIRST_VERBS)
+        for fragment in re.split(r"[;.!?]\s*", text)[1:]
+        if (fragment_words := _words(fragment))
+    )
+    return len(committed) + bare_followups
+
+
 def _contains_second_explicit_action(raw_text: str) -> bool:
-    """Do not let a multi-line answer silently execute its first command."""
+    """A labelled rationale cannot smuggle in a second manipulation."""
     lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
     labelled_actions = sum(
         re.match(r"^(?:action|intervention|proposal)\s*:", line, re.I) is not None
@@ -163,6 +248,21 @@ def _contains_second_explicit_action(raw_text: str) -> bool:
     )
     if labelled_actions > 1:
         return True
+    # Examine every labelled field, not just unlabelled prose. The first
+    # Action: (or the first narrative sentence) owns one manipulation; any
+    # committed physical act elsewhere is a second intervention. The first
+    # action clause itself may also contain an explicit follow-up.
+    primary_present = labelled_actions > 0 or any(
+        _LABEL.fullmatch(line) is None for line in lines
+    )
+    for line in lines:
+        match = _LABEL.fullmatch(line)
+        if match is None:
+            continue
+        group = _LABEL_GROUP[" ".join(match.group(1).casefold().split())]
+        count = _committed_operations(match.group(2))
+        if (group == "action" and count > 1) or (group != "action" and primary_present and count):
+            return True
     # An unlabeled paragraph may describe its rationale over many sentences.
     # Only obvious additional executable clauses are rejected here; unresolved
     # prose remains inert even if this conservative detector misses one.
@@ -173,12 +273,16 @@ def _contains_second_explicit_action(raw_text: str) -> bool:
     ]
     if labelled_actions == 0:
         # The opening narrative sentence is the proposed primary action.
+        if sentences and _committed_operations(sentences[0]) > 1:
+            return True
         sentences = sentences[1:]
     else:
         # With an Action: field, *every* additional imperative narrative
         # sentence would be an unsanctioned second manipulation.
         pass
     for sentence in sentences:
+        if _committed_operations(sentence):
+            return True
         words = _words(sentence)
         if words and words[0] == "then":
             words = words[1:]
