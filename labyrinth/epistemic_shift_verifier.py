@@ -37,14 +37,50 @@ def _actual_kernel(case: Case, state: State) -> str:
 
 
 def independent_replay(case: Case, attempts: object) -> tuple[State, tuple[int | None, ...]] | None:
-    if not isinstance(attempts, (list, tuple)) or len(attempts) > MAX_ATTEMPTS:
+    # Subclasses may lie independently about __len__ and __iter__. Take one
+    # immutable snapshot of an exact builtin witness and enforce the charge
+    # budget against that same snapshot before replay.
+    if type(attempts) not in (list, tuple):
+        return None
+    trace = tuple(attempts)
+    if len(trace) > MAX_ATTEMPTS:
         return None
     state = State()
     observations: list[int | None] = []
-    for pair in attempts:
+    for pair in trace:
         state, effect = _apply(state, pair, _actual_kernel(case, state))
         observations.append(effect)
     return state, tuple(observations)
+
+
+def exact_observations(expected: tuple[int | None, ...], observed: object) -> bool:
+    """Reject custom equality objects masquerading as truthful binary effects."""
+    if type(observed) not in (list, tuple) or len(expected) != len(observed):
+        return False
+    for truth, candidate in zip(expected, observed):
+        if truth is None:
+            if candidate is not None:
+                return False
+        elif (type(truth) is not int or truth not in (0, 1)
+              or type(candidate) is not int or candidate != truth):
+            return False
+    return True
+
+
+def exact_replay_match(expected: tuple[State, tuple[int | None, ...]] | None,
+                       current: object, observations: object) -> bool:
+    """Compare typed state and effects; equality callbacks are not evidence."""
+    if expected is None or type(current) is not State:
+        return False
+    if (type(current.interventions) is not int or current.interventions < 0
+            or type(current.previous_x) is not int or current.previous_x not in (0, 1)
+            or type(current.previous_y) is not int or current.previous_y not in (0, 1)):
+        return False
+    state = expected[0]
+    return (state.interventions == current.interventions
+            and state.previous_x == current.previous_x
+            and state.previous_y == current.previous_y
+            and exact_observations(expected[1], observations))
 
 
 def assess_hypothesis(case: Case, current: State, candidate_kernel: object) -> dict[str, object]:
@@ -57,7 +93,10 @@ def assess_hypothesis(case: Case, current: State, candidate_kernel: object) -> d
     if current.interventions < CHANGE_AFTER + 1:
         return {"verdict": "UNKNOWN", "hypothesis_verified": False,
                 "reason": "insufficient post-change intervention history"}
-    if type(candidate_kernel) is not str or candidate_kernel not in ALL_KINDS:
+    if type(candidate_kernel) is not str or not candidate_kernel.strip():
+        return {"verdict": "UNKNOWN", "hypothesis_verified": False,
+                "reason": "missing or malformed causal mechanism"}
+    if candidate_kernel not in ALL_KINDS:
         return {"verdict": "NOVEL_RULESET_CHALLENGE", "hypothesis_verified": False,
                 "proposal": candidate_kernel,
                 "reason": "unrecognized mechanism requires new-rules review"}
@@ -83,7 +122,7 @@ def assess_hypothesis(case: Case, current: State, candidate_kernel: object) -> d
 def adjudicate_claim(case: Case, claim: object, attempts: object,
                      observations: object, belief_log: object) -> dict[str, object]:
     replay = independent_replay(case, attempts)
-    if replay is None or replay[1] != tuple(observations):
+    if replay is None or not exact_observations(replay[1], observations):
         return {"verdict": "EVALUATOR_DISAGREEMENT", "verified_success": False}
     current = replay[0]
     if type(claim) is not dict or type(claim.get("kind")) is not str:

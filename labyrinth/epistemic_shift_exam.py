@@ -115,7 +115,8 @@ def candidate_view(case: Case) -> dict[str, object]:
 
 
 def semantic_fingerprint(case: Case) -> str:
-    return sha256(f"{RULESET}|{case.kind}|{case.sealed}|{CHANGE_AFTER}".encode()).hexdigest()
+    effective_kind = "copy" if case.sealed else case.kind
+    return sha256(f"{RULESET}|{effective_kind}|{case.sealed}|{CHANGE_AFTER}".encode()).hexdigest()
 
 
 class CandidateSession:
@@ -131,10 +132,10 @@ class CandidateSession:
         self._fault: str | None = None
 
     def view(self) -> dict[str, object]:
-        from .epistemic_shift_verifier import independent_replay
+        from .epistemic_shift_verifier import exact_replay_match, independent_replay
         try:
             result = independent_replay(self._case, self._attempts)
-            if result is None or result != (self._state, tuple(self._observations)):
+            if not exact_replay_match(result, self._state, self._observations):
                 self._fault = "environment/verifier disagreement"
         except Exception:
             self._fault = "independent replay unavailable"

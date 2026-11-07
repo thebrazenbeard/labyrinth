@@ -102,6 +102,31 @@ malformed action accounting, false-positive change detection, stale-belief
 controls, future counterexamples, evidence-backed belief revision, injected
 transition/replay faults, and local testing of proposed new rules.
 
+### Independent hostile reattack of the first implementation
+
+Destroyer and Skeptic independently broke the initial examiner at source
+commit `644244f67aeccc32519e28d5c0fa47cd3eccd37d` despite its green tests:
+
+1. A crafted nonbinary output with hostile `__eq__` concealed a replay
+   disagreement. One witness escalated this to a false `VERIFIED_WIN` for a
+   purported causal revision in a sealed machine whose law never changed.
+2. Missing, non-text and whitespace-only hypothesis kernels were incorrectly
+   returned as `NOVEL_RULESET_CHALLENGE`, sometimes with an unserializable
+   raw object in the receipt.
+3. Mechanically identical sealed copies received different semantic
+   fingerprints, incorrectly inflating family-diversity accounting.
+4. In the independently called replay API, a list subclass lied about its
+   length and bypassed the ten-intervention ceiling. A tuple subclass could
+   also lie about iteration. The ordinary CandidateSession always uses an
+   exact list, but the verifier's public contract still required hardening.
+
+The revised implementation checks exact binary observation types, typed
+state values, and snapshot-bound replay budgets; malformed causal-law labels
+return `UNKNOWN`, while genuine novel textual proposals remain reviewable.
+These are regression-tested, not grounds to claim tamper-proof independent
+execution or neural learning. The hostile findings came from separate
+agent-owned test surfaces, then were reproduced in the unified checkout.
+
 ### Fresh executed source-only results, 2026-11-07
 
 - Focused new suite: **32/32 PASS**; Python `-O`: **32/32 PASS**.
