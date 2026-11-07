@@ -18,6 +18,38 @@ python -m labyrinth toy-eval --seed 0 --eval-count 64 --checkpoint toy-checkpoin
 python -m unittest discover -s tests -v
 ```
 
+### Minotaur hostile examination (development-only)
+
+The optional, standard-library-only exam modules exercise **four separate
+declared-world families** through one candidate bridge and a fifth causal-law
+revision family through its own intervention interface. These are public
+source-development challenges, not privately held-out graduation tests:
+
+```bash
+python -m labyrinth.minotaur_cross_exam
+python -m unittest tests.test_minotaur_cross_exam tests.test_epistemic_shift_exam -q
+python -m unittest discover -s tests -q
+```
+
+The cross-family command runs public-rule deterministic **zero-update**
+controls on Constant, Diverse, Timegate, and Oracle Chamber. Oracle policy or
+conditional UNSAT certification is distinct from a physical escape. The
+causal-law examiner deliberately holds out stateful mechanisms from its
+stateless training mechanisms and tests provisional beliefs, contradictions,
+and independently replayed counterfactuals. Its best public symbolic control
+already encodes all six declared mechanisms, so success proves **neither**
+weight updates **nor** transfer by a model. The evaluator still shares a
+Python process with any in-process candidate; this is not private custody.
+
+See the five exam protocols in `docs/CONSTANT_EXAM_PROTOCOL.md`,
+`docs/MINOTAUR_DIVERSE_EXAM_PROTOCOL.md`,
+`docs/MINOTAUR_TIMEGATE_HOSTILE_PROTOCOL.md`,
+`docs/MINOTAUR_ORACLE_CHAMBER_HOSTILE_PROTOCOL.md`, and
+`docs/MINOTAUR_EPISTEMIC_SHIFT_HOSTILE_PROTOCOL.md` for exact rules, falsifiers,
+remaining trust gaps, and how a novel discovery is challenged rather than
+discarded. No Lappy model, production process, protected evaluator, or
+official TrainingDay checkpoint is launched by these commands.
+
 `--count`, `--train-count`, and `--eval-count` mean tasks **per tier**. Reports are JSON; existing paths are never overwritten. CLI-supplied replay JSON and saved demonstration artifacts are limited to **8 MiB per input file** before parsing, including files that change during the read. Without a specified model, `replay:constant-zero` is a deterministic negative-control fixture that outputs `ANSWER: 0` for every question. It does not solve problems or learn. To get nontrivial scores offline, pass `--replay-file mapping.json`, where the JSON object maps exact public prompt text to fixed answer strings. Missing fixture keys fail closed.
 
 For a local user-operated Ollama installation:
