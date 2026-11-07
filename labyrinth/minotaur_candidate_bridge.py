@@ -61,15 +61,23 @@ def _no_nan(_value: str) -> Any:
 def _public(value: Mapping[str, Any]) -> str:
     if not isinstance(value, Mapping):
         raise ValueError("public view must be a mapping")
-    def inspect(node: Any) -> None:
+    def inspect(node: Any, path: tuple[object, ...] = ()) -> None:
         if isinstance(node, Mapping):
             for key, child in node.items():
-                if type(key) is not str or key in _PRIVATE_FIELDS:
+                # Oracle Chamber's explicit public answer transcript uses
+                # answers[index].answer for a returned 0/1 bit. A hidden
+                # answer anywhere else remains barred from the model prompt.
+                public_query_bit = (key == "answer" and len(path) == 2
+                                    and path[0] == "answers"
+                                    and type(path[1]) is int and type(child) is int
+                                    and child in (0, 1))
+                if (type(key) is not str or
+                        (key in _PRIVATE_FIELDS and not public_query_bit)):
                     raise ValueError("evaluator-only or malformed public field")
-                inspect(child)
+                inspect(child, (*path, key))
         elif isinstance(node, (list, tuple)):
-            for child in node:
-                inspect(child)
+            for index, child in enumerate(node):
+                inspect(child, (*path, index))
     inspect(value)
     raw = _json(dict(value))
     if len(raw) > MAX_PUBLIC_CHARACTERS:

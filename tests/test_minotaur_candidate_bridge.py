@@ -144,6 +144,10 @@ class CandidateBridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "evaluator-only"):
             run_candidate(public, factory, spy, authorize_local_adapter=True)
         self.assertEqual(spy.prompts, [])
+        public, factory, _ = context()
+        public["answer"] = 7
+        with self.assertRaisesRegex(ValueError, "evaluator-only"):
+            run_candidate(public, factory, spy, authorize_local_adapter=True)
 
     def test_legacy_start_only_exam_is_adaptable_without_private_case(self):
         public = StartOnlyExam().start()
