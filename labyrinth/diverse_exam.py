@@ -218,9 +218,11 @@ class CandidateSession:
         self._replay_divergence = False
         self._transition_error: Exception | None = None
         self._observation_error: Exception | None = None
+        self._verification_error: Exception | None = None
 
     def _verdict(self) -> str:
-        if self._transition_error is not None or self._observation_error is not None:
+        if (self._transition_error is not None or self._observation_error is not None
+                or self._verification_error is not None):
             return "EVALUATOR_ERROR"
         if self._replay_divergence:
             return "REPLAY_DIVERGENCE"
@@ -229,14 +231,20 @@ class CandidateSession:
         # Verify both the legal trace and complete attempt transcript with a
         # separate rules implementation; invalid probes count as no-op turns.
         from .diverse_exam_verifier import verify, verify_attempts
-        legal = verify(family=self._exam.family, rotation=self._exam.rotation,
-                       sealed=self._exam.sealed, actions=self._valid_trace)
-        full = verify_attempts(family=self._exam.family, rotation=self._exam.rotation,
-                               sealed=self._exam.sealed, attempts=self._attempts)
+        try:
+            legal = verify(family=self._exam.family, rotation=self._exam.rotation,
+                           sealed=self._exam.sealed, actions=self._valid_trace)
+            full = verify_attempts(family=self._exam.family, rotation=self._exam.rotation,
+                                   sealed=self._exam.sealed, attempts=self._attempts)
+        except Exception as exc:
+            self._verification_error = exc
+            self._last_action_status = "EVALUATOR_ERROR"
+            return "EVALUATOR_ERROR"
         return "VERIFIED_WIN" if legal.outcome == full.outcome == "VERIFIED_WIN" else "REACHED_EXIT_UNCERTIFIED"
 
     def view(self) -> dict[str, object]:
-        if self._transition_error is not None or self._observation_error is not None:
+        if (self._transition_error is not None or self._observation_error is not None
+                or self._verification_error is not None):
             observation = None
         else:
             try:
@@ -252,6 +260,7 @@ class CandidateSession:
             "observation": observation,
             "remaining_actions": MAX_ACTIONS - len(self._attempts),
             "finished": (self._transition_error is not None or self._observation_error is not None
+                         or self._verification_error is not None
                          or self._replay_divergence
                          or self._state.room == "freedom"
                          or len(self._attempts) == MAX_ACTIONS),
@@ -261,6 +270,7 @@ class CandidateSession:
 
     def act(self, action: object) -> dict[str, object]:
         if (self._transition_error is not None or self._observation_error is not None
+                or self._verification_error is not None
                 or self._replay_divergence
                 or len(self._attempts) == MAX_ACTIONS
                 or self._state.room == "freedom"):
@@ -296,13 +306,20 @@ class CandidateSession:
         # verifier owns a separate transition implementation and its complete
         # attempt replay charges invalid actions as no-op turns.
         from .diverse_exam_verifier import _advance, verify_attempts
-        if self._last_action_status == "ACCEPTED":
-            self._independent_state = _advance(
-                self._exam.family, self._exam.rotation, self._exam.sealed,
-                self._independent_state, action)
-        transcript = verify_attempts(
-            family=self._exam.family, rotation=self._exam.rotation,
-            sealed=self._exam.sealed, attempts=self._attempts)
+        try:
+            if self._last_action_status == "ACCEPTED":
+                self._independent_state = _advance(
+                    self._exam.family, self._exam.rotation, self._exam.sealed,
+                    self._independent_state, action)
+            transcript = verify_attempts(
+                family=self._exam.family, rotation=self._exam.rotation,
+                sealed=self._exam.sealed, attempts=self._attempts)
+        except Exception as exc:
+            # A broken oracle must not leave a session active with a charged
+            # but uncertified action, even if the game transition succeeded.
+            self._verification_error = exc
+            self._last_action_status = "EVALUATOR_ERROR"
+            raise RuntimeError("independent verifier failed; evaluation terminated") from exc
         local_state = (self._state.room, self._state.bits, self._state.enabled)
         if (local_state != self._independent_state
                 or transcript.final_room != self._state.room

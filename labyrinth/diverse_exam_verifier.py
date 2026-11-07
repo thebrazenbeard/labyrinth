@@ -82,7 +82,7 @@ def _advance(family: str, rotation: int, sealed: bool,
 
 def verify(*, family: str, rotation: int, sealed: bool, actions: object) -> Replay:
     _check_world(family, rotation, sealed)
-    if not isinstance(actions, (tuple, list)):
+    if type(actions) not in (tuple, list):
         return Replay("INVALID_TRACE", detail="trace must be a list/tuple")
     if len(actions) > 12 or any(type(a) is not str or a not in _LEGAL for a in actions):
         return Replay("INVALID_TRACE", detail="excess length or undeclared action")
@@ -102,7 +102,7 @@ def verify_attempts(*, family: str, rotation: int, sealed: bool, attempts: objec
     successful escape still must occur within the twelve-attempt budget.
     """
     _check_world(family, rotation, sealed)
-    if not isinstance(attempts, (tuple, list)) or len(attempts) > 12:
+    if type(attempts) not in (tuple, list) or len(attempts) > 12:
         return Replay("INVALID_TRACE", detail="attempt list malformed or over budget")
     state = ("foyer", 0, False)
     for index, action in enumerate(attempts):
@@ -123,18 +123,20 @@ def verify_unsat_certificate(*, family: str, rotation: int, sealed: bool,
     certificate must be reexamined against a new ruleset.
     """
     _check_world(family, rotation, sealed)
-    if not isinstance(claimed_states, (set, frozenset, list, tuple)):
+    if type(claimed_states) not in (set, frozenset, list, tuple):
         return UnsatReview(False, "certificate must be a collection")
     if len(claimed_states) > 1024:
         return UnsatReview(False, "certificate exceeds finite bound")
+    # Validate raw entries first: equality/hash dedup can silently erase a
+    # malformed `True` alias of an integer possession bit.
+    if any(type(x) is not tuple or len(x) != 3 or type(x[0]) is not str or
+           type(x[1]) is not int or type(x[2]) is not bool or x[1] not in range(4)
+           for x in claimed_states):
+        return UnsatReview(False, "invalid state tuple")
     try:
         claimed = set(claimed_states)
     except TypeError:
         return UnsatReview(False, "unhashable certificate entry")
-    if any(type(x) is not tuple or len(x) != 3 or type(x[0]) is not str or
-           type(x[1]) is not int or type(x[2]) is not bool or x[1] not in range(4)
-           for x in claimed):
-        return UnsatReview(False, "invalid state tuple")
     start = ("foyer", 0, False)
     if start not in claimed:
         return UnsatReview(False, "initial state omitted")
