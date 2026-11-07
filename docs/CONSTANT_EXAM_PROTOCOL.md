@@ -17,7 +17,7 @@ Repeat the same apparent no-exit scenario using deterministic seeded wording var
 ## Run
 
 ```bash
-python -m unittest discover -s . -p 'test_constant_exam.py' -v
+python -m unittest discover -s tests -p 'test_constant_exam.py' -v
 ```
 
 Example evaluator API:
