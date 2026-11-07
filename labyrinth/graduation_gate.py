@@ -8,6 +8,15 @@ and corrupted-label control on common held-out cases with a private oracle.
 The evaluator, **not** Minotaur or the trainee, must own the HMAC key.  HMAC
 authenticates the signed receipt's origin, not whether the evaluator told the
 truth, had genuinely unseen questions, or ran the declared checkpoints.
+The v2 gate ALSO requires a policy-frozen, independently custodied semantic
+case registry with a complete per-attempt roster. Family identifiers mean
+equivalence classes under normalized task MECHANICS, not seed, rotation or
+wording. Paired tests count conservatively all-correct family clusters, not
+individual paraphrases. Legacy signed v1 receipts BLOCK rather than silently
+upgrade. The registry must be reviewed and held by an independent source;
+caller-supplied hashes alone DO NOT authenticate semantic diversity. Even a
+registered tuple can be false if its human/machine custodian lies. Only
+externally verified custody can make a graduation result meaningful.
 The trusted owner must persist GateState across processes and issue a fresh
 session nonce for each qualification campaign; neither is automatic here.
 An unsigned Labyrinth report, even one that passes its consistency auditor,
@@ -25,14 +34,33 @@ import re
 from typing import Any
 
 
-SCHEMA = "labyrinth.minotaur-evaluator-attestation.v1"
-_DOMAIN = b"labyrinth.minotaur.graduation.v1\x00"
+LEGACY_SCHEMA = "labyrinth.minotaur-evaluator-attestation.v1"
+SCHEMA = "labyrinth.minotaur-evaluator-attestation.v2"
+_DOMAIN = b"labyrinth.minotaur.graduation.v2\x00"
 _PRIVATE_EXAM_SCORE_PROVENANCE = "independent_private_exam.v1"
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z", re.ASCII)
 _NONCE = re.compile(r"[0-9a-f]{32,128}\Z", re.ASCII)
 _MAX_RECEIPT_BYTES = 1_048_576
 _MAX_TRIALS = 2_000
+
+
+@dataclass(frozen=True)
+class SemanticCaseCommitment:
+    """Pre-registered equivalence-class judgment by a SEPARATE trusted owner.
+
+    The family ID means normalized MECHANICS, not a seed, graph rotation,
+    difficulty parameter, prompt hash, or evaluator-generated trial label.
+    Source code cannot verify whether the custodian classified the semantics
+    honestly. That requires an external review of actual scenario mechanics.
+    """
+
+    attempt: int
+    run_id: str
+    slice_name: str  # "train" or one of the required evaluation slices
+    case_id: str
+    prompt_commitment: str
+    semantic_family_id: str
 
 
 @dataclass(frozen=True)
@@ -47,6 +75,8 @@ class GraduationPolicy:
     expected_conditions_sha256: str
     required_slices: tuple[str, ...] = ("heldout", "transfer")
     min_cases_per_slice: int = 16
+    min_semantic_families_per_slice: int = 8
+    independent_semantic_registry: tuple[SemanticCaseCommitment, ...] = ()
     min_accuracy: float = 0.75
     min_format_rate: float = 0.90
     min_gain_over_controls: float = 0.10
@@ -84,8 +114,38 @@ class GraduationPolicy:
             raise ValueError("graduation requires heldout and transfer, never a training slice")
         if type(self.min_cases_per_slice) is not int or not 16 <= self.min_cases_per_slice <= 500:
             raise ValueError("min_cases_per_slice must be in [16, 500]")
+        if (type(self.min_semantic_families_per_slice) is not int
+                or not 8 <= self.min_semantic_families_per_slice <= self.min_cases_per_slice):
+            raise ValueError("min_semantic_families_per_slice must be in [8, min_cases_per_slice]")
         if type(self.max_attempts) is not int or not 1 <= self.max_attempts <= 100:
             raise ValueError("max_attempts must be in [1, 100]")
+        registry = self.independent_semantic_registry
+        if (type(registry) is not tuple or not 1 <= len(registry) <= 10_000
+                or any(type(x) is not SemanticCaseCommitment for x in registry)):
+            raise ValueError("separately custodied semantic registry is required")
+        registered_cases: set[tuple[int, str, str]] = set()
+        registered_prompts: set[tuple[int, str, str]] = set()
+        runs_by_attempt: dict[int, set[str]] = {}
+        for entry in registry:
+            case_key = (entry.attempt, entry.run_id, entry.case_id)
+            prompt_key = (entry.attempt, entry.run_id, entry.prompt_commitment)
+            if (type(entry.attempt) is not int or not 1 <= entry.attempt <= self.max_attempts
+                    or type(entry.run_id) is not str or not _ID.fullmatch(entry.run_id)
+                    or type(entry.slice_name) is not str
+                    or entry.slice_name not in ("train", *self.required_slices)
+                    or type(entry.case_id) is not str or not _ID.fullmatch(entry.case_id)
+                    or type(entry.prompt_commitment) is not str
+                    or not _SHA256.fullmatch(entry.prompt_commitment)
+                    or type(entry.semantic_family_id) is not str
+                    or not _SHA256.fullmatch(entry.semantic_family_id)
+                    or case_key in registered_cases
+                    or prompt_key in registered_prompts):
+                raise ValueError("malformed or repeated independent semantic registry entry")
+            registered_cases.add(case_key)
+            registered_prompts.add(prompt_key)
+            runs_by_attempt.setdefault(entry.attempt, set()).add(entry.run_id)
+        if any(len(run_ids) != 1 for run_ids in runs_by_attempt.values()):
+            raise ValueError("each attempt must have one precommitted run, not selectable suites")
         for name in ("min_accuracy", "min_format_rate", "min_gain_over_controls"):
             value = getattr(self, name)
             if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
@@ -119,6 +179,7 @@ class GateState:
     consumed_suite_sha256s: frozenset[str] = frozenset()
     consumed_eval_case_ids: frozenset[str] = frozenset()
     consumed_eval_prompt_commitments: frozenset[str] = frozenset()
+    consumed_eval_semantic_family_ids: frozenset[str] = frozenset()
     graduated: bool = False
     policy_fingerprint: str | None = None
 
@@ -158,10 +219,11 @@ _ROOT_KEYS = frozenset({
     "schema", "objective_id", "trainee_sha256", "base_sha256", "session_nonce", "run_id",
     "attempt", "evaluator_sha256", "conditions_sha256", "fresh_process_reload",
     "independent_private_oracle", "score_provenance", "training_case_ids", "training_prompt_commitments",
+    "training_semantic_family_ids",
     "slices", "suite_sha256", "arm_checkpoint_sha256s", "arm_training_steps",
 })
 _TRIAL_KEYS = frozenset({
-    "case_id", "candidate_correct", "candidate_format", "baseline_correct",
+    "case_id", "semantic_family_id", "candidate_correct", "candidate_format", "baseline_correct",
     "zero_update_correct", "corrupted_correct", "prompt_commitment",
     "baseline_format", "zero_update_format", "corrupted_format",
     "candidate_semantic_correct", "baseline_semantic_correct",
@@ -176,8 +238,10 @@ def _one_sided_exact_paired_p(wins: int, losses: int) -> float:
     """Exact one-sided McNemar/binomial tail for discordant paired cases.
 
     The null is no greater correctness probability for candidate than control.
-    It assumes the individual held-out problems, not their paraphrases or
-    correlated variants, are exchangeable independent evaluation units.
+    In the v2 gate, inputs are *semantic-family clusters* (each conservatively
+    correct only when ALL its cases are correct), not cosmetic prompt variants.
+    Even distinct families are only independent if the external custodian's
+    actual construction and sampling support that inference.
     """
     discordant = wins + losses
     if discordant == 0:
@@ -227,6 +291,9 @@ def decide_graduation(
             or type(state.consumed_eval_prompt_commitments) is not frozenset
             or any(type(r) is not str or not _SHA256.fullmatch(r)
                    for r in state.consumed_eval_prompt_commitments)
+            or type(state.consumed_eval_semantic_family_ids) is not frozenset
+            or any(type(r) is not str or not _SHA256.fullmatch(r)
+                   for r in state.consumed_eval_semantic_family_ids)
             or type(state.graduated) is not bool
             or (state.policy_fingerprint is not None
                 and (type(state.policy_fingerprint) is not str
@@ -238,7 +305,8 @@ def decide_graduation(
     if (state.policy_fingerprint is None
             and (state.next_attempt != 1 or state.consumed_run_ids
                  or state.consumed_suite_sha256s or state.consumed_eval_case_ids
-                 or state.consumed_eval_prompt_commitments or state.graduated)):
+                 or state.consumed_eval_prompt_commitments
+                 or state.consumed_eval_semantic_family_ids or state.graduated)):
         return GateDecision("BLOCKED", ("unbound trusted state cannot authorize graduation",), state)
     if state.graduated:
         return GateDecision("GRADUATED", ("previous trusted graduation retained",), state)
@@ -258,6 +326,11 @@ def decide_graduation(
                              parse_constant=_reject_nonfinite)
     except (ValueError, UnicodeError, RecursionError):
         return GateDecision("BLOCKED", ("malformed signed evaluation evidence",), state)
+    # v1 had no structural identity: signed aliases could be counted as 16
+    # independent wins and promoted. Preserve decoding as explicit BLOCKED,
+    # never silently reinterpret an old authenticated receipt as v2 proof.
+    if type(receipt) is dict and receipt.get("schema") == LEGACY_SCHEMA:
+        return GateDecision("BLOCKED", ("legacy attestation lacks semantic-family evidence",), state)
     if not _exact_keys(receipt, _ROOT_KEYS):
         return GateDecision("BLOCKED", ("unexpected evaluation receipt schema",), state)
     if (receipt["schema"] != SCHEMA or receipt["objective_id"] != policy.objective_id
@@ -300,6 +373,7 @@ def decide_graduation(
 
     training_ids = receipt["training_case_ids"]
     training_prompts = receipt["training_prompt_commitments"]
+    training_families = receipt["training_semantic_family_ids"]
     groups = receipt["slices"]
     if (type(training_ids) is not list or not 1 <= len(training_ids) <= _MAX_TRIALS
             or any(type(x) is not str or not _ID.fullmatch(x) for x in training_ids)
@@ -308,17 +382,37 @@ def decide_graduation(
             or any(type(x) is not str or not _SHA256.fullmatch(x)
                    for x in training_prompts)
             or len(set(training_prompts)) != len(training_prompts)
+            or type(training_families) is not list
+            or len(training_families) != len(training_ids)
+            or any(type(x) is not str or not _SHA256.fullmatch(x)
+                   for x in training_families)
             or type(groups) is not dict or set(groups) != set(policy.required_slices)):
         return GateDecision("BLOCKED", ("invalid or incomplete evaluation slice custody",), state)
 
     if (set(training_ids) & state.consumed_eval_case_ids
-            or set(training_prompts) & state.consumed_eval_prompt_commitments):
+            or set(training_prompts) & state.consumed_eval_prompt_commitments
+            or set(training_families) & state.consumed_eval_semantic_family_ids):
         return GateDecision("BLOCKED", ("prior final evaluation leaked into training",), state)
 
     encountered = set(training_ids) | state.consumed_eval_case_ids
     seen_prompts = set(training_prompts) | state.consumed_eval_prompt_commitments
+    registered = [entry for entry in policy.independent_semantic_registry
+                  if entry.attempt == receipt["attempt"] and entry.run_id == receipt["run_id"]]
+    if not registered:
+        return GateDecision("BLOCKED", ("no independently precommitted attempt and run",), state)
+    registry_lookup = {
+        (entry.slice_name, entry.case_id, entry.prompt_commitment): entry.semantic_family_id
+        for entry in registered
+    }
+    expected_train = {(entry.case_id, entry.prompt_commitment, entry.semantic_family_id)
+                      for entry in registered if entry.slice_name == "train"}
+    actual_train = set(zip(training_ids, training_prompts, training_families))
+    if not expected_train or actual_train != expected_train:
+        return GateDecision("BLOCKED", ("training roster differs from independent precommitment",), state)
+    seen_families = set(training_families) | state.consumed_eval_semantic_family_ids
     new_case_ids: set[str] = set()
     new_prompt_commitments: set[str] = set()
+    new_family_ids: set[str] = set()
     satisfied = True
     count_total = 0
     for slice_name in policy.required_slices:
@@ -335,6 +429,7 @@ def decide_graduation(
             "baseline_semantic_correct", "zero_update_semantic_correct",
             "corrupted_semantic_correct")}
         paired = {arm: [0, 0] for arm in ("baseline", "zero_update", "corrupted")}
+        family_trials: dict[str, list[dict[str, Any]]] = {}
         for trial in trials:
             if not _exact_keys(trial, _TRIAL_KEYS):
                 return GateDecision("BLOCKED", ("malformed paired trial",), state)
@@ -343,21 +438,22 @@ def decide_graduation(
                 return GateDecision("BLOCKED", ("training/evaluation overlap or repeated case",), state)
             encountered.add(case_id)
             new_case_ids.add(case_id)
+            family_id = trial["semantic_family_id"]
+            if (type(family_id) is not str or not _SHA256.fullmatch(family_id)
+                    or family_id in seen_families):
+                return GateDecision("BLOCKED", ("untrusted or reused semantic-family identity",), state)
             prompt_commitment = trial["prompt_commitment"]
             if (type(prompt_commitment) is not str or not _SHA256.fullmatch(prompt_commitment)
                     or prompt_commitment in seen_prompts):
                 return GateDecision("BLOCKED", ("training/evaluation prompt overlap",), state)
             seen_prompts.add(prompt_commitment)
             new_prompt_commitments.add(prompt_commitment)
+            if registry_lookup.get((slice_name, case_id, prompt_commitment)) != family_id:
+                return GateDecision("BLOCKED", ("unregistered or false semantic-family assignment",), state)
+            family_trials.setdefault(family_id, []).append(trial)
             for name in tally:
                 if type(trial[name]) is not bool:
                     return GateDecision("BLOCKED", ("nonboolean scoring evidence",), state)
-                tally[name] += int(trial[name])
-            for arm, (wins, losses) in paired.items():
-                candidate = trial["candidate_semantic_correct"]
-                control = trial[f"{arm}_semantic_correct"]
-                paired[arm] = [wins + int(candidate and not control),
-                               losses + int(control and not candidate)]
             for name in ("candidate_response_sha256", "baseline_response_sha256",
                          "zero_update_response_sha256", "corrupted_response_sha256"):
                 if type(trial[name]) is not str or not _SHA256.fullmatch(trial[name]):
@@ -380,7 +476,35 @@ def decide_graduation(
                                  or trial[f"{left}_format"] != trial[f"{right}_format"])):
                         return GateDecision("BLOCKED", ("contradictory paired scoring evidence",), state)
 
-        n = len(trials)
+        # Signers may not select the best-looking subset of a frozen pool after
+        # observing answers. All predeclared cases for this attempt/slice must
+        # be present exactly once in the signed receipt, not merely members of
+        # an allowlist. Unknown, missing, or cherry-picked trials block.
+        expected_slice = {(entry.case_id, entry.prompt_commitment, entry.semantic_family_id)
+                          for entry in registered if entry.slice_name == slice_name}
+        received_slice = {(trial["case_id"], trial["prompt_commitment"],
+                           trial["semantic_family_id"]) for trial in trials}
+        if received_slice != expected_slice:
+            return GateDecision("BLOCKED", ("evaluation roster differs from frozen case manifest",), state)
+
+        # This is the statistical unit: one declared semantic family, not its
+        # potentially many aliases/seeds. A family succeeds only if all its
+        # constituent cases succeed. Repeated variants cannot amplify paired
+        # wins or earn extra independent observations.
+        if len(family_trials) < policy.min_semantic_families_per_slice:
+            return GateDecision("BLOCKED", ("insufficient independent semantic families",), state)
+        for family_id, members in family_trials.items():
+            family_scores = {name: all(t[name] for t in members) for name in tally}
+            for name, correct in family_scores.items():
+                tally[name] += int(correct)
+            for arm in paired:
+                candidate = family_scores["candidate_semantic_correct"]
+                control = family_scores[f"{arm}_semantic_correct"]
+                paired[arm][0] += int(candidate and not control)
+                paired[arm][1] += int(control and not candidate)
+        seen_families.update(family_trials)
+        new_family_ids.update(family_trials)
+        n = len(family_trials)
         # Reasoning qualification uses answer correctness *irrespective of*
         # serialization, so a format-only fix cannot fake a reasoning gain.
         accuracy = tally["candidate_semantic_correct"] / n
@@ -422,7 +546,9 @@ def decide_graduation(
                        consumed_suite_sha256s=state.consumed_suite_sha256s | {receipt["suite_sha256"]},
                        consumed_eval_case_ids=state.consumed_eval_case_ids | new_case_ids,
                        consumed_eval_prompt_commitments=(
-                           state.consumed_eval_prompt_commitments | new_prompt_commitments))
+                           state.consumed_eval_prompt_commitments | new_prompt_commitments),
+                       consumed_eval_semantic_family_ids=(
+                           state.consumed_eval_semantic_family_ids | new_family_ids))
     if satisfied:
         return GateDecision("GRADUATED", ("objective demonstrated under signed conditions",),
                             replace(advanced, graduated=True))
