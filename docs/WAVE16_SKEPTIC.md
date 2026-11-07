@@ -68,6 +68,74 @@ unqualified report is not an evaluation prompt and must not be distributed
 to candidate models during an active withheld campaign. Model/source
 contamination remains UNKNOWN until genuine hidden seed custody exists.
 
+## S16-04 — batch receipt aggregation and admission semantics
+
+During an unfrozen Wave16 batch prototype, the batch replay validator
+accepted a rehashed receipt whose skipped second row was falsely relabeled
+`COMPLETED`, and accepted independently altered `calls_reserved=999` and
+`skipped_or_invalid=0` despite a one-call/two-case manifest. An independent
+regression now mutates each of those three fields and requires fail-closed
+rejection. The author corrected these invariants in the live WIP; the
+focused regression became GREEN. Because the original file was untracked
+and uncommitted when first tested, the RED is documented as a bounded
+observed WIP test, **not** a reproducible historical Git commit. Freeze and
+reattack the final source SHA before reporting a durable fix.
+
+## S16-05 — typed receipt schema laundered through Python bool/int equality
+
+**FAILS at immutable Experimenter commit**
+`0ffcaba17f326a8b5f9c7ff094775a2bd7d4e8f9`. A genuine fixed-subprocess
+one-case batch with `case_seed=1`, `calls_reserved=1`, and
+`precommitted_case_count=1` independently verifies. Mutating **any one** of
+those three nested integer fields to boolean `True`, then recomputing the
+unkeyed `batch_receipt_sha256`, still returns
+`verify_batch_receipt(forged) is True` because Python `True == 1`.
+
+`test_batch_reviewer_rejects_bool_spoofed_integer_fields` is a separate
+executable red regression with **three failing subtests** against that exact
+source. To reproduce, run from the Experimenter checkout:
+
+```bash
+PYTHONPATH=. python3 -B -m unittest discover \
+  -s /workspace/scratch/633ecda5b2d8/labyrinth-wave16-skeptic/tests \
+  -p test_wave16_skeptic.py -v
+```
+
+The command runs the full file; the two earlier decoder mutations remain
+RED on Experimenter's base because the root's separate decoder hardening
+is absent from that source. Do not misclassify these branch differences
+as new regressions. Require exact built-in integer typing throughout
+receipt-schema admission, not ordinary equality against an integer.
+
+### S16-05b — manifest checksum does not guarantee nested type safety
+
+**FAILS on follow-up WIP atop `0ffcaba` (three independent ERROR subtests).**
+Changing `manifest.config` from a valid dictionary to `null`, an array,
+or a string, then recomputing **both** the manifest and outer receipt
+hashes, causes `verify_batch_receipt` to raise uncaught `AttributeError`
+at `manifest["config"].items()`. A malformed receipt must return `False`
+without crashing the verifier. Regression:
+`test_batch_verifier_fails_closed_on_double_rehashed_wrong_manifest_type`.
+Unlike S16-05, this was first run against the author's *uncommitted*
+bool-typing follow-up, so exact immutable follow-up SHA is pending.
+
+## S16-06 — child-wire nested receipt and genuine control recheck
+
+**SURVIVES bounded attacks** on clean integrated source
+`a0994536e117ed612ccc649c94dc6b4f559a7f89`: the ordinary fixed
+child's seed-1 ABSTAIN is now classified `COMPLETED` with
+`SOURCE_PROCESS_TRIAL_REPLAY_VALID`; a forged `[None]` process receipt,
+forged `raw_response="{}"`, or forged nested child response hash is rejected
+even when both trial and batch outer self-hashes are recomputed. This is
+an executable 3-mutation regression, *not* independent process identity
+attestation or a model win.
+
+The complete independent Skeptic file now passes **8/8 normal and 8/8
+optimized (`python -O`)** against exact clean `a099453` source. This
+includes both earlier failure classes S16-05 and S16-05b; their historical
+RED source/WIP provenance is preserved separately above. No neural
+training or network/host model installation was run.
+
 ## Evidence limits
 
 These are source and executable TEST results on exact commits, not trained
