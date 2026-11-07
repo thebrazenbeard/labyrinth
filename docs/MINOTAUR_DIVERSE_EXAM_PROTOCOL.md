@@ -34,17 +34,25 @@ privately sealed evaluator here.
 termination consumes one of twelve actions. Malformed/undeclared actions return
 an `INVALID_ACTION` feedback record and an unchanged room observation; twelve
 invalid probes finish the attempt. The entire attempted transcript, including
-invalid commands, is checked by `diverse_verifier.verify_attempts()` while
+invalid commands, is checked by `diverse_exam_verifier.verify_attempts()` while
 the extracted legal action trace is checked by strict `verify()`. A later
 physical escape **can** earn a win after invalid attempts, provided the
 entire session still fits the twelve-attempt budget. Failed commands never
 grant free exploration. Both the charged transcript and legal replay are
 evaluator-only receipt fields.
 
-The independent `diverse_verifier.verify()` reimplements declared transition
+The independent `diverse_exam_verifier.verify()` reimplements declared transition
 rules without importing the generator's `step()`, and rejects invalid traces
 or unsupported rhetorical claims. Two codepaths in one public repository
 are **not** an independent external examiner.
+
+**Evaluator disagreement:** after each attempt, the session compares its full
+room, inventory and activation state with the independently replayed state.
+Any mismatch must terminate the session as `REPLAY_DIVERGENCE`; it is an
+evaluator-integrity failure, not evidence of candidate failure.
+Invalid engine return values, transition exceptions and observation-delivery
+exceptions terminate with `EVALUATOR_ERROR` and preserve the charged attempt;
+neither verdict is a valid model-grade outcome.
 
 `verify_unsat_certificate()` independently enumerates the reachable state
 closure from the declared start under all nine actions, requires a proposed
@@ -93,6 +101,14 @@ assert receipt.outcome == "VERIFIED_WIN"
 5. Only an isolated evaluation environment, genuinely novel sealed task
    families, frozen predeclared controls, real checkpoint/tensor receipts, and
    an independently custodied examiner could support broader learning claims.
+
+An executable observation-only, zero-update control in
+`tests/test_psychologist_zero_update.py` wins 720/720 nominal open cases and
+0/720 sealed near-twins, across repeated paraphrases, split labels and the
+same three mechanical families. Those 720 observations are **not** 720
+independent reasoning tasks. The sealed failures do not establish that the
+script recognized impossibility; this action-only prototype cannot record an
+explicit abstention or a candidate-proposed ruleset amendment.
 
 Proposed outcome: use this for training **harness and curriculum development**,
 then add independent new mechanisms and metamorphic families before scheduling

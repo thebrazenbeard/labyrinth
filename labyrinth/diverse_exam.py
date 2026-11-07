@@ -211,11 +211,19 @@ class CandidateSession:
     def __init__(self, exam: Exam):
         self._exam = exam
         self._state = State()
+        self._independent_state = ("foyer", 0, False)
         self._attempts: list[object] = []
         self._valid_trace: list[str] = []
         self._last_action_status = "NOT_STARTED"
+        self._replay_divergence = False
+        self._transition_error: Exception | None = None
+        self._observation_error: Exception | None = None
 
     def _verdict(self) -> str:
+        if self._transition_error is not None or self._observation_error is not None:
+            return "EVALUATOR_ERROR"
+        if self._replay_divergence:
+            return "REPLAY_DIVERGENCE"
         if self._state.room != "freedom":
             return "EXHAUSTED" if len(self._attempts) == MAX_ACTIONS else "IN_PROGRESS"
         # Verify both the legal trace and complete attempt transcript with a
@@ -228,26 +236,80 @@ class CandidateSession:
         return "VERIFIED_WIN" if legal.outcome == full.outcome == "VERIFIED_WIN" else "REACHED_EXIT_UNCERTIFIED"
 
     def view(self) -> dict[str, object]:
+        if self._transition_error is not None or self._observation_error is not None:
+            observation = None
+        else:
+            try:
+                observation = observe(self._exam, self._state)
+                if type(observation) is not str or not observation.strip():
+                    raise TypeError("observer returned invalid observation")
+            except Exception as exc:
+                # Do not continue after the candidate failed to receive feedback.
+                self._observation_error = exc
+                self._last_action_status = "EVALUATOR_ERROR"
+                raise
         return {
-            "observation": observe(self._exam, self._state),
+            "observation": observation,
             "remaining_actions": MAX_ACTIONS - len(self._attempts),
-            "finished": self._state.room == "freedom" or len(self._attempts) == MAX_ACTIONS,
+            "finished": (self._transition_error is not None or self._observation_error is not None
+                         or self._replay_divergence
+                         or self._state.room == "freedom"
+                         or len(self._attempts) == MAX_ACTIONS),
             "action_status": self._last_action_status,
             "verdict": self._verdict(),
         }
 
     def act(self, action: object) -> dict[str, object]:
-        if len(self._attempts) == MAX_ACTIONS or self._state.room == "freedom":
+        if (self._transition_error is not None or self._observation_error is not None
+                or self._replay_divergence
+                or len(self._attempts) == MAX_ACTIONS
+                or self._state.room == "freedom"):
             raise ValueError("session finished")
         # Charge every attempted action before validation; otherwise a model
         # can probe malformed actions without exhausting its finite budget.
         self._attempts.append(action)
         if type(action) is not str or action not in ACTIONS:
             self._last_action_status = "INVALID_ACTION"
-            return self.view()
-        self._valid_trace.append(action)
-        self._state = step(self._exam, self._state, action)
-        self._last_action_status = "ACCEPTED"
+        else:
+            self._valid_trace.append(action)
+            try:
+                proposed = step(self._exam, self._state, action)
+                valid_rooms = {"freedom"}
+                for source, _, destination in _EDGES[self._exam.family]:
+                    valid_rooms.update((source, destination))
+                if (type(proposed) is not State or type(proposed.room) is not str
+                        or proposed.room not in valid_rooms
+                        or type(proposed.bits) is not int or not 0 <= proposed.bits <= 3
+                        or type(proposed.enabled) is not bool):
+                    raise TypeError("game step returned invalid State")
+                self._state = proposed
+            except Exception as exc:
+                # Preserve the charged attempt and exception. Never allow
+                # further play after an incomplete engine transition.
+                self._transition_error = exc
+                self._last_action_status = "EVALUATOR_ERROR"
+                raise
+            self._last_action_status = "ACCEPTED"
+
+        # Check *every* attempt, not just a game-reported escape: a faulty
+        # transition that suppresses a real escape must fail closed too. The
+        # verifier owns a separate transition implementation and its complete
+        # attempt replay charges invalid actions as no-op turns.
+        from .diverse_exam_verifier import _advance, verify_attempts
+        if self._last_action_status == "ACCEPTED":
+            self._independent_state = _advance(
+                self._exam.family, self._exam.rotation, self._exam.sealed,
+                self._independent_state, action)
+        transcript = verify_attempts(
+            family=self._exam.family, rotation=self._exam.rotation,
+            sealed=self._exam.sealed, attempts=self._attempts)
+        local_state = (self._state.room, self._state.bits, self._state.enabled)
+        if (local_state != self._independent_state
+                or transcript.final_room != self._state.room
+                or transcript.outcome == "INVALID_TRACE"
+                or (transcript.outcome == "VERIFIED_WIN") != (self._state.room == "freedom")):
+            self._replay_divergence = True
+            raise RuntimeError("game/verifier disagree; abort evaluation")
         return self.view()
 
     def actions(self) -> tuple[str, ...]:

@@ -2,7 +2,9 @@
 
 import json
 import unittest
+from unittest.mock import patch
 
+import labyrinth.diverse_exam as exam_module
 from labyrinth.diverse_exam import (ACTIONS, CandidateSession, FAMILIES, MAX_ACTIONS, State,
                           family_fingerprint, make_exam, public_view, search,
                           step, world_fingerprint)
@@ -171,6 +173,141 @@ class DiverseExamTests(unittest.TestCase):
         for bad in ("0", -1, True, 2**31):
             with self.assertRaises(ValueError):
                 make_exam(bad)
+
+    def test_candidate_session_rejects_suppressed_valid_win(self):
+        """An incorrect engine must not silently erase a verifier-proven escape."""
+        case = make_exam(0)
+        witness = search(case).witness
+        actual_step = step
+
+        def suppress_winning_leave(exam, state, action):
+            if action == "leave" and state.room == "gate":
+                return state
+            return actual_step(exam, state, action)
+
+        session = CandidateSession(case)
+        with patch.object(exam_module, "step", side_effect=suppress_winning_leave):
+            for action in witness[:-1]:
+                session.act(action)
+            with self.assertRaisesRegex(RuntimeError, "verifier disagree"):
+                session.act(witness[-1])
+        self.assertTrue(session.view()["finished"])
+        self.assertEqual(session.view()["verdict"], "REPLAY_DIVERGENCE")
+        with self.assertRaises(ValueError):
+            session.act("leave")
+
+    def test_candidate_session_rejects_early_transition_divergence(self):
+        """Mismatch must abort at the first affected action, even before a win."""
+        case = make_exam(1)
+        first_action = search(case).witness[0]
+        session = CandidateSession(case)
+        with patch.object(exam_module, "step", return_value=State()):
+            with self.assertRaisesRegex(RuntimeError, "verifier disagree"):
+                session.act(first_action)
+        self.assertTrue(session.view()["finished"])
+        self.assertEqual(session.view()["verdict"], "REPLAY_DIVERGENCE")
+
+    def test_candidate_session_rejects_hidden_inventory_divergence(self):
+        """An unchanged room does not excuse a broken inventory transition."""
+        case = make_exam(0)  # relic; taking the item changes bits, not room
+        witness = search(case).witness
+        actual_step = step
+
+        def suppress_relic_pickup(exam, state, action):
+            if action == "take" and state.room == "archive":
+                return state
+            return actual_step(exam, state, action)
+
+        session = CandidateSession(case)
+        with patch.object(exam_module, "step", side_effect=suppress_relic_pickup):
+            for action in witness:
+                if action == "take":
+                    with self.assertRaisesRegex(RuntimeError, "verifier disagree"):
+                        session.act(action)
+                    break
+                session.act(action)
+            else:
+                self.fail("relic witness did not attempt a pickup")
+        self.assertEqual(session.view()["verdict"], "REPLAY_DIVERGENCE")
+
+    def test_candidate_session_seals_engine_exception_and_preserves_receipt(self):
+        """An exception during a winning command cannot leave the session live."""
+        case = make_exam(0)
+        witness = search(case).witness
+        session = CandidateSession(case)
+        for action in witness[:-1]:
+            session.act(action)
+
+        with patch.object(exam_module, "step", side_effect=RuntimeError("injected step fault")):
+            with self.assertRaisesRegex(RuntimeError, "injected step fault") as caught:
+                session.act(witness[-1])
+
+        self.assertEqual(session.attempts(), witness)
+        self.assertTrue(session.view()["finished"])
+        self.assertEqual(session.view()["verdict"], "EVALUATOR_ERROR")
+        self.assertEqual(session.view()["action_status"], "EVALUATOR_ERROR")
+        self.assertIs(session._transition_error, caught.exception)
+        self.assertEqual(verify_attempts(family=case.family, rotation=case.rotation,
+                                         sealed=case.sealed, attempts=session.attempts()).outcome,
+                         "VERIFIED_WIN")
+        with self.assertRaises(ValueError):
+            session.act("leave")
+
+    def test_candidate_session_seals_malformed_transition_results(self):
+        """A bad return must never replace the session's last valid state."""
+        case = make_exam(0)
+        for invalid_result in (None, State("unknown_room"),
+                               State("foyer", True, False),
+                               State("foyer", 0, "yes")):
+            with self.subTest(return_value=invalid_result):
+                session = CandidateSession(case)
+                previous_observation = session.view()["observation"]
+                with patch.object(exam_module, "step", return_value=invalid_result):
+                    with self.assertRaisesRegex(TypeError, "invalid State") as caught:
+                        session.act("north")
+                self.assertEqual(session.attempts(), ("north",))
+                self.assertEqual(session._state, State())
+                self.assertEqual(previous_observation, public_view(case)["observation"])
+                self.assertIsNone(session.view()["observation"])
+                self.assertTrue(session.view()["finished"])
+                self.assertEqual(session.view()["verdict"], "EVALUATOR_ERROR")
+                self.assertIs(session._transition_error, caught.exception)
+                with self.assertRaises(ValueError):
+                    session.act("east")
+
+    def test_candidate_session_seals_observation_exception(self):
+        """A successful transition without deliverable feedback must halt play."""
+        case = make_exam(0)
+        session = CandidateSession(case)
+        session.act("north")
+        with patch.object(exam_module, "observe", side_effect=RuntimeError("injected observation fault")):
+            with self.assertRaisesRegex(RuntimeError, "injected observation fault") as caught:
+                session.act("east")
+        self.assertEqual(session.attempts(), ("north", "east"))
+        self.assertEqual(session._state.room, "archive")
+        self.assertTrue(session.view()["finished"])
+        self.assertEqual(session.view()["verdict"], "EVALUATOR_ERROR")
+        self.assertEqual(session.view()["action_status"], "EVALUATOR_ERROR")
+        self.assertIsNone(session.view()["observation"])
+        self.assertIs(session._observation_error, caught.exception)
+        with self.assertRaises(ValueError):
+            session.act("west")
+
+    def test_candidate_session_rejects_malformed_observations(self):
+        """A missing or non-text observation must not allow the attempt to continue."""
+        case = make_exam(0)
+        for invalid in (None, "", "   ", True):
+            with self.subTest(observation=invalid):
+                session = CandidateSession(case)
+                with patch.object(exam_module, "observe", return_value=invalid):
+                    with self.assertRaisesRegex(TypeError, "invalid observation"):
+                        session.act("north")
+                self.assertEqual(session.attempts(), ("north",))
+                self.assertTrue(session.view()["finished"])
+                self.assertEqual(session.view()["verdict"], "EVALUATOR_ERROR")
+                self.assertIsNone(session.view()["observation"])
+                with self.assertRaises(ValueError):
+                    session.act("east")
 
 
 if __name__ == "__main__":
