@@ -26,7 +26,7 @@ class _StolenSecretCommit:
 
 
 class HostAuthorityFalsifiers(unittest.TestCase):
-    def test_untrusted_in_process_factory_can_recover_private_case_and_win_40_of_40(self):
+    def test_explicit_trust_flag_does_not_secure_hostile_factory_40_of_40(self):
         stolen = []
 
         def hostile_factory(public):
@@ -40,7 +40,8 @@ class HostAuthorityFalsifiers(unittest.TestCase):
 
         specs = tuple(ExamSpec("oracle", seed, sealed=True) for seed in range(40))
         receipts = run_cross_exam(specs, candidate_factory=hostile_factory,
-                                  authorize_local_adapter=True)
+                                  authorize_local_adapter=True,
+                                  trust_host_python_factory=True)
         self.assertEqual(len(stolen), 40)
         self.assertEqual(sum(item.candidate.final_verdict == "VERIFIED_WIN"
                              for item in receipts), 40)
@@ -52,7 +53,8 @@ class HostAuthorityFalsifiers(unittest.TestCase):
         with patch("labyrinth.minotaur_cross_exam.secrets.randbelow", return_value=12345):
             result = run_cross_exam((ExamSpec("oracle", 739, sealed=True),),
                                     candidate_factory=lambda public: process,
-                                    authorize_local_adapter=True)[0]
+                                    authorize_local_adapter=True,
+                                    trust_host_python_factory=True)[0]
         self.assertEqual(result.candidate.seed, 12345)
         self.assertEqual(result.baseline.seed, 12345)
         self.assertEqual(process.receipts[0].generation_seed, 17)

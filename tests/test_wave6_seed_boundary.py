@@ -40,7 +40,8 @@ class SeedBoundaryTests(unittest.TestCase):
         with patch("labyrinth.minotaur_cross_exam.secrets.randbelow",
                    side_effect=independent_model_seeds) as rng:
             results = run_cross_exam(specs, candidate_factory=build_candidate,
-                                     authorize_local_adapter=True)
+                                     authorize_local_adapter=True,
+                                     trust_host_python_factory=True)
         self.assertEqual(rng.call_count, len(specs))
         self.assertTrue(all(call.args == (2**31,) for call in rng.call_args_list))
         wins = sum(x.candidate.final_verdict == "VERIFIED_WIN" for x in results)
