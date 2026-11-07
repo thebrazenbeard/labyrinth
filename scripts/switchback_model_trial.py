@@ -476,6 +476,22 @@ def _bound_process_generation(adapter: ProcessModelAdapter | CommandProcessAdapt
             receipt.response_bytes == len(wire))
 
 
+def _bounded_report_response(raw: object, max_bytes: int) -> str | None:
+    """Retain exact model wire text only inside the HOST-PRIVATE trial report.
+
+    The batch verifier needs these bounded bytes to recompute the nested child
+    envelope hash. A digest alone cannot reconstruct a discarded response.
+    Never truncate: a truncated response cannot be bound to its original hash.
+    """
+    if type(raw) is not str:
+        return None
+    try:
+        size = len(raw.encode("utf-8"))
+    except UnicodeError:
+        return None
+    return raw if size <= max_bytes else None
+
+
 def _bound_to_actual_trial(receipt: object, case: object,
                            proposal: dict[str, object], observations: list[object],
                            model_probe_actions: list[str]) -> bool:
@@ -557,17 +573,20 @@ def run_trial(config: TrialConfig,
         child_receipts = adapter.receipts[previous:]
         if response is None:
             turns.append({"turn": turn, "prompt_sha256": _sha(prompt.encode()),
-                          "response_sha256": None, "decision": None,
+                          "response_sha256": None, "raw_response": None,
+                          "decision": None,
                           "process_receipts": [asdict(r) for r in child_receipts],
                           "status": terminal_reason})
             break
-        if not _bound_process_generation(adapter, prompt, response, child_receipts):
+        bounded_response = _bounded_report_response(response, config.max_output_bytes)
+        if bounded_response is None or not _bound_process_generation(
+                adapter, prompt, bounded_response, child_receipts):
             process_evidence_valid = False
             terminal_reason = "EVALUATOR_DISAGREEMENT"
             turns.append({"turn": turn, "prompt_sha256": _sha(prompt.encode()),
-                          "response_sha256": (_sha(response.encode("utf-8"))
-                                              if type(response) is str else None),
-                          "decision": None,
+                          "response_sha256": (_sha(bounded_response.encode("utf-8"))
+                                              if bounded_response is not None else None),
+                          "raw_response": bounded_response, "decision": None,
                           "process_receipts": [asdict(r) for r in child_receipts],
                           "status": terminal_reason})
             break
@@ -584,7 +603,7 @@ def run_trial(config: TrialConfig,
             decision = None
         turns.append({"turn": turn, "prompt_sha256": _sha(prompt.encode()),
                       "response_sha256": _sha(response.encode("utf-8")),
-                      "decision": decision,
+                      "raw_response": response, "decision": decision,
                       "process_receipts": [asdict(r) for r in child_receipts],
                       "status": "PARSED" if decision is not None else terminal_reason})
         if decision is None:
@@ -629,6 +648,7 @@ def run_trial(config: TrialConfig,
         "schema": SCHEMA,
         "source_commit": _git_source_commit(source_root),
         "evidence_class": "SOURCE_PUBLIC_PROCESS_TRIAL",
+        "report_classification": "HOST_PRIVATE_SEED_AND_MODEL_OUTPUT_DO_NOT_PUBLISH",
         "model_neural_identity_verified": False,
         "model_weight_update_verified": False,
         "generalization_qualified": False,
