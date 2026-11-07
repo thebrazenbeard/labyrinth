@@ -20,7 +20,9 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
+import tempfile
 import time
 from typing import Any
 
@@ -34,6 +36,7 @@ from scripts.switchback_model_trial import (
 
 
 SCHEMA = "labyrinth.switchback-batch-process.v1"
+PUBLIC_SUMMARY_SCHEMA = "labyrinth.switchback-batch-public-summary.v1"
 MAX_CASES = 32
 MAX_BATCH_CALLS = MAX_CASES * (MAX_PROBES + 1)
 CASE_ADMISSION_OVERHEAD_SECONDS = 1.0
@@ -648,6 +651,62 @@ def verify_batch_receipt(batch: object) -> bool:
         return False
 
 
+def _public_summary(report: dict[str, object], *, verified: bool,
+                    private_report_saved: bool = False,
+                    private_report_save_failed: bool = False) -> dict[str, object]:
+    """Export only verified, aggregate source-public counts, never case/transcript data.
+
+    The summary is deliberately NOT a substitute for the privately retained
+    replayable batch receipt.
+    """
+    source = report.get("aggregate") if verified else None
+    aggregate = source if type(source) is dict else {}
+    allowed = ("precommitted_case_count", "source_verified_wins",
+               "receipts_valid", "skipped_or_invalid")
+    return {
+        "schema": PUBLIC_SUMMARY_SCHEMA,
+        "evidence_class": "SOURCE_PUBLIC_UNQUALIFIED_SUMMARY",
+        "private_report_included": False,
+        "private_report_saved": private_report_saved,
+        "private_report_save_failed": private_report_save_failed,
+        "full_receipt_replayable_from_stdout": False,
+        "batch_receipt_sha256": report.get("batch_receipt_sha256") if verified else None,
+        "batch_source_replay_valid": verified,
+        "aggregate": {key: aggregate.get(key) for key in allowed},
+        "neural_learning_verified": False,
+        "private_heldout_qualified": False,
+    }
+
+
+def _write_private_report_exclusive(report: dict[str, object], path: str) -> None:
+    """Publish a complete file atomically, mode 0600, never replacing a path.
+
+    Creating a same-directory temporary file then linking the finished inode
+    to the final path fails if the target already exists (including a symlink).
+    This is not a same-UID adversary sandbox or a guarantee about parent dirs.
+    """
+    if type(path) is not str or not Path(path).is_absolute():
+        raise ValueError("private report target must be an absolute path")
+    destination = Path(path)
+    data = _canonical(report) + b"\n"
+    descriptor, staged_path = tempfile.mkstemp(
+        prefix=".minotaur-private-", suffix=".tmp", dir=str(destination.parent))
+    try:
+        try:
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                descriptor = -1
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.link(staged_path, destination)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+    finally:
+        os.unlink(staged_path)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seeds", nargs="+", type=int, required=True)
@@ -662,8 +721,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--call-timeout", type=float, default=1.0)
     parser.add_argument("--max-total-seconds", type=float, default=40.)
     parser.add_argument("--max-output-bytes", type=int, default=8192)
+    export = parser.add_mutually_exclusive_group()
+    export.add_argument("--private-report-file", metavar="ABSOLUTE_PATH",
+                        help="write full host-private receipt exclusively as a 0600 file")
+    export.add_argument("--emit-private-json-stdout", action="store_true",
+                        help="UNSAFE opt-in: print full private receipt on stdout")
     parser.add_argument("--command", nargs=argparse.REMAINDER, default=[])
     args = parser.parse_args(argv)
+    if args.private_report_file is not None and not Path(
+            args.private_report_file).is_absolute():
+        parser.error("--private-report-file requires an absolute path")
     seeds = tuple(args.seeds)
     generation = tuple(args.generation_seeds) if args.generation_seeds is not None else tuple(
         index for index in range(len(seeds)))
@@ -676,8 +743,23 @@ def main(argv: list[str] | None = None) -> int:
                        model_artifact_path=args.model_file,
                        explicit_authorization=args.authorize_local)
     result = run_batch(config, spec)
-    print(_canonical(result).decode("utf-8"))
-    return 0 if verify_batch_receipt(result) else 2
+    verified = verify_batch_receipt(result)
+    if args.emit_private_json_stdout:
+        print(_canonical(result).decode("utf-8"))
+    elif args.private_report_file is not None:
+        try:
+            _write_private_report_exclusive(result, args.private_report_file)
+        except (OSError, ValueError, TypeError):
+            print(_canonical(_public_summary(
+                result, verified=verified,
+                private_report_save_failed=True)).decode("utf-8"))
+            return 2
+        print(_canonical(_public_summary(
+            result, verified=verified,
+            private_report_saved=True)).decode("utf-8"))
+    else:
+        print(_canonical(_public_summary(result, verified=verified)).decode("utf-8"))
+    return 0 if verified else 2
 
 
 if __name__ == "__main__":

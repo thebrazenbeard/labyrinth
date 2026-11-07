@@ -16,7 +16,31 @@ python3 -m unittest discover -s tests -p test_switchback_batch_trial.py -q
 python3 -O -m unittest discover -s tests -p test_switchback_batch_trial.py -q
 ```
 
-The CLI prints one JSON batch receipt. Frozen `BatchConfig` binds the ordered
+The CLI now prints one **redacted, machine-parseable source-public summary**
+(`labyrinth.switchback-batch-public-summary.v1`) by default. It includes only
+verified aggregate counts and a checksum reference. That summary **cannot**
+be passed to `verify_batch_receipt` as a full replayable receipt. To preserve
+an offline, independently replayable source report without printing private
+bytes into terminal/CI logs, explicitly use an absolute private output path:
+
+```sh
+python3 -m scripts.switchback_batch_trial --seeds 0 1 2 \
+  --generation-seeds 17 18 19 --mode fixed --fixed-actions 0 RESET \
+  --max-calls-per-case 3 --max-total-calls 9 \
+  --max-total-seconds 15 --private-report-file /absolute/private/batch.json
+```
+
+The full JSON file is created at mode `0600` through a same-directory staged
+write and an exclusive final hard link. Existing files and final-path symlinks
+are never replaced. If writing fails, the command returns nonzero and emits
+only a redacted failure summary. The parent directory remains a trusted local
+operator choice; this file mode is not same-user filesystem custody or an OS
+sandbox. A deliberately dangerous backwards-compatible
+`--emit-private-json-stdout` option exists for controlled offline consumers;
+use it only where stdout and logs are themselves protected. The two full
+export modes are mutually exclusive.
+
+Frozen `BatchConfig` binds the ordered
 distinct case seeds, independent generation seeds, per-case limits, total call
 reservation, global time reservation, and response size. `AdapterSpec` binds
 the type of subprocess and optional model artifact path. Both manifest and
@@ -55,9 +79,13 @@ known script.
 counts, case bindings, and source receipts. A rehashed but fabricated win,
 resource count or neural-update claim must not pass the verifier.
 
-**Privacy/custody:** The JSON contains host-private case seed and raw model
-output text, not merely public exam prompts. It must not be automatically
-published, uploaded to an issue or shared outside the intended examiner.
+**Privacy/custody:** The **full private JSON**, whether saved to a file or
+emitted with the unsafe legacy flag, contains host-private case seeds, model
+output and potentially sensitive literal `command_argv`/model file paths.
+Do not put secrets in command arguments. Do not automatically publish, log,
+upload to an issue or share this report outside the trusted examiner. The
+default public summary intentionally omits all per-case identifiers, raw
+responses, arguments, paths and source receipts.
 Per-call digest reconstruction detects some altered same-user receipts; it
 still cannot attest which physical executable originally produced the bytes.
 

@@ -278,10 +278,11 @@ class SwitchbackBatchTrialTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             batch.AdapterSpec(mode="fixed", command_argv=(sys.executable,))
 
-    def test_cli_fixed_batch_emits_one_replayable_receipt(self):
+    def test_cli_explicit_legacy_private_stdout_emits_replayable_receipt(self):
         stdout = io.StringIO()
         with redirect_stdout(stdout):
             status = batch.main(["--seeds", "0", "1", "--mode", "fixed",
+                                 "--emit-private-json-stdout",
                                  "--max-calls-per-case", "1", "--max-total-calls", "2",
                                  "--max-total-seconds", "5"])
         self.assertEqual(status, 0)
