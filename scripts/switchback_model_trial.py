@@ -28,7 +28,8 @@ from typing import Any
 from labyrinth.minotaur_process_adapter import (
     ProcessAdapterFailure, ProcessCallReceipt, ProcessModelAdapter,
     _child_environment, _finish_or_track_child, _read_json,
-    _release_child_call, _reserve_child_call,
+    _json as _process_json, _release_child_call, _reserve_child_call,
+    SCHEMA as PROCESS_SCHEMA,
 )
 from labyrinth.switchback_circuit import MAX_MOVES, MAX_PROBES, ProbeSession, make_case
 from labyrinth.switchback_oracle import verify_receipt_replay
@@ -363,7 +364,35 @@ def _independent_wire_decision(raw: str, public_actions: list[str],
     """
     if type(raw) is not str or len(raw.encode("utf-8")) > max_bytes:
         raise ValueError("unbounded raw model output")
-    value = _read_json(raw.encode("utf-8"))
+    # This MUST NOT share the scoring parser's imported `_read_json` entrypoint.
+    # A single erroneous or patched decoder previously changed an actual child
+    # ABSTAIN into a winning PLAN in both supposed independent checks.
+    def exact_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate raw wire JSON key")
+            result[key] = item
+        return result
+
+    def reject_constant(_value: str) -> Any:
+        raise ValueError("non-finite raw wire number")
+
+    def finite_float(value: str) -> float:
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("non-finite raw wire number")
+        return result
+
+    try:
+        # Use JSONDecoder directly: the primary `_read_json` path calls
+        # `json.loads`. A single replacement of json.loads in the trusted
+        # interpreter must not corrupt both independent raw-output checks.
+        value = json.JSONDecoder(object_pairs_hook=exact_pairs,
+                                 parse_constant=reject_constant,
+                                 parse_float=finite_float).decode(raw)
+    except RecursionError as error:
+        raise ValueError("raw wire JSON nesting exceeds limit") from error
     if type(value) is not dict or type(value.get("kind")) is not str:
         raise ValueError("raw decision is not an exact JSON object")
     tag = value["kind"]
@@ -396,6 +425,71 @@ def _independent_wire_decision(raw: str, public_actions: list[str],
     else:
         raise ValueError("unrecognized raw decision kind")
     return value
+
+
+def _bound_process_generation(adapter: ProcessModelAdapter | CommandProcessAdapter,
+                              prompt: str, response: str,
+                              receipts: tuple[ProcessCallReceipt, ...]) -> bool:
+    """Require a completed local child call matching the returned wire text.
+
+    The built-in process adapter hashes its *child envelope*, while the command
+    adapter hashes its raw stdout. Both must match the adapter-specific protocol.
+    These are parent-owned, self-reported consistency receipts, NOT independent
+    attestation of a real process, of a neural model, of the subprocess
+    executable, or of OS isolation. Host interpreter integrity is assumed.
+    """
+    if (type(prompt) is not str or type(response) is not str or
+            len(receipts) != 1 or type(receipts[0]) is not ProcessCallReceipt):
+        return False
+    receipt = receipts[0]
+    if (receipt.schema != PROCESS_SCHEMA or receipt.status != "OK" or
+            type(receipt.child_pid) is not int or receipt.child_pid <= 0 or
+            type(receipt.generation_seed) is not int or
+            receipt.generation_seed != adapter.generation_seed or
+            receipt.evaluator_seed_discarded is not True or
+            receipt.resource_admission != "REAPED_SLOT_RELEASED" or
+            type(receipt.response_bytes) is not int or
+            type(receipt.response_sha256) is not str or
+            type(receipt.request_sha256) is not str):
+        return False
+    if type(adapter) is CommandProcessAdapter:
+        if receipt.parent_session_frame_visible is not None:
+            return False
+        request = prompt.encode("utf-8")
+        wire = response.encode("utf-8")
+    else:
+        if receipt.parent_session_frame_visible is not False:
+            return False
+        request = _process_json({
+            "schema": PROCESS_SCHEMA, "public_prompt": prompt,
+            "generation_seed": adapter.generation_seed, "mode": adapter.mode,
+            "actions": adapter.actions, "model": adapter.model,
+            "base_url": adapter.base_url,
+        })
+        wire = _process_json({
+            "schema": PROCESS_SCHEMA, "response": response,
+            "child_pid": receipt.child_pid,
+            "parent_session_frame_visible": False,
+        })
+    return (receipt.request_sha256 == _sha(request) and
+            receipt.response_sha256 == _sha(wire) and
+            receipt.response_bytes == len(wire))
+
+
+def _bounded_report_response(raw: object, max_bytes: int) -> str | None:
+    """Retain exact model wire text only inside the HOST-PRIVATE trial report.
+
+    The batch verifier needs these bounded bytes to recompute the nested child
+    envelope hash. A digest alone cannot reconstruct a discarded response.
+    Never truncate: a truncated response cannot be bound to its original hash.
+    """
+    if type(raw) is not str:
+        return None
+    try:
+        size = len(raw.encode("utf-8"))
+    except UnicodeError:
+        return None
+    return raw if size <= max_bytes else None
 
 
 def _bound_to_actual_trial(receipt: object, case: object,
@@ -462,6 +556,7 @@ def run_trial(config: TrialConfig,
     candidate_proposal: dict[str, object] | None = None
     observed_before_submission: list[object] | None = None
     terminal_reason = "CALL_BUDGET_EXHAUSTED"
+    process_evidence_valid = True
     for turn in range(config.max_model_calls):
         if time.monotonic() - beginning > config.total_timeout_seconds:
             terminal_reason = "TRIAL_TIMEOUT"
@@ -478,7 +573,20 @@ def run_trial(config: TrialConfig,
         child_receipts = adapter.receipts[previous:]
         if response is None:
             turns.append({"turn": turn, "prompt_sha256": _sha(prompt.encode()),
-                          "response_sha256": None, "decision": None,
+                          "response_sha256": None, "raw_response": None,
+                          "decision": None,
+                          "process_receipts": [asdict(r) for r in child_receipts],
+                          "status": terminal_reason})
+            break
+        bounded_response = _bounded_report_response(response, config.max_output_bytes)
+        if bounded_response is None or not _bound_process_generation(
+                adapter, prompt, bounded_response, child_receipts):
+            process_evidence_valid = False
+            terminal_reason = "EVALUATOR_DISAGREEMENT"
+            turns.append({"turn": turn, "prompt_sha256": _sha(prompt.encode()),
+                          "response_sha256": (_sha(bounded_response.encode("utf-8"))
+                                              if bounded_response is not None else None),
+                          "raw_response": bounded_response, "decision": None,
                           "process_receipts": [asdict(r) for r in child_receipts],
                           "status": terminal_reason})
             break
@@ -495,7 +603,7 @@ def run_trial(config: TrialConfig,
             decision = None
         turns.append({"turn": turn, "prompt_sha256": _sha(prompt.encode()),
                       "response_sha256": _sha(response.encode("utf-8")),
-                      "decision": decision,
+                      "raw_response": response, "decision": decision,
                       "process_receipts": [asdict(r) for r in child_receipts],
                       "status": "PARSED" if decision is not None else terminal_reason})
         if decision is None:
@@ -522,7 +630,8 @@ def run_trial(config: TrialConfig,
                               source_receipt.get("schema") ==
                               "labyrinth.switchback-session-receipt.v1" and
                               verify_receipt_replay(source_receipt))
-    exact_trial_binding = (independently_replayed and candidate_proposal is not None and
+    exact_trial_binding = (process_evidence_valid and independently_replayed and
+                           candidate_proposal is not None and
                            observed_before_submission is not None and
                            _bound_to_actual_trial(source_receipt, case,
                                                   candidate_proposal,
@@ -539,6 +648,7 @@ def run_trial(config: TrialConfig,
         "schema": SCHEMA,
         "source_commit": _git_source_commit(source_root),
         "evidence_class": "SOURCE_PUBLIC_PROCESS_TRIAL",
+        "report_classification": "HOST_PRIVATE_SEED_AND_MODEL_OUTPUT_DO_NOT_PUBLISH",
         "model_neural_identity_verified": False,
         "model_weight_update_verified": False,
         "generalization_qualified": False,
@@ -560,6 +670,8 @@ def run_trial(config: TrialConfig,
         "source_verdict": verdict,
         "source_receipt": source_receipt,
         "source_receipt_replay_valid": independently_replayed,
+        "process_receipt_consistency_valid": process_evidence_valid,
+        "physical_child_execution_independently_attested": False,
         "trial_binding_valid": exact_trial_binding,
         "verified_success": verified_win,
         "elapsed_ms": round((time.monotonic() - beginning) * 1000),
