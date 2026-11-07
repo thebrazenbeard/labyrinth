@@ -205,6 +205,7 @@ class CandidateBridgeTests(unittest.TestCase):
         other_public, other_factory, _ = context(1)
         self.assertFalse(audit_receipt(receipt, other_public, other_factory))
         self.assertFalse(audit_receipt(replace(receipt, source_tree_sha256="0" * 64), public, factory))
+        self.assertFalse(audit_receipt(replace(receipt, max_model_calls=2), public, factory))
 
     def test_write_once_receipt_and_roundtrip_self_digest(self):
         public, factory, _ = context()

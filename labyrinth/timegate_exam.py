@@ -207,6 +207,10 @@ class CandidateSession:
         self._submission: dict[str, object] | None = None
         self._integrity_fault: str | None = None
 
+    def public_start(self) -> dict[str, object]:
+        """Host-side source of public rules for exact candidate binding."""
+        return candidate_view(self._case)
+
     def view(self) -> dict[str, object]:
         from .timegate_oracle import replay_snapshot, replay_observation, verify_attempts
         oracle = None

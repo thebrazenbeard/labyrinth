@@ -32,8 +32,9 @@ class BridgeVerdictSemanticsTests(unittest.TestCase):
         public = candidate_view(case)
         from labyrinth.minotaur_candidate_bridge import FixedActionAdapter
         receipt = run_candidate(public, lambda: CandidateSession(case),
-                                FixedActionAdapter(("alpha",) * 8))
-        self.assertEqual(len(receipt.turns), 5)
+                                FixedActionAdapter(("alpha",) * 5))
+        self.assertEqual(len(receipt.turns), 6)  # Five charged queries + final claim.
+        self.assertEqual(receipt.turns[-1].disposition, "CLAIM")
         self.assertEqual(receipt.final_verdict, "UNKNOWN")
         self.assertFalse(receipt.verified_escape)
         self.assertTrue(audit_receipt(receipt, public, lambda: CandidateSession(case)))

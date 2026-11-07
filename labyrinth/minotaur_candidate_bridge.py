@@ -135,7 +135,9 @@ class RunReceipt:
     model_id_unattested: str
     adapter_provenance: str
     seed: int
+    max_model_calls: int
     public_start_json: str
+    public_binding: str
     source_commit_unattested: str | None
     source_tree_sha256: str
     turns: tuple[TurnReceipt, ...]
@@ -222,7 +224,26 @@ def _validated_budget(public: Mapping[str, Any], limit: int) -> int:
                            public.get("maximum_actions", limit))))
     if type(candidate) is not int or not 1 <= candidate <= MAX_ACTIONS:
         raise ValueError("public action budget must be a bounded integer")
-    return min(candidate, limit)
+    # The task's charged-action allowance and the model's call allowance are
+    # separate: after the final question, one terminal claim may be required.
+    return candidate
+
+
+def _bind_public_start(session: Any, supplied_json: str, initial: Mapping[str, Any]) -> str:
+    """Cross-check the advertised world against its host-owned public rules.
+
+    Observation-only legacy examiners are explicitly unqualified as a full
+    public/private rule binding, even when they offer a nonempty observation.
+    """
+    source = getattr(session, "public_start", None)
+    if callable(source):
+        if _public(source()) != supplied_json:
+            raise ValueError("candidate public rules do not match the host examiner")
+        return "HOST_PUBLIC_VIEW_MATCHED"
+    supplied = json.loads(supplied_json)
+    if _observation(initial) != _observation(supplied):
+        raise ValueError("candidate public observation does not match private session")
+    return "OBSERVATION_ONLY_UNATTESTED"
 
 
 def _apply_action(session: Any, action: str) -> Mapping[str, Any]:
@@ -258,6 +279,7 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
         raise ValueError("invalid evaluation seed")
     public_json = _public(public_start)
     budget = _validated_budget(public_start, max_model_calls)
+    call_limit = min(max_model_calls, budget + 1)
     # Subclasses may override generate() and perform arbitrary, even remote,
     # effects. Only the two exact frozen control implementations are trusted.
     fixed = type(adapter) in (FixedActionAdapter, ReplayAdapter)
@@ -274,12 +296,12 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
     session = session_factory()
     initial = _session_view(session, first=True)
     last_feedback = initial
-    if _observation(initial) != _observation(public_start):
-        raise ValueError("candidate public view does not match private session observation")
+    binding = _bind_public_start(session, public_json, initial)
     history: list[dict[str, Any]] = []
     turns: list[TurnReceipt] = []
     final = _verdict(initial)
-    for index in range(budget):
+    charged_actions = 0
+    for index in range(call_limit):
         if _terminal(initial):
             break
         request = _request(public_json, history, index)
@@ -296,9 +318,16 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
                                      None, "MODEL_OUTPUT_INVALID"))
             final = "MODEL_OUTPUT_INVALID"
             break
+        if decision == "ACTION" and charged_actions >= budget:
+            # Do not grant a sixth question; accept a CLAIM only. Record the
+            # attempted policy violation without touching the examiner.
+            turns.append(TurnReceipt(request, response, None, "ACTION_BUDGET_EXCEEDED"))
+            final = "ACTION_BUDGET_EXCEEDED"
+            break
         try:
             if decision == "ACTION":
                 feedback = _apply_action(session, content)
+                charged_actions += 1
             else:
                 feedback = session.submit(_claim_for_host(content))
             feedback_json = _public(feedback)
@@ -320,7 +349,9 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
     source = _source_state()
     return _seal(schema=SCHEMA, model_id_unattested=model_id,
                  adapter_provenance=provenance, seed=seed,
-                 public_start_json=public_json, source_commit_unattested=source["commit"],
+                 max_model_calls=max_model_calls,
+                 public_start_json=public_json, public_binding=binding,
+                 source_commit_unattested=source["commit"],
                  source_tree_sha256=source["source_tree_sha256"],
                  turns=tuple(turns), final_verdict=final,
                  verified_escape=_is_verified_escape(final, last_feedback))
@@ -342,18 +373,23 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
             return False
         if receipt.source_tree_sha256 != _source_state()["source_tree_sha256"]:
             return False
+        if type(receipt.max_model_calls) is not int or not 1 <= receipt.max_model_calls <= MAX_ACTIONS:
+            return False
         session = session_factory()
         initial = _session_view(session, first=True)
         last_feedback = initial
-        if _observation(initial) != _observation(public_start):
+        if receipt.public_binding != _bind_public_start(session, receipt.public_start_json,
+                                                        initial):
             return False
         if not receipt.turns and not _terminal(initial):
             return False
         budget = _validated_budget(public_start, MAX_ACTIONS)
+        call_limit = min(receipt.max_model_calls, budget + 1)
+        charged_actions = 0
         history: list[dict[str, Any]] = []
         last = _verdict(initial)
         for index, turn in enumerate(receipt.turns):
-            if index >= budget or _terminal(initial) or turn.prompt_json != _request(receipt.public_start_json, history, index):
+            if index >= call_limit or _terminal(initial) or turn.prompt_json != _request(receipt.public_start_json, history, index):
                 return False
             if turn.disposition in ("MODEL_CALL_ERROR", "MODEL_OUTPUT_INVALID", "EVALUATOR_ERROR"):
                 if index != len(receipt.turns) - 1 or turn.public_feedback_json is not None:
@@ -367,8 +403,18 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
                         return False
                 return receipt.final_verdict == turn.disposition and not receipt.verified_escape
             decision, content = _parse(turn.response_text)
+            if turn.disposition == "ACTION_BUDGET_EXCEEDED":
+                return (index == len(receipt.turns) - 1
+                        and turn.public_feedback_json is None
+                        and decision == "ACTION" and charged_actions >= budget
+                        and receipt.final_verdict == "ACTION_BUDGET_EXCEEDED"
+                        and not receipt.verified_escape)
             if decision != turn.disposition:
                 return False
+            if decision == "ACTION":
+                if charged_actions >= budget:
+                    return False
+                charged_actions += 1
             feedback = (_apply_action(session, content) if decision == "ACTION"
                         else session.submit(_claim_for_host(content)))
             feedback_json = _public(feedback)
