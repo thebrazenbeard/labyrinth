@@ -119,6 +119,27 @@ def assess_hypothesis(case: Case, current: State, candidate_kernel: object) -> d
             "reason": "all three-step declared-world counterfactuals agree"}
 
 
+def observed_trace_identifies(attempts: tuple[object, ...],
+                              observations: tuple[int | None, ...],
+                              proposed_kernel: str) -> bool:
+    """Test identification from observed evidence, not hidden oracle truth.
+
+    Unique only relative to the seven declared causal kernels; it does not
+    exclude previously unknown causal mechanisms.
+    """
+    compatible = []
+    for candidate in ALL_KINDS:
+        state = State()
+        predicted = []
+        for pair in attempts:
+            active = "copy" if state.interventions < CHANGE_AFTER else candidate
+            state, effect = _apply(state, pair, active)
+            predicted.append(effect)
+        if exact_observations(tuple(predicted), observations):
+            compatible.append(candidate)
+    return compatible == [proposed_kernel]
+
+
 def adjudicate_claim(case: Case, claim: object, attempts: object,
                      observations: object, belief_log: object) -> dict[str, object]:
     replay = independent_replay(case, attempts)
@@ -160,6 +181,12 @@ def adjudicate_claim(case: Case, claim: object, attempts: object,
         if reviewed["verdict"] != "VERIFIED_WIN":
             return {**reviewed, "verified_success": False,
                     "revision_verified": False}
+        identified = observed_trace_identifies(tuple(attempts), tuple(observations),
+                                               revised)
+        if not identified:
+            return {**reviewed, "verdict": "UNKNOWN", "verified_success": False,
+                    "revision_verified": False, "observationally_identified": False,
+                    "reason": "observed trace does not distinguish declared laws"}
         # Evidence of real contradiction must precede the recorded revision.
         contradiction = None
         valid_count = 0
@@ -177,6 +204,7 @@ def adjudicate_claim(case: Case, claim: object, attempts: object,
         accepted = correct_prior and revised_after
         return {**reviewed, "verdict": "VERIFIED_WIN" if accepted else "UNKNOWN",
                 "verified_success": False, "revision_verified": accepted,
+                "observationally_identified": True,
                 "reason": ("recorded revision follows observed prelaw falsifier"
                            if accepted else "no recorded contradiction-driven revision")}
     if kind == "ABSTAIN":

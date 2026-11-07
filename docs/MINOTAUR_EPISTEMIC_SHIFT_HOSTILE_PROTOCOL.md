@@ -119,12 +119,22 @@ commit `644244f67aeccc32519e28d5c0fa47cd3eccd37d` despite its green tests:
    length and bypassed the ten-intervention ceiling. A tuple subclass could
    also lie about iteration. The ordinary CandidateSession always uses an
    exact list, but the verifier's public contract still required hardening.
+5. Two distinct causal worlds (stateful EDGE and LAG) produced identical
+   early contradictory observations. A blind guess of EDGE nevertheless won
+   `revision_verified` on the EDGE world. Correct future-law identification
+   and evidence that the observed history actually distinguishes candidate
+   rules are separate claims. A revised hypothesis now needs a unique fit
+   among the seven declared post-laws to receive revision credit; otherwise
+   it receives `UNKNOWN` and `observationally_identified=False`. Direct
+   `HYPOTHESIS` oracle correctness remains a separate narrow result.
 
 The revised implementation checks exact binary observation types, typed
 state values, and snapshot-bound replay budgets; malformed causal-law labels
 return `UNKNOWN`, while genuine novel textual proposals remain reviewable.
 These are regression-tested, not grounds to claim tamper-proof independent
-execution or neural learning. The hostile findings came from separate
+execution or neural learning. Even unique identification is relative to the
+finite declared rule catalogue, not proof against arbitrary unknown laws.
+The hostile findings came from separate
 agent-owned test surfaces, then were reproduced in the unified checkout.
 
 ### Fresh executed source-only results, 2026-11-07
