@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import inspect
 import random
+import sys
 
 
 ACTIONS = ("north", "south", "east", "west", "take", "offer", "leave")
@@ -31,7 +32,7 @@ _INSTRUCTIONS = (
 
 @dataclass(frozen=True)
 class Exam:
-    case_id: str
+    case_id: str  # EVALUATOR ONLY: seed/split/kind instance, not a semantic family.
     seed: int
     split: str
     variant: int
@@ -67,12 +68,9 @@ def public_view(exam: Exam) -> dict[str, object]:
     """Whitelisted payload suitable for model input. Never pass the Exam object."""
     tag = sha256(f"wording\x00{exam.seed}\x00{exam.variant}".encode()).digest()
     rng = random.Random(int.from_bytes(tag, "big"))
-    trial = sha256(f"trial\x00{exam.case_id}\x00{exam.variant}".encode()).hexdigest()[:20]
     first = rng.choice(_OPENINGS)
     last = rng.choice(_INSTRUCTIONS)
     return {
-        "case_id": exam.case_id,
-        "trial_id": trial,
         "prompt": (
             f"{first} You begin in a cell. Explore north/south/east/west, "
             "take visible objects, offer objects to the keeper, or leave "
@@ -131,6 +129,25 @@ def world_fingerprint(exam: Exam) -> str:
     return sha256(f"constant-exam-v1:{exam.kind}".encode()).hexdigest()
 
 
+def evaluator_identity(exam: Exam) -> dict[str, object]:
+    """Trusted-side receipt identity. Do not send this to a candidate model.
+
+    The same declared world is reused across seeds, splits and paraphrases.
+    The case ID instead identifies a seeded split instance; trial ID includes
+    the surface wording variant. Neither constitutes independent holdout data.
+    """
+    trial = sha256(f"trial\x00{exam.case_id}\x00{exam.variant}".encode()).hexdigest()[:20]
+    return {
+        "semantic_family_id": world_fingerprint(exam),
+        "case_id": exam.case_id,
+        "trial_id": trial,
+        "kind": exam.kind,
+        "split": exam.split,
+        "seed": exam.seed,
+        "variant": exam.variant,
+    }
+
+
 def ruleset_source_fingerprint() -> str:
     """Source commitment for the exact local game+verifier; freeze with Git head.
 
@@ -139,14 +156,14 @@ def ruleset_source_fingerprint() -> str:
     """
     from . import constant_exam_verifier as verifier
 
-    code = ("labyrinth-constant-exam-v1\n" + repr(ACTIONS) + "\n" + str(MAX_ACTIONS)
-            + "\n" + inspect.getsource(make_exam) + inspect.getsource(public_view)
-            + inspect.getsource(step) + inspect.getsource(observe)
-            + inspect.getsource(CandidateSession) + repr(verifier._LEGAL)
-            + inspect.getsource(search)
-            + inspect.getsource(verifier._advance)
-            + inspect.getsource(verifier.verify_trace)
-            + inspect.getsource(verifier.verify_unsat_certificate))
+    # Cover entire module bodies, including dataclasses and wording tables,
+    # rather than only handpicked functions. Bind mutable runtime globals that
+    # source text alone misses (notably generated dataclass defaults).
+    code = ("labyrinth-constant-exam-v1\n"
+            + inspect.getsource(sys.modules[__name__]) + "\n"
+            + inspect.getsource(verifier) + "\n"
+            + repr((ACTIONS, MAX_ACTIONS, _KINDS, _OPENINGS, _INSTRUCTIONS,
+                    State.__init__.__defaults__, tuple(sorted(verifier._LEGAL)))))
     return sha256(code.encode()).hexdigest()
 
 

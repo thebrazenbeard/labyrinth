@@ -9,9 +9,9 @@ Repeat the same apparent no-exit scenario using deterministic seeded wording var
 - `apparently_sealed`: a real (but unobvious) escape exists under the fixed rules; a search interrupted early reports `UNSOLVED` even though a valid trace will be accepted.
 - `sealed_control`: same room/action structure, **one world rule removed**, so exhaustive enumeration proves no exit under the **declared finite state space**. Never generalize that to the physical world or a richer rule set.
 - Paraphrases are repeated measurements of one *semantic family*. They do not constitute independent holdout cases or transfer evidence.
-- `case_id` names the semantic family; `trial_id` identifies a seeded wording trial. Neither implies an independent task.
+- `world_fingerprint(exam)` names the semantic family (one label per declared kind, independent of seed, split and paraphrase). `case_id` names the evaluator's seeded/split/kind instance; `trial_id` names its wording trial. A case ID is **not** a family or independent-task count. Both IDs and the hidden kind stay exclusively in `evaluator_identity(exam)` and never in `public_view(exam)`; deterministic hashes containing the hidden kind can reveal it by comparison if exposed.
 - `CandidateSession(exam)` exposes only `start()` and bounded `act(action)` observations, with the private case kind bound inside the trusted evaluator. Invalid attempts consume the budget; the final win is checked using the independent verifier. A remote service boundary is still needed against hostile code introspection.
-- `ruleset_source_fingerprint()` commits the generator, session, search, game transitions, observations, verifier code, action set, and attempt limit. Record the **exact Git head** and file hashes as well for auditable receipts; source hashes are not correctness proofs.
+- `ruleset_source_fingerprint()` commits the full two-module source, including dataclass definitions, candidate wording tables and verifier code, plus behavior-relevant dynamic globals and initial-state defaults. Record the **exact Git head** and file hashes as well for auditable receipts; the fingerprint is not a runtime attestation or correctness proof. A hostile local process can modify objects after a receipt is computed, so it cannot replace isolation and immutable custody.
 - Preserve the entire attempted-action transcript (including invalid attempts), observations, attempt counts, independent verification receipts and declared model/runtime in a future persistent evaluator. This prototype does **not** persist such receipts.
 
 ## Run
@@ -23,11 +23,12 @@ python -m unittest discover -s tests -p 'test_constant_exam.py' -v
 Example evaluator API:
 
 ```python
-from labyrinth.constant_exam import make_exam, public_view, search
+from labyrinth.constant_exam import evaluator_identity, make_exam, public_view, search
 from labyrinth.constant_exam_verifier import verify_trace
 
 exam = make_exam(42, split="dev", variant=3)
 model_input = public_view(exam)       # Never send the Exam object to model.
+audit_identity = evaluator_identity(exam)  # Evaluator only; never send to model.
 limited = search(exam, max_expansions=2)  # UNSOLVED, **not** UNSAT.
 full = search(exam)                       # Evaluator-only exploration.
 receipt = verify_trace(kind=exam.kind, actions=full.witness)
@@ -44,4 +45,4 @@ receipt = verify_trace(kind=exam.kind, actions=full.witness)
 
 ## Next integration seam
 
-Package `public_view` for a candidate model, have an isolated evaluator accept only `list[str]` action traces with `case_id`, and store `(exact source head, case ID, semantic fingerprint, trace, verifier outcome, attempt budget, model digest, runtime)` as an auditable evaluation receipt. Freeze holdouts and use new independent scenario families before any claims of transferred reasoning.
+Package `public_view` for a candidate model, with the evaluator mapping an opaque service-side session handle to `evaluator_identity`; do not transmit `case_id`, `trial_id`, hidden kind or a seed-derivable identity. Accept bounded attempts and store `(exact source head, evaluator case/trial IDs, semantic-family ID, full attempted-action transcript including invalid actions, verified outcome, attempt budget, model digest, runtime)` as an auditable evaluation receipt. This prototype still lacks those durable receipts. Freeze holdouts and use new independent scenario families before any claims of transferred reasoning.

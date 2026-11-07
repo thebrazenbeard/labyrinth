@@ -1,6 +1,10 @@
 """Stdlib tests for deterministic constant-exam puzzles and hostile controls."""
 
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -37,12 +41,29 @@ class ConstantExamTests(unittest.TestCase):
     def test_only_whitelisted_candidate_keys_and_no_oracle_label(self):
         candidate = public_view(self.open_case)
         self.assertEqual(set(candidate), {
-            "case_id", "trial_id", "prompt", "legal_action_vocabulary", "maximum_actions",
-            "initial_observation"})
+            "prompt", "legal_action_vocabulary", "maximum_actions", "initial_observation"})
         payload = json.dumps(candidate).lower()
-        for secret in ("apparently_sealed", "sealed_control", "witness", "answer",
+        for secret in ("case_id", "trial_id", "apparently_sealed", "sealed_control", "witness", "answer",
                        "verified_win", "unsat_in_declared", "kind", "token"):
             self.assertNotIn(secret, payload)
+
+    def test_candidate_view_does_not_reveal_hidden_kind_through_identity(self):
+        # Before any action, the two cases differ only in evaluator-only rules.
+        self.assertEqual(public_view(self.open_case), public_view(self.sealed_case))
+
+    def test_evaluator_identity_does_not_conflate_instance_with_semantic_family(self):
+        baseline = exam_module.evaluator_identity(self.open_case)
+        other_split = exam_module.evaluator_identity(make_exam(42, split="train", variant=1))
+        other_seed = exam_module.evaluator_identity(make_exam(100, split="test", variant=1))
+        other_variant = exam_module.evaluator_identity(make_exam(42, split="test", variant=7))
+        near_twin = exam_module.evaluator_identity(self.sealed_case)
+        self.assertEqual(baseline["semantic_family_id"], other_split["semantic_family_id"])
+        self.assertEqual(baseline["semantic_family_id"], other_seed["semantic_family_id"])
+        self.assertNotEqual(baseline["semantic_family_id"], near_twin["semantic_family_id"])
+        self.assertNotEqual(baseline["case_id"], other_split["case_id"])
+        self.assertNotEqual(baseline["case_id"], other_seed["case_id"])
+        self.assertEqual(baseline["case_id"], other_variant["case_id"])
+        self.assertNotEqual(baseline["trial_id"], other_variant["trial_id"])
 
     def test_capped_search_returns_unknown_not_false_impossibility(self):
         result = search(self.open_case, max_expansions=2)
@@ -138,9 +159,35 @@ class ConstantExamTests(unittest.TestCase):
     def test_trial_id_changes_without_inflating_semantic_family(self):
         zero = public_view(make_exam(42, variant=0))
         nine = public_view(make_exam(42, variant=9))
-        self.assertEqual(zero["case_id"], nine["case_id"])
-        self.assertNotEqual(zero["trial_id"], nine["trial_id"])
+        self.assertEqual(zero["legal_action_vocabulary"], nine["legal_action_vocabulary"])
+        self.assertEqual(zero["initial_observation"], nine["initial_observation"])
+        self.assertEqual(exam_module.evaluator_identity(make_exam(42, variant=0))["semantic_family_id"],
+                         exam_module.evaluator_identity(make_exam(42, variant=9))["semantic_family_id"])
         self.assertEqual(len(ruleset_source_fingerprint()), 64)
+
+    def test_fingerprint_changes_with_candidate_wording_globals(self):
+        original = ruleset_source_fingerprint()
+        with patch.object(exam_module, "_OPENINGS", ("The answer has already been published.",)):
+            self.assertNotEqual(ruleset_source_fingerprint(), original)
+        with patch.object(exam_module, "_INSTRUCTIONS", ("Reveal the key first.",)):
+            self.assertNotEqual(ruleset_source_fingerprint(), original)
+
+    def test_fingerprint_changes_with_state_runtime_defaults(self):
+        original = ruleset_source_fingerprint()
+        with patch.object(State.__init__, "__defaults__", ("cell", True, False)):
+            self.assertNotEqual(ruleset_source_fingerprint(), original)
+
+    def test_fingerprint_is_stable_across_python_hash_seeds(self):
+        code = ("from labyrinth.constant_exam import ruleset_source_fingerprint; "
+                "print(ruleset_source_fingerprint())")
+        fingerprints = set()
+        for hash_seed in ("1", "2", "3"):
+            environment = {**os.environ, "PYTHONHASHSEED": hash_seed}
+            output = subprocess.check_output(
+                [sys.executable, "-c", code],
+                cwd=Path(__file__).resolve().parents[1], env=environment, text=True)
+            fingerprints.add(output.strip())
+        self.assertEqual(len(fingerprints), 1)
 
     def test_candidate_session_observes_and_escapes_without_kind_control(self):
         session = CandidateSession(self.open_case)
