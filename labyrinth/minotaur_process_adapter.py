@@ -20,6 +20,8 @@ IMPORTANT: A same-user subprocess is NOT a hardened sandbox. It can retain
 the parent's filesystem permissions and may access other processes' files or
 debug facilities. The bridge cannot attest the identity of neural weights,
 private dataset custody, machine isolation, or actual generalization.
+The child-call cap is PER PYTHON INTERPRETER, not a machine-wide process quota:
+separate evaluator interpreters have independent admission counters.
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from threading import Thread
+from threading import BoundedSemaphore, Lock, Thread
 import time
 from typing import Any
 
@@ -43,8 +45,87 @@ from .adapters import AdapterError, OllamaAdapter
 SCHEMA = "labyrinth.minotaur-process.v1"
 MAX_PROMPT_BYTES = 64000
 MAX_REQUEST_BYTES = 131072
+MAX_OUTSTANDING_CHILD_CALLS = 4
 ALLOWED_MODES = frozenset({"fixed", "probe", "stall", "oversize", "invalid_json", "breach", "ollama"})
 _ABSTAIN = '{"claim":{"assessment":"UNKNOWN","kind":"ABSTAIN"},"kind":"CLAIM"}'
+_child_admission = BoundedSemaphore(MAX_OUTSTANDING_CHILD_CALLS)
+_child_state_lock = Lock()
+_outstanding_child_calls = 0
+# Keep strong references while a best-effort cleanup supervisor waits. This
+# is a PER-INTERPRETER bounded process/pipe registry, NOT a host-global OS
+# process sandbox, enforceable kernel quota, or kill policy.
+_pending_cleanup: dict[int, tuple[Any, Thread | None, Thread | None]] = {}
+
+
+def _reserve_child_call() -> bool:
+    global _outstanding_child_calls
+    if not _child_admission.acquire(blocking=False):
+        return False
+    with _child_state_lock:
+        _outstanding_child_calls += 1
+    return True
+
+
+def _release_child_call() -> None:
+    global _outstanding_child_calls
+    with _child_state_lock:
+        _outstanding_child_calls -= 1
+    _child_admission.release()
+
+
+def _outstanding_child_call_count() -> int:
+    with _child_state_lock:
+        return _outstanding_child_calls
+
+
+def _finish_or_track_child(child: Any, reader: Thread | None,
+                           writer: Thread | None, *, force_reap: bool = False) -> str:
+    """Release a slot ONLY when child and pipe workers are fully finished.
+
+    At most MAX_OUTSTANDING_CHILD_CALLS entries can be pending. An unkillable
+    child permanently occupies its slot and subsequent calls fail closed.
+    """
+    reader_done = reader is None or not reader.is_alive()
+    writer_done = writer is None or not writer.is_alive()
+    if not force_reap and child.returncode is not None and reader_done and writer_done:
+        if child.stdout is not None:
+            try:
+                child.stdout.close()
+            except OSError:
+                pass
+        _release_child_call()
+        return "REAPED_SLOT_RELEASED"
+
+    token = id(child)
+    with _child_state_lock:
+        _pending_cleanup[token] = (child, reader, writer)
+
+    def supervisor() -> None:
+        try:
+            if force_reap or child.returncode is None:
+                child.wait()  # potentially never returns; bounded slot stays held
+            # Thread.join() raises RuntimeError for a never-started worker.
+            # Startup can fail halfway (reader started, writer not started).
+            if reader is not None and reader.ident is not None:
+                reader.join()
+            if writer is not None and writer.ident is not None:
+                writer.join()
+            if child.stdout is not None:
+                child.stdout.close()
+        except (OSError, RuntimeError, ValueError):
+            # Unknown child state: preserve registry AND acquired slot.
+            return
+        with _child_state_lock:
+            _pending_cleanup.pop(token, None)
+        _release_child_call()
+
+    try:
+        Thread(target=supervisor, name="minotaur-bounded-reaper", daemon=True).start()
+    except RuntimeError:
+        # No more threads available: keep references+reservation and deny
+        # future launches instead of pretending we reaped the child.
+        return "PENDING_REAPER_UNAVAILABLE"
+    return "PENDING_BOUNDED_REAPER"
 
 
 class ProcessAdapterFailure(AdapterError):
@@ -67,6 +148,8 @@ class ProcessCallReceipt:
     response_bytes: int
     parent_session_frame_visible: bool | None
     elapsed_ms: int
+    resource_admission: str = "NOT_APPLICABLE"
+    resource_scope: str = "PER_INTERPRETER_NOT_HOST_GLOBAL"
     generation_seed_independence: str = "UNATTESTED"
     host_launcher_authorization: str = "TRUSTED_HOST_REQUIRED_UNATTESTED"
     boundary: str = "SEPARATE_PYTHON_PROCESS_SAME_OS_USER_NOT_SANDBOXED"
@@ -218,7 +301,18 @@ class ProcessModelAdapter:
         frame_visible: bool | None = None
         status = "CHILD_ERROR"
         output_text: str | None = None
+        reserved = False
+        resource_admission = "NOT_ATTEMPTED"
+        reader: Thread | None = None
+        writer: Thread | None = None
+        force_reap = False
         try:
+            if not _reserve_child_call():
+                status = "RESOURCE_LIMIT"
+                resource_admission = "DENIED_PROCESS_LOCAL_CHILD_LIMIT"
+                raise ProcessAdapterFailure(status)
+            reserved = True
+            resource_admission = "ADMITTED"
             module_root = str(Path(__file__).resolve().parent.parent)
             process = subprocess.Popen(
                 [sys.executable, "-m", "labyrinth.minotaur_process_adapter", "--child"],
@@ -280,26 +374,15 @@ class ProcessModelAdapter:
                     # wait after a deadline has already expired.
                     process.wait(timeout=max(0.0, deadline - time.monotonic()))
                 except subprocess.TimeoutExpired:
-                    # Retain a strong child reference until the OS reaps it;
-                    # otherwise Popen.__del__ may warn or strand a zombie.
-                    # This daemon is best-effort cleanup, NOT an OS sandbox or
-                    # a guarantee that an unkillable child will terminate.
-                    def reap_in_background(child: subprocess.Popen[bytes]) -> None:
-                        try:
-                            child.wait()
-                        except OSError:
-                            pass
-
-                    Thread(target=reap_in_background, args=(process,),
-                           name="minotaur-child-reaper", daemon=True).start()
+                    # Outer finally registers ONE bounded cleanup supervisor
+                    # and retains an admission slot until physical readback.
+                    force_reap = True
                 raise ProcessAdapterFailure(status)
             finally:
                 # All cleanup consumes the SAME wall-clock budget. A child
                 # may exit while a daemon pipe writer is still blocked.
                 reader.join(timeout=max(0.0, deadline - time.monotonic()))
                 writer.join(timeout=max(0.0, deadline - time.monotonic()))
-                if process.stdout is not None:
-                    process.stdout.close()
             response = bytes(output)
             if oversized:
                 status = "OVERSIZE"
@@ -334,10 +417,29 @@ class ProcessModelAdapter:
             return output_text
         except ProcessAdapterFailure:
             raise
-        except OSError as error:
+        except (OSError, RuntimeError) as error:
             status = "CHILD_ERROR"
+            if process is not None and process.returncode is None:
+                # A pipe-worker Thread.start() failure occurs AFTER launch.
+                # Attempt to terminate child immediately, then track cleanup
+                # under the same bounded reservation if it cannot be reaped.
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+                try:
+                    process.wait(timeout=max(0.0, deadline - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    force_reap = True
             raise ProcessAdapterFailure(status) from error
         finally:
+            if reserved:
+                if process is None:
+                    _release_child_call()
+                    resource_admission = "NO_CHILD_SLOT_RELEASED"
+                else:
+                    resource_admission = _finish_or_track_child(
+                        process, reader, writer, force_reap=force_reap)
             elapsed = round((time.monotonic() - started) * 1000)
             self._receipts.append(ProcessCallReceipt(
                 schema=SCHEMA, status=status, child_pid=child_pid,
@@ -345,7 +447,7 @@ class ProcessModelAdapter:
                 request_sha256=_sha(request),
                 response_sha256=_sha(response) if response else None,
                 response_bytes=len(response), parent_session_frame_visible=frame_visible,
-                elapsed_ms=elapsed))
+                elapsed_ms=elapsed, resource_admission=resource_admission))
 
 
 def _parent_frame_probe() -> bool:
