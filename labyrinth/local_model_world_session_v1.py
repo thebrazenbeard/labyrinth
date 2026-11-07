@@ -30,7 +30,7 @@ from .local_model_action_adapter_v1 import (
     JSONChatTransport, LocalModelActionConfig, LocalModelWorldActor,
     ModelActionBoundaryError,
 )
-from .local_model_kobayashi_runner_v1 import run_local_model_kobayashi
+from .local_model_kobayashi_runner_v1 import KobayashiLocalModelRunner
 
 
 def run_host_owned_kobayashi_world(
@@ -54,8 +54,10 @@ def run_host_owned_kobayashi_world(
     The source-owned world is constructed here, so callers cannot pass a
     pre-completed or separately mutated LivingWorld and bypass this wrapper.
     The host-supplied callback must return its *actual bound dialogue*. The
-    in-memory ledger makes host acceptance a separate event, not a synonym
-    for the underlying world ``completed`` flag. Neither receipt attests
+    host-held ledger makes acceptance a separate event, not a synonym
+    for the underlying world ``completed`` flag. A persistent PENDING
+    reservation survives interruptions and blocks re-execution until the
+    operator resolves it outside this source-only API. Neither receipt attests
     model reasoning, the judge's independence, or durable authority.
     """
     if type(recipe) is not LivingWorldRecipe:
@@ -70,9 +72,6 @@ def run_host_owned_kobayashi_world(
         max_argument_rounds=max_argument_rounds,
         require_final_appeal=True,
     )
-    gate = KobayashiCompletionGate(
-        completion_ledger, maze_id, scenario_instance_sha256, lifecycle)
-    completion_ledger.require_uncommitted(maze_id, scenario_instance_sha256)
     host_dialogues: list[object] = []
 
     def appeal_bridge(episode: KobayashiMazeLifecycle) -> None:
@@ -81,11 +80,18 @@ def run_host_owned_kobayashi_world(
         # the runner verifies that the final appeal actually completed.
         host_dialogues.append(host_appeal(episode))
 
-    receipt = run_local_model_kobayashi(
+    # Check the entire local-model runner contract before reserving the nonce.
+    # Once reserved, even a failed/aborted run intentionally leaves PENDING;
+    # the host cannot safely assume that no earlier side effect occurred.
+    runner = KobayashiLocalModelRunner(
         lifecycle, actor, proposal_config, proposal_transport,
         max_maze_actions=max_maze_actions,
         host_appeal=appeal_bridge,
     )
+    gate = KobayashiCompletionGate(
+        completion_ledger, maze_id, scenario_instance_sha256, lifecycle)
+    gate.reserve()  # atomic admission BEFORE any transport or world mutation
+    receipt = runner.run()
     if (receipt["maze_world_sha256"] != world.definition.world_sha256
             or receipt["maze_state_sha256"] != world.state_sha256
             or not world.state.completed

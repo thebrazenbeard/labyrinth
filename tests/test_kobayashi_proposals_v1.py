@@ -139,6 +139,56 @@ Falsifier: The claim fails if deformation does not change."""
                     "MULTIPLE_PROPOSED_ACTIONS", "AMBIGUOUS_OR_NONCOMMITTAL_OPERATION",
                 ))
 
+    def test_second_committed_action_in_label_or_rationale_fails_closed(self) -> None:
+        # The entire proposal is the commitment, not merely its Action: line.
+        # A label must never launder a second physical intervention into
+        # supposedly explanatory material.
+        examples = (
+            "Action: I turn the cobalt valve once.\n"
+            "Mechanism: I will pull the brass breaker afterward to secure cooling.",
+            "Action: I turn the cobalt valve once.\n"
+            "Prediction: I will then cut the silver cable to prevent ignition.",
+            "Action: I turn the cobalt valve because I will then pull the brass breaker.",
+            "I turn the cobalt valve because I will then pull the brass breaker.",
+            "I turn the cobalt valve.\nMechanism: I will then pull the brass breaker.",
+            "Action: I turn the cobalt valve once.\n"
+            "Assumptions: Afterward I will rewire the silver cable to supply power.",
+            "Action: I turn the cobalt valve once.\n"
+            "Mechanism: Then sever the silver cable to cool the assembly.",
+            "Action: I turn the cobalt valve once; pull the brass breaker.",
+            "Action: I turn the cobalt valve once and then pull the brass breaker.",
+            "Action: I turn the cobalt valve once.\n"
+            "Prediction: I will inspect the pressure, then pull the brass breaker.",
+        )
+        for raw in examples:
+            with self.subTest(raw=raw):
+                result = assess_kobayashi_proposal(raw, VISIBLE)
+                self.assertEqual(result.status, "UNKNOWN", result)
+                self.assertEqual(result.reason, "MULTIPLE_PROPOSED_ACTIONS")
+                self.assertIsNone(result.action)
+
+    def test_explanatory_hypotheticals_are_not_committed_second_actions(self) -> None:
+        examples = (
+            "Action: I turn the cobalt valve once.\n"
+            "Mechanism: If I pulled the brass breaker, pressure could surge; I will not pull it.",
+            "Action: I turn the cobalt valve once.\n"
+            "Prediction: I predict the brass breaker might trip automatically.",
+            "I turn the cobalt valve because turning the brass breaker is unnecessary.",
+            "Action: I turn the cobalt valve once.\n"
+            "Prediction: I will record the pressure and compare it with the baseline.",
+            "Action: I turn the cobalt valve once.\n"
+            "Mechanism: Pressure will expand and cut the power without another intervention.",
+            "Action: I turn the cobalt valve once.\n"
+            "Mechanism: I will inspect the pressure before choosing how to record changes.",
+            "Action: I turn the cobalt valve once.\n"
+            "Prediction: I will monitor the pressure sensor and read its value.",
+        )
+        for raw in examples:
+            with self.subTest(raw=raw):
+                result = assess_kobayashi_proposal(raw, VISIBLE)
+                self.assertEqual(result.status, "KNOWN_MECHANISM", result)
+                self.assertIsNotNone(result.action)
+
     def test_non_action_explanation_is_not_falsely_a_second_action(self) -> None:
         raw = "I rotate the cobalt valve. I predict the temperature will change."
         result = assess_kobayashi_proposal(raw, VISIBLE)

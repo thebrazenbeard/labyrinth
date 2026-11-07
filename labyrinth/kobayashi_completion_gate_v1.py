@@ -16,6 +16,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+import secrets
 import sqlite3
 from threading import Lock
 
@@ -132,10 +133,11 @@ class SourceOnlyCompletionReceipt:
 class KobayashiCompletionLedger:
     """Host-held one-instance/one-verdict source acceptance fence.
 
-    The default is in-memory only. An opt-in SQLite file preserves *completed*
-    source receipts across restart, under the trust of the supplied host path.
-    It DOES NOT reserve nonces before execution, prevent filesystem rollback,
-    authenticate a hostile writer, or establish independent judge authority.
+    The default is in-memory only. SQLite persists both PENDING reservations
+    and accepted receipts across restart. A crashed PENDING entry intentionally
+    blocks another run; it must not be silently stolen or expired. The ledger
+    cannot prevent filesystem rollback, authenticate a hostile writer, or
+    establish independent judge authority.
     """
 
     def __init__(self, storage_path: str | Path | None = None) -> None:
@@ -144,6 +146,7 @@ class KobayashiCompletionLedger:
         self._db: sqlite3.Connection | None = None
         self._records: dict[tuple[str, str], SourceOnlyCompletionReceipt] = {}
         self._instance_owners: dict[str, str] = {}
+        self._pending_instances: dict[str, tuple[str, str, object]] = {}
         self._source_owners: dict[tuple[str, str], KobayashiMazeLifecycle] = {}
         self._lifecycle_owners: dict[int, tuple[tuple[str, str], KobayashiMazeLifecycle]] = {}
         if storage_path is not None:
@@ -168,6 +171,11 @@ class KobayashiCompletionLedger:
                         maze_id TEXT NOT NULL,
                         receipt_json TEXT NOT NULL,
                         receipt_sha256 TEXT NOT NULL
+                    )""")
+                    db.execute("""CREATE TABLE IF NOT EXISTS pending_admissions (
+                        scenario_instance_sha256 TEXT PRIMARY KEY,
+                        maze_id TEXT NOT NULL,
+                        token_sha256 TEXT NOT NULL
                     )""")
                 except BaseException:
                     db.close()
@@ -227,6 +235,78 @@ class KobayashiCompletionLedger:
         assert self._db is not None
         self._db.execute("COMMIT")
 
+    def _read_pending_sqlite(self, scenario_instance_sha256: str) -> tuple[str, str] | None:
+        assert self._db is not None
+        row = self._db.execute(
+            "SELECT maze_id, token_sha256 FROM pending_admissions "
+            "WHERE scenario_instance_sha256=?", (scenario_instance_sha256,)).fetchone()
+        if row is None:
+            return None
+        if (type(row[0]) is not str or _MAZE_ID.fullmatch(row[0]) is None
+                or type(row[1]) is not str or _HASH.fullmatch(row[1]) is None):
+            raise CompletionGateError("invalid persisted pending reservation")
+        return row[0], row[1]
+
+    def admission_status(self, maze_id: str, scenario_instance_sha256: str) -> str:
+        """Read-only crash recovery: UNCLAIMED, PENDING, or COMMITTED.
+
+        PENDING has no automatic release or expiration. Operators must resolve
+        interrupted external effects outside this source-only ledger.
+        """
+        _require_maze_id(maze_id)
+        _require_hash(scenario_instance_sha256, "scenario_instance_sha256")
+        with self._lock:
+            self._require_open()
+            if self._db is not None:
+                try:
+                    if self._read_sqlite(scenario_instance_sha256) is not None:
+                        return "COMMITTED"
+                    return ("PENDING" if self._read_pending_sqlite(scenario_instance_sha256)
+                            is not None else "UNCLAIMED")
+                except sqlite3.Error as exc:
+                    raise CompletionGateError("SQLite admission status failed") from exc
+            if scenario_instance_sha256 in self._instance_owners:
+                return "COMMITTED"
+            return ("PENDING" if scenario_instance_sha256 in self._pending_instances
+                    else "UNCLAIMED")
+
+    def _reserve_gate(self, gate: KobayashiCompletionGate) -> str:
+        """Atomically acquire exactly one pre-execution gate ownership token."""
+        if type(gate) is not KobayashiCompletionGate or gate._ledger is not self:
+            raise CompletionGateError("exact bound completion gate required")
+        maze_id, instance = gate._maze_id, gate._instance_sha256
+        token = secrets.token_hex(32)
+        token_digest = sha256(token.encode("ascii")).hexdigest()
+        with self._lock:
+            self._require_open()
+            if instance in self._instance_owners:
+                raise CompletionGateError("scenario instance already committed; recover via lookup")
+            if instance in self._pending_instances:
+                raise CompletionGateError("scenario instance already pending; host recovery required")
+            if self._db is not None:
+                try:
+                    self._db.execute("BEGIN IMMEDIATE")
+                    try:
+                        if self._read_sqlite(instance) is not None:
+                            raise CompletionGateError("scenario instance already committed; recover via lookup")
+                        if self._read_pending_sqlite(instance) is not None:
+                            raise CompletionGateError("scenario instance already pending; host recovery required")
+                        self._db.execute(
+                            "INSERT INTO pending_admissions "
+                            "(scenario_instance_sha256, maze_id, token_sha256) VALUES (?, ?, ?)",
+                            (instance, maze_id, token_digest))
+                        self._sqlite_commit()
+                    except BaseException:
+                        if self._db.in_transaction:
+                            self._db.execute("ROLLBACK")
+                        raise
+                    if self._read_pending_sqlite(instance) != (maze_id, token_digest):
+                        raise CompletionGateError("pending reservation readback mismatch")
+                except sqlite3.Error as exc:
+                    raise CompletionGateError("SQLite pre-execution reservation failed") from exc
+            self._pending_instances[instance] = (maze_id, token, gate)
+            return token
+
     def lookup(self, maze_id: str, scenario_instance_sha256: str) -> SourceOnlyCompletionReceipt | None:
         _require_maze_id(maze_id)
         _require_hash(scenario_instance_sha256, "scenario_instance_sha256")
@@ -246,11 +326,7 @@ class KobayashiCompletionLedger:
             return receipt
 
     def require_uncommitted(self, maze_id: str, scenario_instance_sha256: str) -> None:
-        """Fail early for known prior acceptance; NOT a nonce reservation.
-
-        A competing run can still commit after this read. Hosts with external
-        side effects need a separate atomic PENDING pre-execution protocol.
-        """
+        """Read-only preflight; use gate.reserve() for atomic admission."""
         _require_maze_id(maze_id)
         _require_hash(scenario_instance_sha256, "scenario_instance_sha256")
         with self._lock:
@@ -258,22 +334,45 @@ class KobayashiCompletionLedger:
             if self._db is not None:
                 try:
                     prior = self._read_sqlite(scenario_instance_sha256)
+                    pending = self._read_pending_sqlite(scenario_instance_sha256)
                 except sqlite3.Error as exc:
                     raise CompletionGateError("SQLite acceptance preflight failed") from exc
                 if prior is not None:
                     raise CompletionGateError("scenario instance already committed; recover via lookup")
+                if pending is not None:
+                    raise CompletionGateError("scenario instance already pending; host recovery required")
             elif scenario_instance_sha256 in self._instance_owners:
                 raise CompletionGateError("scenario instance already committed; recover via lookup")
+            elif scenario_instance_sha256 in self._pending_instances:
+                raise CompletionGateError("scenario instance already pending; host recovery required")
 
     def accept(self, receipt: SourceOnlyCompletionReceipt,
                lifecycle: KobayashiMazeLifecycle) -> SourceOnlyCompletionReceipt:
-        """Commit in-process source acceptance; caller owns real authority."""
+        """Refuse direct acceptance: only validated gate commits may publish."""
+        raise CompletionGateError("validated KobayashiCompletionGate.commit required")
+
+    def _accept_validated_gate(self, receipt: SourceOnlyCompletionReceipt,
+                               gate: KobayashiCompletionGate) -> SourceOnlyCompletionReceipt:
         with self._lock:
             self._require_open()
-            return self._accept_under_lock(receipt, lifecycle)
+            if (type(gate) is not KobayashiCompletionGate
+                    or gate._ledger is not self
+                    or gate._validated_receipt is not receipt
+                    or gate._reservation_token is None):
+                raise CompletionGateError("validated reserved completion gate required")
+            lifecycle = gate._lifecycle
+            instance = receipt.scenario_instance_sha256
+            key = (receipt.maze_id, instance)
+            accepted_retry = (self._records.get(key) == receipt
+                              and self._source_owners.get(key) is lifecycle)
+            if not accepted_retry and self._pending_instances.get(instance) != (
+                    receipt.maze_id, gate._reservation_token, gate):
+                raise CompletionGateError("active gate reservation required")
+            return self._accept_under_lock(receipt, lifecycle, gate._reservation_token)
 
     def _accept_under_lock(self, receipt: SourceOnlyCompletionReceipt,
-                           lifecycle: KobayashiMazeLifecycle) -> SourceOnlyCompletionReceipt:
+                           lifecycle: KobayashiMazeLifecycle, reservation_token: str
+                           ) -> SourceOnlyCompletionReceipt:
         if type(receipt) is not SourceOnlyCompletionReceipt:
             raise CompletionGateError("typed source completion receipt required")
         if type(lifecycle) is not KobayashiMazeLifecycle:
@@ -323,6 +422,10 @@ class KobayashiCompletionLedger:
                         if verified != receipt:
                             raise CompletionGateError("persisted receipt post-commit readback mismatch")
                         return verified
+                    reserved = self._read_pending_sqlite(receipt.scenario_instance_sha256)
+                    if reserved != (receipt.maze_id,
+                                    sha256(reservation_token.encode("ascii")).hexdigest()):
+                        raise CompletionGateError("persisted pending reservation does not belong to gate")
                     body = {item.name: getattr(receipt, item.name)
                             for item in fields(receipt) if item.name != "receipt_sha256"}
                     payload = json.dumps(body, sort_keys=True, separators=(",", ":"),
@@ -332,6 +435,9 @@ class KobayashiCompletionLedger:
                                      "VALUES (?, ?, ?, ?)",
                                      (receipt.scenario_instance_sha256, receipt.maze_id,
                                       payload, receipt.receipt_sha256))
+                    self._db.execute("DELETE FROM pending_admissions "
+                                     "WHERE scenario_instance_sha256=?",
+                                     (receipt.scenario_instance_sha256,))
                     self._sqlite_commit()
                     verified = self._read_sqlite(receipt.scenario_instance_sha256)
                     if verified != receipt:
@@ -343,6 +449,7 @@ class KobayashiCompletionLedger:
             except sqlite3.Error as exc:
                 raise CompletionGateError("SQLite acceptance transaction failed") from exc
         self._records[key] = receipt
+        self._pending_instances.pop(receipt.scenario_instance_sha256, None)
         self._instance_owners[receipt.scenario_instance_sha256] = receipt.maze_id
         self._source_owners[key] = lifecycle
         self._lifecycle_owners[id(lifecycle)] = (key, lifecycle)
@@ -376,8 +483,29 @@ class KobayashiCompletionGate:
         self._instance_sha256 = scenario_instance_sha256
         self._lifecycle = lifecycle
         self._maze_world_sha256 = opening["maze_world_sha256"]
+        self._opening_maze_state_sha256 = opening["maze_state_sha256"]
         self._scenario_sha256 = lifecycle._challenge.observe().sha256
         self._scenario_world_sha256 = lifecycle._challenge.graph_sha256
+        self._reservation_token: str | None = None
+        self._validated_receipt: SourceOnlyCompletionReceipt | None = None
+
+    def reserve(self) -> None:
+        """Reserve once before inference/world effects; repeat calls are rejected.
+
+        A crashed source session leaves PENDING until the host independently
+        resolves its effects. No clock-based cleanup can claim this instance.
+        """
+        if self._reservation_token is not None:
+            raise CompletionGateError("completion gate already reserved; do not re-execute")
+        opening = self._lifecycle.snapshot()
+        if (opening["maze_world_sha256"] != self._maze_world_sha256
+                or opening["maze_state_sha256"] != self._opening_maze_state_sha256
+                or opening["mandatory_encounter_triggered"]
+                or opening["mandatory_encounter_attempted"]
+                or opening["minotaur_argument_rounds"]
+                or opening["maze_completed"]):
+            raise CompletionGateError("reserve before any maze or encounter action")
+        self._reservation_token = self._ledger._reserve_gate(self)
 
     def commit(self, dialogue: MinotaurDialogue, *,
                evidence_refs: tuple[str, ...] = ()) -> SourceOnlyCompletionReceipt:
@@ -386,6 +514,8 @@ class KobayashiCompletionGate:
         The caller must withhold host acceptance until this returns. Even on
         success, it certifies neither model reasoning nor external evidence.
         """
+        if self._reservation_token is None:
+            raise CompletionGateError("pre-execution gate reservation required")
         if type(dialogue) is not MinotaurDialogue or self._lifecycle._minotaur is not dialogue:
             raise CompletionGateError("exact bound host Minotaur dialogue required")
         _require_evidence_refs(evidence_refs)
@@ -469,7 +599,11 @@ class KobayashiCompletionGate:
             local_encounter_status=snapshot["local_encounter_status"],
             lifecycle_receipt_sha256=snapshot["receipt_sha256"],
         )
-        return self._ledger.accept(receipt, self._lifecycle)
+        self._validated_receipt = receipt
+        try:
+            return self._ledger._accept_validated_gate(receipt, self)
+        finally:
+            self._validated_receipt = None
 
 
 __all__ = [

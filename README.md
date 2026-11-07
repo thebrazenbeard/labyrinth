@@ -30,24 +30,31 @@ receipt until the entire maze, initial proposal, bounded arguments and final
 appeal agree. The caller must provide a `KobayashiCompletionLedger`, a unique
 `maze_id`, and a unique 64-hex scenario-instance digest before running. The
 source-only ledger rejects reused instance IDs, accepts inert same-session
-retries and supports legitimate separate sessions with identical verdict text.
+completion-delivery retries and supports legitimate separate sessions with
+identical verdict text. Direct `ledger.accept(...)` is deliberately rejected:
+host acceptance requires a validated, reserved `KobayashiCompletionGate`.
 The default ledger is **in-memory** and only guards one Python process. For a
 trusted host directory, the caller may opt into an SQLite-backed ledger with
 `KobayashiCompletionLedger(storage_path=Path("/trusted/path/receipts.sqlite3"))`.
-It serializes accepted-instance commits across connections, permits readback
-after process restart via `ledger.lookup(maze_id, scenario_instance_sha256)`,
-and rejects a fresh episode reusing a committed instance even if its result is
-byte-identical. The strict world session checks for known committed instances
-and a closed ledger **before model calls**, but this is only a read-only
-preflight and does not exclude a simultaneous competing execution. The host
-must close the ledger when finished. **This does not
-reserve an instance before maze execution**, protect against an older SQLite
-snapshot being restored, resist hostile writers, or eliminate filesystem
-symlink races. The host must protect the directory and retain an external
-monotonic witness before treating these receipts as durable anti-rollback
-evidence. Final acceptance includes a separate source-only completion receipt;
-neither receipt authenticates model weights, judge independence, or external
-physical evidence.
+It atomically reserves a scenario instance as **PENDING** before the strict
+world session invokes any model transport or mutates the world. Only the owner
+of that reservation may commit the final accepted receipt, within the same
+SQLite transaction that removes PENDING. A competing strict session cannot
+begin execution for the same instance. Accepted receipts can be read back
+after restart via `ledger.lookup(maze_id, scenario_instance_sha256)`; the
+read-only `ledger.admission_status(...)` reports `UNCLAIMED`, `PENDING`, or
+`COMMITTED`. A crash or unsuccessful run deliberately leaves PENDING and blocks
+fresh execution; there is **no automatic expiry, retry, or force release**.
+The host must independently resolve any previous effects and use a *new*
+instance identity when an authorized new attempt is appropriate. Manual gate
+users must call `gate.reserve()` before execution and before `gate.commit()`.
+The host must close the ledger when finished. These source-owned fences do
+**not** protect against restoring an older SQLite snapshot, hostile writers,
+in-process Python introspection, or filesystem symlink races. The host must
+protect the directory and retain an external monotonic witness before treating
+receipts as durable anti-rollback evidence. Final acceptance includes a
+separate source-only completion receipt; neither receipt authenticates model
+weights, judge independence, or underlying external physical evidence.
 
 The older `labyrinth.local_model_world_runner_v1.run_local_model_world` story
 runner is available again for source-only local action traces. Its default
