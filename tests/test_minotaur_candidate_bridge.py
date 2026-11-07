@@ -74,6 +74,8 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertTrue(paired.candidate_win)
         self.assertFalse(paired.control_win)
         self.assertFalse(paired.neural_training_claim)
+        self.assertEqual(paired.session_isolation, "IN_PROCESS_UNATTESTED")
+        self.assertFalse(paired.comparison_qualified)
         self.assertTrue(audit_receipt(paired.candidate, public, factory))
         self.assertTrue(audit_receipt(paired.control, public, factory))
 
@@ -91,6 +93,25 @@ class CandidateBridgeTests(unittest.TestCase):
                              candidate=FixedActionAdapter(WINNING_SEED_ZERO),
                              control=FixedActionAdapter(("wait",)))
 
+    def test_matched_pair_rejects_distinct_proxies_sharing_underlying_session(self):
+        public, factory, _ = context()
+        shared = factory()
+
+        class Proxy:
+            def view(self):
+                return shared.view()
+
+            def act(self, action):
+                return shared.act(action)
+
+            def submit(self, claim):
+                return shared.submit(claim)
+
+        with self.assertRaisesRegex(ValueError, "control examiner changed"):
+            run_matched_pair(public, Proxy,
+                             candidate=FixedActionAdapter(()),
+                             control=FixedActionAdapter(WINNING_SEED_ZERO))
+
     def test_private_case_identity_never_in_adapter_prompt(self):
         public, factory, case = context(7, sealed=True)
         spy = SpyLocalAdapter()
@@ -103,6 +124,18 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertTrue(all(case.case_id not in p for p in spy.prompts))
         self.assertTrue(all('"sealed"' not in p and '"case_id"' not in p for p in spy.prompts))
         self.assertTrue(audit_receipt(receipt, public, factory))
+
+    def test_control_subclass_cannot_bypass_adapter_authorization(self):
+        class Impostor(FixedActionAdapter):
+            def generate(self, prompt, *, seed=None):
+                return '{"kind":"CLAIM","claim":{"kind":"ABSTAIN","assessment":"UNKNOWN"}}'
+
+        public, factory, _ = context()
+        with self.assertRaises(PermissionError):
+            run_candidate(public, factory, Impostor(()))
+        permitted = run_candidate(public, factory, Impostor(()),
+                                  authorize_local_adapter=True)
+        self.assertEqual(permitted.adapter_provenance, "MODEL_ADAPTER_UNATTESTED")
 
     def test_recursive_private_public_fields_fail_closed_before_model_call(self):
         public, factory, _ = context()
@@ -117,6 +150,7 @@ class CandidateBridgeTests(unittest.TestCase):
         factory = StartOnlyExam
         receipt = run_candidate(public, factory, FixedActionAdapter(("forward",)))
         self.assertEqual(receipt.final_verdict, "VERIFIED_WIN")
+        self.assertFalse(receipt.verified_escape)  # Status-only is not escape evidence.
         self.assertTrue(audit_receipt(receipt, public, factory))
 
     def test_budget_and_invalid_actions_never_grant_extra_turns(self):

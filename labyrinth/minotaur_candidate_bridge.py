@@ -31,7 +31,7 @@ MAX_ACTIONS = 32
 _PRIVATE_FIELDS = frozenset({"case_id", "seed", "sealed", "gold_trace", "fingerprint",
                              "answer", "correct_answer", "exam_id", "kind", "private"})
 _INSTRUCTION = ("Return one JSON object only: either "
-                '{"kind":"ACTION","action":"one action from the public list"} or '
+                '{"kind":"ACTION","action":"one action or query from the public list"} or '
                 '{"kind":"CLAIM","claim":{"kind":"ABSTAIN","assessment":"UNKNOWN"}}. '
                 "No prose, tools, code or extra fields. Invalid output ends this evaluation.")
 
@@ -143,6 +143,8 @@ class PairedReceipt:
     candidate_win: bool
     control_win: bool
     neural_training_claim: bool = False
+    session_isolation: str = "IN_PROCESS_UNATTESTED"
+    comparison_qualified: bool = False
 
 
 class FixedActionAdapter:
@@ -208,10 +210,29 @@ def _validated_budget(public: Mapping[str, Any], limit: int) -> int:
     if type(limit) is not int or not 1 <= limit <= MAX_ACTIONS:
         raise ValueError("max_model_calls must be an integer from 1 to 32")
     candidate = public.get("remaining_actions", public.get("actions_remaining",
-                           public.get("maximum_actions", limit)))
+                           public.get("remaining_queries",
+                           public.get("maximum_actions", limit))))
     if type(candidate) is not int or not 1 <= candidate <= MAX_ACTIONS:
         raise ValueError("public action budget must be a bounded integer")
     return min(candidate, limit)
+
+
+def _apply_action(session: Any, action: str) -> Mapping[str, Any]:
+    """Support action environments and bounded binary-query environments."""
+    if hasattr(session, "act"):
+        return session.act(action)
+    if hasattr(session, "ask"):
+        return session.ask(action)
+    raise ValueError("examiner has no declared action/query method")
+
+
+def _is_verified_escape(verdict: str, feedback: Mapping[str, Any]) -> bool:
+    """A generic VERIFIED_WIN can describe a *policy*, not an escape.
+
+    Credit only an examiner's explicit independently checked escape witness.
+    A legacy status-only interface is intentionally insufficient evidence.
+    """
+    return verdict == "VERIFIED_WIN" and feedback.get("escape_verified") is True
 
 
 def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[], Any],
@@ -229,7 +250,9 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
         raise ValueError("invalid evaluation seed")
     public_json = _public(public_start)
     budget = _validated_budget(public_start, max_model_calls)
-    fixed = isinstance(adapter, (FixedActionAdapter, ReplayAdapter))
+    # Subclasses may override generate() and perform arbitrary, even remote,
+    # effects. Only the two exact frozen control implementations are trusted.
+    fixed = type(adapter) in (FixedActionAdapter, ReplayAdapter)
     if not fixed and not authorize_local_adapter:
         raise PermissionError("non-control model adapter requires explicit local authorization")
     if isinstance(adapter, OllamaAdapter) and adapter.allow_remote:
@@ -242,6 +265,7 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
     provenance = "DETERMINISTIC_CONTROL" if fixed else "MODEL_ADAPTER_UNATTESTED"
     session = session_factory()
     initial = _session_view(session, first=True)
+    last_feedback = initial
     if _observation(initial) != _observation(public_start):
         raise ValueError("candidate public view does not match private session observation")
     history: list[dict[str, Any]] = []
@@ -266,7 +290,7 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
             break
         try:
             if decision == "ACTION":
-                feedback = session.act(content)
+                feedback = _apply_action(session, content)
             else:
                 feedback = session.submit(_claim_for_host(content))
             feedback_json = _public(feedback)
@@ -275,6 +299,7 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
             final = "EVALUATOR_ERROR"
             break
         turns.append(TurnReceipt(request, response, feedback_json, decision))
+        last_feedback = feedback
         history.append({"decision": json.loads(response), "feedback": json.loads(feedback_json)})
         final = _verdict(feedback)
         initial = (session.view() if hasattr(session, "view") else feedback)
@@ -290,7 +315,7 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
                  public_start_json=public_json, source_commit_unattested=source["commit"],
                  source_tree_sha256=source["source_tree_sha256"],
                  turns=tuple(turns), final_verdict=final,
-                 verified_escape=final == "VERIFIED_WIN")
+                 verified_escape=_is_verified_escape(final, last_feedback))
 
 
 def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
@@ -311,6 +336,7 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
             return False
         session = session_factory()
         initial = _session_view(session, first=True)
+        last_feedback = initial
         if _observation(initial) != _observation(public_start):
             return False
         if not receipt.turns and not _terminal(initial):
@@ -335,18 +361,20 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
             decision, content = _parse(turn.response_text)
             if decision != turn.disposition:
                 return False
-            feedback = (session.act(content) if decision == "ACTION"
+            feedback = (_apply_action(session, content) if decision == "ACTION"
                         else session.submit(_claim_for_host(content)))
             feedback_json = _public(feedback)
             if feedback_json != turn.public_feedback_json:
                 return False
             history.append({"decision": json.loads(turn.response_text),
                             "feedback": json.loads(feedback_json)})
+            last_feedback = feedback
             initial = (session.view() if hasattr(session, "view") else feedback)
             last = _verdict(initial)
             if decision == "CLAIM" and index < len(receipt.turns) - 1:
                 return False
-        return receipt.final_verdict == last and receipt.verified_escape == (last == "VERIFIED_WIN")
+        return (receipt.final_verdict == last
+                and receipt.verified_escape == _is_verified_escape(last, last_feedback))
     except (ValueError, TypeError, KeyError, AttributeError, OSError, RecursionError):
         return False
 
@@ -361,8 +389,16 @@ def run_matched_pair(public_start: Mapping[str, Any], session_factory: Callable[
     control_session = session_factory()
     if candidate_session is control_session:
         raise ValueError("candidate and control require independent examiner sessions")
+    if not hasattr(control_session, "view"):
+        raise ValueError("paired control requires a readback-capable examiner")
+    # Detect aliasing through separate proxy objects in the common case:
+    # the control must remain unchanged while the candidate runs. This is
+    # only a source-level consistency test, not proof of process isolation.
+    control_before = _public(control_session.view())
     candidate_run = run_candidate(public_start, lambda: candidate_session, candidate, seed=seed,
                                   authorize_local_adapter=authorize_local_adapter)
+    if _public(control_session.view()) != control_before:
+        raise ValueError("control examiner changed during candidate evaluation")
     control_run = run_candidate(public_start, lambda: control_session, control, seed=seed,
                                 authorize_local_adapter=authorize_local_adapter)
     return PairedReceipt(candidate_run, control_run,

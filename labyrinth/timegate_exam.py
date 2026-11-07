@@ -249,6 +249,8 @@ class CandidateSession:
                          len(self._attempts) == MAX_ACTIONS or
                          self._submission is not None),
             "verdict": verdict,
+            "escape_verified": (won and full == "VERIFIED_WIN"
+                                and self._integrity_fault is None),
             "integrity_status": ("OK" if self._integrity_fault is None else
                                  "EVALUATOR_DISAGREEMENT"),
         }
