@@ -185,6 +185,54 @@ class BehavioralProtocolTests(unittest.TestCase):
                                       receipt_sha256=sha256(tampered.encode()).hexdigest())
         self.assertFalse(verify_local_record(manifest, altered))
 
+    def test_record_replay_rejects_forged_score_budget_and_witness(self):
+        def always_abstain(port):
+            return CandidateChoice("ABSTAIN", (), .5)
+
+        manifest = precommit(((0, 100),), (always_abstain,))
+        record = evaluate(manifest, (always_abstain,)).trials[0]
+        self.assertTrue(verify_local_record(manifest, record))
+        self.assertEqual(record.loss, .65)
+        self.assertFalse(record.witnessed_by_public_probes)
+
+        mutations = {
+            "loss": 0.,
+            "confidence_brier": 0.,
+            "abstention_penalty": 0.,
+            "false_win_penalty": 1.,
+            "candidate_confidence": 1.,
+            "witnessed_by_public_probes": True,
+            "solved_by_source": False,
+            "proposal_kind": "PLAN",
+            "terminal": "VERIFIED_WIN",
+            "calls": manifest.budget.max_calls + 1,
+            "probes": True,
+            "elapsed_ms": -1,
+            "pair_index": True,
+        }
+        for field, value in mutations.items():
+            with self.subTest(field=field):
+                self.assertFalse(verify_local_record(
+                    manifest, dataclasses.replace(record, **{field: value})))
+
+    def test_record_replay_rejects_boolean_in_numeric_identity_fields(self):
+        def one_probe_then_abstain(port):
+            port.probe("TICK")
+            return CandidateChoice("ABSTAIN", (), .5)
+
+        manifest = precommit(((0, 100), (1, 101)), (one_probe_then_abstain,))
+        records = evaluate(manifest, (one_probe_then_abstain,)).trials
+        one_probe = records[0]
+        second_pair = records[2]
+        self.assertEqual(one_probe.probes, 1)
+        self.assertEqual(second_pair.pair_index, 1)
+        self.assertTrue(verify_local_record(manifest, one_probe))
+        self.assertTrue(verify_local_record(manifest, second_pair))
+        self.assertFalse(verify_local_record(
+            manifest, dataclasses.replace(one_probe, probes=True)))
+        self.assertFalse(verify_local_record(
+            manifest, dataclasses.replace(second_pair, pair_index=True)))
+
     def test_post_hoc_time_violation_is_fail_closed_but_not_preemptive(self):
         manifest = precommit(((0, 100),), (_slow_hostile,),
                              Budget(max_seconds=.01))
