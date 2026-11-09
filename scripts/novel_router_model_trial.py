@@ -692,6 +692,18 @@ def verify_trial_receipt(report: object) -> bool:
             if child.get("status") == "OK":
                 if type(child.get("pid")) is not int or child["pid"] <= 0:
                     return False
+                if spec.mode == "fixture":
+                    # A deterministic fixture has a stronger witness than a
+                    # command process: its declared response is already part
+                    # of the frozen adapter configuration. Rehashing a
+                    # fabricated PLAN cannot turn an ABSTAIN fixture into a
+                    # model-originated win, even when the source oracle says
+                    # the fabricated plan would be physically successful.
+                    expected_text = (spec.fixture_responses[index]
+                                     if index < len(spec.fixture_responses)
+                                     else '{"kind":"ABSTAIN"}')
+                    if raw != expected_text.encode("utf-8"):
+                        return False
                 try:
                     observed = _independent_wire_decision(
                         raw, view["probe_actions"], config.max_output_bytes)
