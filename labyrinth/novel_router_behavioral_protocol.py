@@ -139,12 +139,55 @@ def precommit(pairs, policies, budget=Budget()):
     return TrialManifest(pairs, signatures, budget, digest)
 
 
+def _valid_manifest(manifest):
+    """Re-admit an untrusted manifest at every consumption boundary.
+
+    A SHA256 of self-declared fields is NOT a precommit receipt. In particular,
+    an attacker must not turn a training seed into its own heldout twin.
+    """
+    if (type(manifest) is not TrialManifest or
+            type(manifest.pairs) is not tuple or
+            not 0 < len(manifest.pairs) <= 1000 or
+            type(manifest.policies) is not tuple or not manifest.policies or
+            type(manifest.budget) is not Budget or
+            type(manifest.sha256) is not str):
+        return False
+    try:
+        # Dataclass fields can be forcibly replaced after construction.
+        Budget(manifest.budget.max_probes, manifest.budget.max_calls,
+               manifest.budget.max_seconds)
+        seen_seeds = set()
+        for pair in manifest.pairs:
+            if (type(pair) is not tuple or len(pair) != 2 or
+                    any(type(seed) is not int or not 0 <= seed <= novel.MAX_SEED
+                        or seed in seen_seeds for seed in pair) or
+                    pair[0] == pair[1]):
+                return False
+            seen_seeds.update(pair)
+        names = set()
+        for item in manifest.policies:
+            if type(item) is not tuple or len(item) != 2:
+                return False
+            name, digest = item
+            if (type(name) is not str or not name or name in names or
+                    type(digest) is not str or len(digest) != 64 or
+                    any(c not in "0123456789abcdef" for c in digest)):
+                return False
+            names.add(name)
+        return manifest.sha256 == _digest({
+            "schema": SCHEMA, "pairs": manifest.pairs,
+            "policies": manifest.policies, "budget": asdict(manifest.budget)})
+    except Exception:
+        return False
+
+
 class _BudgetExceeded(Exception):
     pass
 
 
 def _proposal(choice):
     if (type(choice) is not CandidateChoice or
+            type(choice.kind) is not str or
             type(choice.solvable_probability) not in (float, int) or
             not math.isfinite(choice.solvable_probability) or
             not 0 <= choice.solvable_probability <= 1 or
@@ -259,6 +302,7 @@ def _one_trial(case, split, pair_index, policy, budget):
     candidate_elapsed_ms = round((time.monotonic() - start) * 1000)
     observed = session.view()
     witnessed = bool(proposal["kind"] == "PLAN" and
+                     choice is not None and len(choice.actions) > 0 and
                      list(choice.actions[:-1]) == actions and
                      choice.actions[-1] == "COMMIT" and _witness(observed, actions))
     receipt = session.submit(proposal)
@@ -294,7 +338,7 @@ def _one_trial(case, split, pair_index, policy, budget):
 
 def evaluate(manifest, policies):
     """Each declared policy gets identical limits for every frozen case."""
-    if (type(manifest) is not TrialManifest or type(policies) is not tuple or
+    if (not _valid_manifest(manifest) or type(policies) is not tuple or
             tuple(_policy_signature(p) for p in policies) != manifest.policies or
             manifest.sha256 != _digest({"schema": SCHEMA, "pairs": manifest.pairs,
                                        "policies": manifest.policies,
@@ -330,7 +374,7 @@ def verify_local_record(manifest, record):
     This does NOT attest that the candidate emitted the recorded confidence
     or plan, used the recorded calls/time, or lacked host-private access.
     """
-    if type(manifest) is not TrialManifest or type(record) is not TrialRecord:
+    if not _valid_manifest(manifest) or type(record) is not TrialRecord:
         return False
     try:
         if (manifest.sha256 != _digest({
@@ -447,7 +491,7 @@ def verify_local_report(manifest, report):
     aggregate arithmetic. Neither path authenticates who ran the policy or
     what the policy actually emitted; raw child custody would be required.
     """
-    if (type(manifest) is not TrialManifest or
+    if (not _valid_manifest(manifest) or
             type(report) is not BehavioralReport or
             type(report.manifest_sha256) is not str or
             report.manifest_sha256 != manifest.sha256 or
@@ -467,6 +511,9 @@ def verify_local_report(manifest, report):
         return False
     for record, (index, split, policy) in zip(report.trials, roles):
         if (type(record) is not TrialRecord or
+                type(record.pair_index) is not int or
+                type(record.split) is not str or
+                type(record.policy) is not str or
                 record.pair_index != index or record.split != split or
                 record.policy != policy or
                 not verify_local_record(manifest, record)):
@@ -488,6 +535,12 @@ def verify_local_report(manifest, report):
         "total_calls": sum(r.calls for r in records),
         "optimizer_updates": 0,
     }
-    return (set(report.totals) == set(expected) and
-            all(type(report.totals[key]) is type(value) and
-                report.totals[key] == value for key, value in expected.items()))
+    try:
+        return (all(type(key) is str for key in report.totals) and
+                set(report.totals) == set(expected) and
+                all(type(report.totals[key]) is type(value) and
+                    report.totals[key] == value for key, value in expected.items()))
+    except Exception:
+        # A read-only mapping does not make custom keys/values safe to hash,
+        # compare, or retrieve. Invalid reports cannot abort a verifier batch.
+        return False
