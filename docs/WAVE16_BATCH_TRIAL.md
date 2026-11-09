@@ -30,12 +30,16 @@ python3 -m scripts.switchback_batch_trial --seeds 0 1 2 \
   --max-total-seconds 15 --private-report-file /absolute/private/batch.json
 ```
 
-The full JSON file is created at mode `0600` through a same-directory staged
-write and an exclusive final hard link. Existing files and final-path symlinks
-are never replaced. If writing fails, the command returns nonzero and emits
-only a redacted failure summary. The parent directory remains a trusted local
-operator choice; this file mode is not same-user filesystem custody or an OS
-sandbox. A deliberately dangerous backwards-compatible
+On supported **POSIX** hosts the full JSON is created at mode `0600` through
+a same-directory staged write and an exclusive final hard link. Existing
+files and final-path symlinks are never replaced. **Windows private-file ACL
+enforcement is not implemented or qualified**, including Python 3.12 and
+earlier where `os.fchmod` may be unavailable. On unsupported platforms, or
+if `fchmod` raises, private export fails with status 2 and emits only the
+redacted failure summary; it does not quietly downgrade to a different file
+mode or unsafe stdout. The parent directory remains a trusted local operator
+choice; POSIX file mode is not same-user filesystem custody or an OS sandbox.
+A deliberately dangerous backwards-compatible
 `--emit-private-json-stdout` option exists for controlled offline consumers;
 use it only where stdout and logs are themselves protected. The two full
 export modes are mutually exclusive.

@@ -678,6 +678,11 @@ def _public_summary(report: dict[str, object], *, verified: bool,
     }
 
 
+def _private_file_platform_qualified() -> bool:
+    """Only POSIX fd-mode enforcement is implemented; Windows ACL is untested."""
+    return os.name == "posix" and callable(getattr(os, "fchmod", None))
+
+
 def _write_private_report_exclusive(report: dict[str, object], path: str) -> None:
     """Publish a complete file atomically, mode 0600, never replacing a path.
 
@@ -687,6 +692,8 @@ def _write_private_report_exclusive(report: dict[str, object], path: str) -> Non
     """
     if type(path) is not str or not Path(path).is_absolute():
         raise ValueError("private report target must be an absolute path")
+    if not _private_file_platform_qualified():
+        raise OSError("owner-only private report export not qualified on this platform")
     destination = Path(path)
     data = _canonical(report) + b"\n"
     descriptor, staged_path = tempfile.mkstemp(
@@ -723,7 +730,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-output-bytes", type=int, default=8192)
     export = parser.add_mutually_exclusive_group()
     export.add_argument("--private-report-file", metavar="ABSOLUTE_PATH",
-                        help="write full host-private receipt exclusively as a 0600 file")
+                        help="POSIX-only: write private receipt exclusively as a 0600 file")
     export.add_argument("--emit-private-json-stdout", action="store_true",
                         help="UNSAFE opt-in: print full private receipt on stdout")
     parser.add_argument("--command", nargs=argparse.REMAINDER, default=[])
@@ -749,7 +756,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.private_report_file is not None:
         try:
             _write_private_report_exclusive(result, args.private_report_file)
-        except (OSError, ValueError, TypeError):
+        except (OSError, ValueError, TypeError, AttributeError, NotImplementedError):
             print(_canonical(_public_summary(
                 result, verified=verified,
                 private_report_save_failed=True)).decode("utf-8"))
