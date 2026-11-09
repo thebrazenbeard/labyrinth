@@ -1,7 +1,7 @@
 """Independent public-seam adversarial tests for Veiled Fork v1."""
 
 import json
-from itertools import permutations
+from itertools import product
 import random
 import unittest
 
@@ -87,13 +87,16 @@ class EpistemicExamTests(unittest.TestCase):
         # identical; the candidate must choose its second probe conditionally.
         s = families()["adaptive_branching_advantage"]
         probes = list(s.probes)
-        for first, second in permutations(probes, 2):
+        evaluated = 0
+        for first, second in product(probes, repeat=2):
+            evaluated += 1
             ambiguous = [(a, b) for a in range(len(s.exits))
                          for b in range(a + 1, len(s.exits))
                          if s.exits[a] != s.exits[b]
                          and (first.answers[a], second.answers[a]) ==
                          (first.answers[b], second.answers[b])]
             self.assertTrue(ambiguous, f"fixed probe pair {first.name}/{second.name} resolved all worlds")
+        self.assertEqual(evaluated, 9)
         solved = find_guaranteed_policy(s)
         self.assertEqual(solved["verdict"], "VERIFIED_WIN")
         self.assertEqual(replay_policy(s, solved["policy"])["verdict"], "VERIFIED_WIN")
