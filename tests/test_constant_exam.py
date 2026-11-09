@@ -12,7 +12,7 @@ import labyrinth.constant_exam as exam_module
 from labyrinth.constant_exam import (ACTIONS, MAX_ACTIONS, CandidateSession, State,
                            make_exam, observe, public_view, ruleset_source_fingerprint,
                            search, step, world_fingerprint)
-from labyrinth.constant_exam_verifier import verify_trace, verify_unsat_certificate
+from labyrinth.constant_exam_verifier import TraceResult, verify_trace, verify_unsat_certificate
 
 
 class ConstantExamTests(unittest.TestCase):
@@ -99,6 +99,27 @@ class ConstantExamTests(unittest.TestCase):
 
     def test_independent_unsat_certificate_rejects_forgery(self):
         closed = search(self.sealed_case).reachable
+
+        class Poison:
+            def __hash__(self):
+                return 42
+
+            @property
+            def place(self):
+                raise RuntimeError("hostile certificate element")
+
+        self.assertFalse(verify_unsat_certificate(kind=self.sealed_case.kind,
+                                                 states={Poison()}))
+
+        class PhantomSet(set):
+            def __len__(self):
+                return 1
+
+            def __iter__(self):
+                return iter(closed)
+
+        self.assertFalse(verify_unsat_certificate(kind=self.sealed_case.kind,
+                                                 states=PhantomSet()))
         self.assertFalse(verify_unsat_certificate(kind=self.open_case.kind,
                                                 states=closed))
         self.assertFalse(verify_unsat_certificate(kind=self.sealed_case.kind,
@@ -124,6 +145,98 @@ class ConstantExamTests(unittest.TestCase):
                                 "VERIFIED_WIN")
         self.assertEqual(verify_trace(kind=self.open_case.kind,
                          actions=("north",) * (MAX_ACTIONS + 1)).outcome, "INVALID_TRACE")
+
+    def test_verifier_does_not_trust_container_length_or_scenario_subclasses(self):
+        winning_path = ("north", "east", "take", "west", "north", "offer", "leave")
+
+        class DishonestList(list):
+            def __len__(self):
+                return 1
+
+        too_many = DishonestList(("south",) * 5 + winning_path)
+        self.assertGreater(len(list(iter(too_many))), MAX_ACTIONS)
+        self.assertEqual(verify_trace(kind=self.open_case.kind, actions=too_many).outcome,
+                         "INVALID_TRACE")
+
+        class Switcheroo(list):
+            def __init__(self, winning):
+                super().__init__()
+                self.winning = winning
+                self.iterations = 0
+
+            def __iter__(self):
+                self.iterations += 1
+                return iter(()) if self.iterations == 1 else iter(self.winning)
+
+        # Two iterations once let a candidate validate one trace and replay another.
+        switcheroo = Switcheroo(winning_path)
+        self.assertEqual(verify_trace(kind=self.open_case.kind, actions=switcheroo).outcome,
+                         "INVALID_TRACE")
+
+        class ChameleonKind(str):
+            def __eq__(self, other):
+                return other in ("apparently_sealed", "sealed_control")
+
+        self.assertEqual(verify_trace(kind="sealed_control", actions=winning_path).outcome,
+                         "NOT_WON")
+        with self.assertRaises(ValueError):
+            verify_trace(kind=ChameleonKind("sealed_control"), actions=winning_path)
+        with self.assertRaises(ValueError):
+            verify_unsat_certificate(kind=ChameleonKind("sealed_control"), states=set())
+
+    def test_session_aborts_if_hidden_state_disagrees_with_independent_replay(self):
+        session = CandidateSession(self.open_case)
+        session.act("north")
+        session.act("east")
+        with patch.object(exam_module, "step", return_value=State(place="market")):
+            with self.assertRaisesRegex(RuntimeError, "game/verifier disagree"):
+                session.act("take")
+        with self.assertRaises(ValueError):
+            session.act("west")
+
+    def test_session_quarantines_transition_and_observation_errors(self):
+        failed_transition = CandidateSession(self.open_case)
+        with patch.object(exam_module, "step", side_effect=RuntimeError("synthetic step fault")):
+            with self.assertRaisesRegex(RuntimeError, "abort evaluation"):
+                failed_transition.act("north")
+        with self.assertRaises(ValueError):
+            failed_transition.act("north")
+
+        failed_observation = CandidateSession(self.open_case)
+        with patch.object(exam_module, "observe", side_effect=RuntimeError("synthetic observation fault")):
+            with self.assertRaisesRegex(RuntimeError, "abort evaluation"):
+                failed_observation.act("north")
+        with self.assertRaises(ValueError):
+            failed_observation.act("north")
+
+    def test_session_rejects_noncanonical_hidden_boolean_state(self):
+        session = CandidateSession(self.open_case)
+        session.act("north")
+        session.act("east")
+        # Python bool/int equality must not disguise a corrupted inventory bit.
+        with patch.object(exam_module, "step", return_value=State("market", 1, False)):
+            with self.assertRaisesRegex(RuntimeError, "game/verifier disagree"):
+                session.act("take")
+        with self.assertRaises(ValueError):
+            session.act("west")
+
+    def test_session_quarantines_malformed_verifier_result(self):
+        for result in (None, TraceResult("FAKE_VERDICT", final_room="hall")):
+            with self.subTest(result=result):
+                session = CandidateSession(self.open_case)
+                with patch("labyrinth.constant_exam_verifier.verify_trace", return_value=result):
+                    with self.assertRaisesRegex(RuntimeError, "abort evaluation"):
+                        session.act("north")
+                with self.assertRaises(ValueError):
+                    session.act("north")
+
+    def test_exam_factory_rejects_subclass_type_spoofing(self):
+        class ChameleonKind(str):
+            def __eq__(self, other):
+                return other in ("apparently_sealed", "sealed_control")
+
+        with self.assertRaises(ValueError):
+            make_exam(0, kind=ChameleonKind("sealed_control"))
 
     def test_transition_model_and_independent_trace_replay_agree(self):
         for exam in (self.open_case, self.sealed_case):

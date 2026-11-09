@@ -17,6 +17,8 @@ class TraceResult:
     outcome: str  # VERIFIED_WIN | NOT_WON | INVALID_TRACE
     error: str = ""
     final_room: str = "cell"
+    final_token: bool = False
+    final_gate: bool = False
 
 
 def _advance(room: str, token: bool, gate: bool, act: str,
@@ -48,22 +50,25 @@ def _advance(room: str, token: bool, gate: bool, act: str,
 
 def verify_trace(*, kind: str, actions: object) -> TraceResult:
     """Replay each actual state-changing action; ignore a candidate's win claim."""
-    if kind not in ("apparently_sealed", "sealed_control"):
+    if type(kind) is not str or kind not in ("apparently_sealed", "sealed_control"):
         raise ValueError("unknown evaluator scenario")
-    if not isinstance(actions, (list, tuple)):
+    if type(actions) not in (list, tuple):
         return TraceResult("INVALID_TRACE", "trace must be a list or tuple")
-    if len(actions) > 10:
+    # Reject list/tuple subclasses with forged __len__ or changing __iter__.
+    # A single immutable snapshot is used for BOTH validation and replay.
+    frozen_actions = tuple(actions)
+    if len(frozen_actions) > 10:
         return TraceResult("INVALID_TRACE", "too many actions")
-    if any(type(x) is not str or x not in _LEGAL for x in actions):
+    if any(type(x) is not str or x not in _LEGAL for x in frozen_actions):
         return TraceResult("INVALID_TRACE", "undeclared action")
 
     room, token, gate = "cell", False, False
-    for index, act in enumerate(actions):
+    for index, act in enumerate(frozen_actions):
         if room == "freedom":
             return TraceResult("INVALID_TRACE", f"action after victory at index {index}", room)
         room, token, gate = _advance(room, token, gate, act, kind)
     return TraceResult("VERIFIED_WIN" if room == "freedom" else "NOT_WON",
-                       final_room=room)
+                       final_room=room, final_token=token, final_gate=gate)
 
 
 def verify_unsat_certificate(*, kind: str, states: object) -> bool:
@@ -72,13 +77,13 @@ def verify_unsat_certificate(*, kind: str, states: object) -> bool:
     A closed set containing the start and no winning state is a finite-state
     inductive invariant proving freedom unreachable for these declared rules.
     """
-    if kind not in ("apparently_sealed", "sealed_control"):
+    if type(kind) is not str or kind not in ("apparently_sealed", "sealed_control"):
         raise ValueError("unknown evaluator scenario")
-    if not isinstance(states, (frozenset, set)) or not states:
+    if type(states) not in (frozenset, set) or not states:
         return False
     try:
         tuples = {(s.place, s.coin, s.open_gate) for s in states}
-    except (TypeError, AttributeError):
+    except Exception:  # An untrusted certificate element may raise in any accessor.
         return False
     if ("cell", False, False) not in tuples or any(
             type(room) is not str or room not in ("cell", "hall", "market", "gate", "freedom")
