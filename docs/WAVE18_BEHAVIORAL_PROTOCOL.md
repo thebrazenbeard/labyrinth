@@ -115,7 +115,7 @@ and validate structurally novel rule families before calculating effective n.
 
 ## Wave20 hostile manifest re-admission (stacked on PR #174)
 
-An adversarial review reproduced four additional **source-level FAILS** in the
+An adversarial review reproduced five additional **source-level FAILS** in the
 source-public protocol. These are distinct from the historical Wave18 counts:
 
 1. `precommit(((0, 0),), ...)` rejected a duplicate train/heldout seed, but
@@ -130,6 +130,11 @@ source-public protocol. These are distinct from the historical Wave18 counts:
 4. A `MappingProxyType` wrapping a totals dict whose `str`-subclass key later
    changed its hash behavior raised an uncaught `RuntimeError` inside
    `verify_local_report()` rather than returning a failed verification.
+5. An independent Skeptic reattack found `verify_local_report()` comparing
+   untrusted row `pair_index`, `split`, and `policy` before primitive type
+   admission. `int` and `str` subclasses overriding `__ne__` could raise a
+   `RuntimeError` and abort report verification. All three fields now have
+   exact-type guards before comparison.
 
 The repair revalidates the exact tuple roster, unique train/heldout seeds,
 bounded budget, unique policy identities and canonical manifest digest at each

@@ -120,6 +120,29 @@ class BehavioralProtocolTests(unittest.TestCase):
         self.assertFalse(verify_local_report(
             manifest, dataclasses.replace(report, totals=MappingProxyType(totals))))
 
+    def test_malicious_record_identity_subclasses_do_not_crash_report(self):
+        # Independent Skeptic counterexample: the report verifier compared
+        # untrusted row fields before the record verifier type-checked them.
+        class ExplodingInt(int):
+            def __ne__(self, other):
+                raise RuntimeError("hostile pair_index comparison")
+
+        class ExplodingStr(str):
+            def __ne__(self, other):
+                raise RuntimeError("hostile row identity comparison")
+
+        manifest = precommit(((0, 1),), (fixed_witness,))
+        report = evaluate(manifest, (fixed_witness,))
+        self.assertTrue(verify_local_report(manifest, report))
+        for field, value in (("pair_index", ExplodingInt(0)),
+                             ("split", ExplodingStr("TRAIN")),
+                             ("policy", ExplodingStr(report.trials[0].policy))):
+            with self.subTest(field=field):
+                bad = dataclasses.replace(report, trials=(
+                    dataclasses.replace(report.trials[0], **{field: value}),
+                    *report.trials[1:]))
+                self.assertFalse(verify_local_report(manifest, bad))
+
     def test_deceptive_choice_kind_fails_closed_without_aborting_batch(self):
         manifest = precommit(((0, 100),), (_misleading_kind_policy,))
         report = evaluate(manifest, (_misleading_kind_policy,))

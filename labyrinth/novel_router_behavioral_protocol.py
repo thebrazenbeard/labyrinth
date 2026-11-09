@@ -511,6 +511,9 @@ def verify_local_report(manifest, report):
         return False
     for record, (index, split, policy) in zip(report.trials, roles):
         if (type(record) is not TrialRecord or
+                type(record.pair_index) is not int or
+                type(record.split) is not str or
+                type(record.policy) is not str or
                 record.pair_index != index or record.split != split or
                 record.policy != policy or
                 not verify_local_record(manifest, record)):
