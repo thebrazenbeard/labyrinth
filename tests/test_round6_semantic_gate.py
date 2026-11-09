@@ -4,13 +4,17 @@ Only test-key HMAC fixtures are used. No real private evaluator, model, or
 production graduation is invoked.
 """
 
-from dataclasses import replace
+from dataclasses import fields, replace
 from hashlib import sha256
 import hmac
+import inspect
 import json
 import unittest
 
-from labyrinth.graduation_gate import GateState, SemanticCaseCommitment, decide_graduation
+from labyrinth.graduation_gate import (
+    GateState, GraduationPolicy, SemanticCaseCommitment,
+    _policy_fingerprint, decide_graduation,
+)
 from tests.test_graduation_gate import KEY, POLICY, decision, evaluated_receipt
 
 
@@ -38,6 +42,31 @@ def _bound_relabel(receipt, relabels, *, max_attempts=None):
 
 
 class SemanticFamilyGateTests(unittest.TestCase):
+    def test_policy_subclass_cannot_hide_different_objective_from_fingerprint(self):
+        """A policy's admission semantics must match its serialized identity."""
+
+        class TrojanPolicy(GraduationPolicy):
+            def __getattribute__(self, name):
+                if (name == "objective_kind"
+                        and inspect.currentframe().f_back.f_code.co_name == "decide_graduation"):
+                    return "skill_mastery"
+                return super().__getattribute__(name)
+
+        adversarial = TrojanPolicy(**{f.name: getattr(POLICY, f.name)
+                                      for f in fields(POLICY)})
+        self.assertEqual(_policy_fingerprint(POLICY), _policy_fingerprint(adversarial))
+        self.assertEqual(decision(evaluated_receipt(controls_correct=True),
+                                  policy=POLICY).disposition, "STAY")
+        with self.assertRaises(TypeError):
+            decision(evaluated_receipt(controls_correct=True), policy=adversarial)
+
+    def test_trusted_state_subclass_not_admitted(self):
+        class MockTrustedState(GateState):
+            pass
+
+        with self.assertRaises(TypeError):
+            decision(evaluated_receipt(), MockTrustedState())
+
     def test_deceptive_string_subclass_cannot_switch_graduation_objective(self):
         """Do not let Python rich comparisons bypass signed policy semantics."""
 

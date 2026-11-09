@@ -281,7 +281,10 @@ def decide_graduation(
     or untrusted receipts never graduate or consume an authenticated attempt.
     """
 
-    if not isinstance(policy, GraduationPolicy) or not isinstance(state, GateState):
+    # Subclasses can override __getattribute__ and make admission-time policy
+    # comparisons differ from the dataclass fields serialized into its digest.
+    # Trusted state likewise must not carry programmable field behavior.
+    if type(policy) is not GraduationPolicy or type(state) is not GateState:
         raise TypeError("expected GraduationPolicy and trusted GateState")
     if (type(state.next_attempt) is not int or state.next_attempt < 1
             or type(state.consumed_run_ids) is not frozenset
