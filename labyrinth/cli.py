@@ -40,6 +40,26 @@ def _positive(raw: str) -> int:
     return value
 
 
+def _public_exam_seed(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("seed must be a signed 32-bit integer") from exc
+    if not -(2**31) <= value <= 2**31 - 1:
+        raise argparse.ArgumentTypeError("seed must be a signed 32-bit integer")
+    return value
+
+
+def _public_exam_variant(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("variant must be between 0 and 31") from exc
+    if not 0 <= value <= 31:
+        raise argparse.ArgumentTypeError("variant must be between 0 and 31")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="labyrinth", description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -100,6 +120,14 @@ def _parser() -> argparse.ArgumentParser:
     rg.add_argument("--timeout-seconds", type=float, default=30.0)
     rg.add_argument("--allow-remote-ollama", action="store_true")
     rg.add_argument("--report", metavar="JSON", help="Exclusively create a JSON report")
+    minotaur = subcommands.add_parser(
+        "minotaur-exam", help="Run two source-public Minotaur families with deterministic controls",
+    )
+    minotaur.add_argument("--seed", type=_public_exam_seed, default=2026,
+                          help="Constant-exam prompt seed, not an independent structural holdout")
+    minotaur.add_argument("--variant", type=_public_exam_variant, default=0,
+                          help="Constant-exam wording variant (0..31), mechanics unchanged")
+    minotaur.add_argument("--report", metavar="JSON", help="Exclusively create a JSON receipt")
     subcommands.add_parser("train-hf", help="Opt-in bounded LoRA update of an existing local HF checkpoint")
     subcommands.add_parser("eval-hf", help="Reload and evaluate a saved HF LoRA pilot in a new process")
     return parser
@@ -169,6 +197,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
             except RuntimeError as exc:
                 raise ValueError(str(exc)) from exc
+        elif args.command == "minotaur-exam":
+            from .minotaur_public_exam import run_public_exam
+
+            report = run_public_exam(seed=args.seed, variant=args.variant)
         else:
             adapter = _load_model(args)
             if args.command == "run":
@@ -192,6 +224,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote reproducible report to {args.report}", file=sys.stderr)
         else:
             print(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))
+        if args.command == "minotaur-exam":
+            return 0 if report["summary"]["independent_checks_agree"] else 2
         return 0 if args.command not in ("audit-report", "audit-hf-report") or report["status"] == "PASS" else 2
     except (ValueError, TypeError, OSError, json.JSONDecodeError, AdapterError) as exc:
         print(f"labyrinth: {exc}", file=sys.stderr)
