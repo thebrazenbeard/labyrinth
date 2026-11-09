@@ -718,12 +718,21 @@ def _public_summary(report: dict[str, object], *, private_report_saved: bool = F
     }
 
 
+def _private_file_platform_qualified() -> bool:
+    """POSIX file-mode API is necessary here; Windows ACLs are unqualified."""
+    return os.name == "posix" and callable(getattr(os, "fchmod", None))
+
+
 def _write_private_report_exclusive(report: dict[str, object], path: str) -> None:
     """Finish a mode-0600 host-private report before atomic exclusive publish.
 
     An existing final filename (including a symlink) is never replaced. This
     does not isolate another process running under the same OS account.
     """
+    # Check BEFORE even constructing a path or staging private bytes. Windows
+    # fchmod (Python >=3.13) does not attest POSIX-style owner-only ACLs.
+    if not _private_file_platform_qualified():
+        raise OSError("private file publication requires qualified POSIX mode controls")
     if type(path) is not str or not Path(path).is_absolute():
         raise ValueError("private report target must be an absolute path")
     destination = Path(path)
@@ -768,8 +777,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--authorize-command", action="store_true")
     parser.add_argument("--command", nargs=argparse.REMAINDER, default=[])
     args = parser.parse_args(argv)
-    if args.private_report_file is not None and not Path(
-            args.private_report_file).is_absolute():
+    # On an unqualified OS, the exporter itself will fail closed. Do not
+    # construct a native Path first: platform qualification takes precedence
+    # over interpreting an unsupported private-file destination.
+    if (args.private_report_file is not None and
+            _private_file_platform_qualified() and not Path(
+            args.private_report_file).is_absolute()):
         parser.error("--private-report-file requires an absolute path")
     config = TrialConfig(args.seed, args.generation_seed, args.mode,
                          args.max_calls, args.timeout, args.total_timeout,
@@ -804,7 +817,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.private_report_file is not None:
         try:
             _write_private_report_exclusive(result, args.private_report_file)
-        except (OSError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError, AttributeError):
+            # os.fchmod is unavailable on Windows Python <= 3.12. Never
+            # silently downgrade a private receipt to unprotected output.
             print(_canonical(_public_summary(
                 result, private_report_save_failed=True)).decode("utf-8"))
             return 2
