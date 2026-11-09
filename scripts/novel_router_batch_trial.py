@@ -88,6 +88,10 @@ def _plain_receipt_tree(root: object) -> bool:
         identity = id(value)
         if identity in active:
             return False
+        # Do not expand an oversized list/dict into hundreds of thousands of
+        # pending tuples *before* the visited-node budget is checked.
+        if len(value) > 250_000 - inspected - len(pending):
+            return False
         active.add(identity)
         pending.append((value, depth, True))
         if kind is dict:

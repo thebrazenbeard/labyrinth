@@ -5,6 +5,7 @@ arbitrary Python subclasses must not get to redefine verdict comparisons.
 """
 
 from copy import deepcopy
+import tracemalloc
 import unittest
 
 from scripts import novel_router_batch_trial as batch
@@ -57,6 +58,19 @@ class Wave20PlainReceiptTests(unittest.TestCase):
         tampered = deepcopy(self.baseline)
         tampered["manifest"]["new_cycle"] = tampered
         self.assertFalse(batch.verify_batch_receipt(tampered))
+
+    def test_overwide_container_is_rejected_before_queue_amplification(self):
+        # Skeptic counterexample: the first guard queued every element of a
+        # 350k-wide list, allocating ~24 MiB despite its 250k-node budget.
+        # Prepare the hostile object before measuring *verifier* allocations.
+        attack = {"cases": [None] * 350_000}
+        tracemalloc.start()
+        try:
+            self.assertFalse(batch.verify_batch_receipt(attack))
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 5 * 1024 * 1024)
 
 
 if __name__ == "__main__":
