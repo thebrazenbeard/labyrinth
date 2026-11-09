@@ -130,6 +130,10 @@ def precommit(pairs, policies, budget=Budget()):
     signatures = tuple(_policy_signature(policy) for policy in policies)
     if len(set(signatures)) != len(signatures):
         raise ValueError("duplicate policy")
+    if len({name for name, _ in signatures}) != len(signatures):
+        # TrialRecord stores the policy name, not its code digest. Distinct
+        # code bodies with one displayed name cannot be attributed per row.
+        raise ValueError("duplicate policy name")
     digest = _digest({"schema": SCHEMA, "pairs": pairs, "policies": signatures,
                       "budget": asdict(budget)})
     return TrialManifest(pairs, signatures, budget, digest)
@@ -321,10 +325,10 @@ def evaluate(manifest, policies):
 
 
 def verify_local_record(manifest, record):
-    """Recompute source receipt from frozen case and charged trace.
+    """Recompute source receipt and derivable grading fields from frozen case.
 
-    Checks semantic replay, not that the candidate actually emitted the plan,
-    used the asserted calls/time, or remained isolated from host-private data.
+    This does NOT attest that the candidate emitted the recorded confidence
+    or plan, used the recorded calls/time, or lacked host-private access.
     """
     if type(manifest) is not TrialManifest or type(record) is not TrialRecord:
         return False
@@ -332,12 +336,47 @@ def verify_local_record(manifest, record):
         if (manifest.sha256 != _digest({
                 "schema": SCHEMA, "pairs": manifest.pairs,
                 "policies": manifest.policies, "budget": asdict(manifest.budget)}) or
+                type(record.budget) is not Budget or
                 record.budget != manifest.budget or
+                type(record.pair_index) is not int or
                 not 0 <= record.pair_index < len(manifest.pairs) or
+                type(record.split) is not str or
                 record.split not in ("TRAIN", "HELDOUT") or
+                type(record.policy) is not str or
                 record.policy not in {name for name, _ in manifest.policies} or
+                type(record.source_verdict) is not str or
+                type(record.probes) is not int or
+                not 0 <= record.probes <= manifest.budget.max_probes or
+                type(record.calls) is not int or
+                not record.probes <= record.calls <= manifest.budget.max_calls or
+                type(record.elapsed_ms) is not int or record.elapsed_ms < 0 or
+                type(record.terminal) is not str or
+                record.terminal not in ("SUBMITTED", "BUDGET_EXHAUSTED",
+                                        "INVALID_DECISION", "POLICY_ERROR") or
+                type(record.proposal_kind) is not str or
+                type(record.solved_by_source) is not bool or
+                type(record.witnessed_by_public_probes) is not bool or
+                type(record.candidate_confidence) not in (float, int) or
+                not math.isfinite(record.candidate_confidence) or
+                not 0 <= record.candidate_confidence <= 1 or
+                any(type(value) not in (float, int) or not math.isfinite(value)
+                    for value in (record.confidence_brier,
+                                  record.abstention_penalty,
+                                  record.false_win_penalty, record.loss)) or
                 type(record.receipt_json) is not str or
+                type(record.receipt_sha256) is not str or
                 record.receipt_sha256 != sha256(record.receipt_json.encode()).hexdigest()):
+            return False
+        # These reject only derivable temporal contradictions. Actual calls,
+        # wall-time and terminal classification are not independently attested.
+        budget_ms = manifest.budget.max_seconds * 1000
+        if (record.terminal == "SUBMITTED" and
+                record.elapsed_ms > budget_ms + 1):
+            return False
+        if (record.terminal == "BUDGET_EXHAUSTED" and
+                record.probes < manifest.budget.max_probes and
+                record.calls < manifest.budget.max_calls and
+                record.elapsed_ms + 1 < budget_ms):
             return False
         # Reject noncanonical serializations, duplicate keys and altered traces.
         def unique(pairs):
@@ -356,15 +395,99 @@ def verify_local_record(manifest, record):
             return False
         private_seed = manifest.pairs[record.pair_index][
             0 if record.split == "TRAIN" else 1]
-        session = novel.ProbeSession(novel.make_case(private_seed))
+        case = novel.make_case(private_seed)
+        session = novel.ProbeSession(case)
         for action in actions:
             if type(action) is not str:
                 return False
             session.probe(action)
-        expected = session.submit(deepcopy(source["adjudication"]["proposal"]))
+        proposal = source["adjudication"]["proposal"]
+        expected_witness = bool(
+            proposal["kind"] == "PLAN" and
+            type(proposal["actions"]) is list and
+            proposal["actions"][-1:] == ["COMMIT"] and
+            proposal["actions"][:-1] == actions and
+            _witness(session.view(), actions))
+        expected = session.submit(deepcopy(proposal))
+        closure = novel.search(case)
+        if (not closure["complete"] or
+                closure["verdict"] not in ("VERIFIED_WIN",
+                                           "PROVEN_UNSAT_UNDER_DECLARED_RULES")):
+            return False
+        solvable = closure["verdict"] == "VERIFIED_WIN"
+        if (record.terminal != "SUBMITTED" and
+                (proposal["kind"] != "ABSTAIN" or
+                 record.candidate_confidence != .5)):
+            return False
+        brier = round((record.candidate_confidence - float(solvable)) ** 2, 8)
+        abstention = .4 if proposal["kind"] == "ABSTAIN" else 0.
+        false_win = (1. if proposal["kind"] == "PLAN" and
+                     expected["verdict"] != "VERIFIED_WIN" else 0.)
+        false_unsat = 1. if proposal["kind"] == "CLAIM_UNSAT" and solvable else 0.
+        penalty = round(false_win + false_unsat, 8)
         return (_json(expected) == record.receipt_json and
                 source["verdict"] == record.source_verdict and
-                source["adjudication"]["seed"] == private_seed)
+                source["adjudication"]["seed"] == private_seed and
+                record.proposal_kind == proposal["kind"] and
+                record.solved_by_source is solvable and
+                record.witnessed_by_public_probes is expected_witness and
+                record.confidence_brier == brier and
+                record.abstention_penalty == abstention and
+                record.false_win_penalty == penalty and
+                record.loss == round(brier + abstention + penalty, 8))
     except (ValueError, TypeError, KeyError, IndexError, AttributeError,
-            RecursionError, OverflowError):
+            RecursionError, OverflowError, RuntimeError):
         return False
+
+
+def verify_local_report(manifest, report):
+    """Bind each source-replayed record to its frozen roster position.
+
+    Unlike single-record replay this checks ordered policy attribution and
+    aggregate arithmetic. Neither path authenticates who ran the policy or
+    what the policy actually emitted; raw child custody would be required.
+    """
+    if (type(manifest) is not TrialManifest or
+            type(report) is not BehavioralReport or
+            type(report.manifest_sha256) is not str or
+            report.manifest_sha256 != manifest.sha256 or
+            type(report.trials) is not tuple or
+            type(report.totals) is not MappingProxyType or
+            report.neural_learning_verified is not False or
+            report.generalization_qualified is not False or
+            report.private_custody is not False or
+            type(report.optimizer_updates) is not int or
+            report.optimizer_updates != 0):
+        return False
+    roles = tuple((index, split, policy)
+                  for index, pair in enumerate(manifest.pairs)
+                  for split, _ in zip(("TRAIN", "HELDOUT"), pair)
+                  for policy, _ in manifest.policies)
+    if len(report.trials) != len(roles):
+        return False
+    for record, (index, split, policy) in zip(report.trials, roles):
+        if (type(record) is not TrialRecord or
+                record.pair_index != index or record.split != split or
+                record.policy != policy or
+                not verify_local_record(manifest, record)):
+            return False
+    records = report.trials
+    expected = {
+        "count": len(records),
+        "verified_wins": sum(r.source_verdict == "VERIFIED_WIN" for r in records),
+        "failures": sum(r.source_verdict == "VERIFIED_FAILURE" for r in records),
+        "abstentions": sum(r.proposal_kind == "ABSTAIN" for r in records),
+        "other": sum(r.proposal_kind == "CLAIM_UNSAT" for r in records),
+        "false_wins": sum(r.proposal_kind == "PLAN" and
+                          r.source_verdict != "VERIFIED_WIN" for r in records),
+        "false_unsat_claims": sum(r.proposal_kind == "CLAIM_UNSAT" and
+                                  r.solved_by_source for r in records),
+        "total_loss": round(sum(r.loss for r in records), 8),
+        "abstention_penalty": round(sum(r.abstention_penalty for r in records), 8),
+        "total_probes": sum(r.probes for r in records),
+        "total_calls": sum(r.calls for r in records),
+        "optimizer_updates": 0,
+    }
+    return (set(report.totals) == set(expected) and
+            all(type(report.totals[key]) is type(value) and
+                report.totals[key] == value for key, value in expected.items()))
