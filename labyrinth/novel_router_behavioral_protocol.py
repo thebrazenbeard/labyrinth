@@ -130,6 +130,10 @@ def precommit(pairs, policies, budget=Budget()):
     signatures = tuple(_policy_signature(policy) for policy in policies)
     if len(set(signatures)) != len(signatures):
         raise ValueError("duplicate policy")
+    if len({name for name, _ in signatures}) != len(signatures):
+        # TrialRecord stores the policy name, not its code digest. Distinct
+        # code bodies with one displayed name cannot be attributed per row.
+        raise ValueError("duplicate policy name")
     digest = _digest({"schema": SCHEMA, "pairs": pairs, "policies": signatures,
                       "budget": asdict(budget)})
     return TrialManifest(pairs, signatures, budget, digest)
