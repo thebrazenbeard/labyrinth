@@ -82,15 +82,20 @@ def verify_unsat_certificate(*, kind: str, states: object) -> bool:
     if type(states) not in (frozenset, set) or not states:
         return False
     try:
-        tuples = {(s.place, s.coin, s.open_gate) for s in states}
+        tuples = set()
+        for state in states:
+            room, token, gate = state.place, state.coin, state.open_gate
+            # Freeze trusted primitives before hashing, equality or closure checks;
+            # str/bool subclasses can run arbitrary code during comparison.
+            if (type(room) is not str or room not in ("cell", "hall", "market", "gate", "freedom")
+                    or type(token) is not bool or type(gate) is not bool):
+                return False
+            tuples.add((room, token, gate))
+        if ("cell", False, False) not in tuples:
+            return False
+        if any(room == "freedom" for room, _, _ in tuples):
+            return False
+        return all(_advance(room, token, gate, action, kind) in tuples
+                   for room, token, gate in tuples for action in _LEGAL)
     except Exception:  # An untrusted certificate element may raise in any accessor.
         return False
-    if ("cell", False, False) not in tuples or any(
-            type(room) is not str or room not in ("cell", "hall", "market", "gate", "freedom")
-            or type(token) is not bool or type(gate) is not bool
-            for room, token, gate in tuples):
-        return False
-    if any(room == "freedom" for room, _, _ in tuples):
-        return False
-    return all(_advance(room, token, gate, action, kind) in tuples
-               for room, token, gate in tuples for action in _LEGAL)

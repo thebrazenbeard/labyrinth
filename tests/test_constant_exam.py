@@ -111,6 +111,15 @@ class ConstantExamTests(unittest.TestCase):
         self.assertFalse(verify_unsat_certificate(kind=self.sealed_case.kind,
                                                  states={Poison()}))
 
+        class BombStr(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                raise RuntimeError("hostile room equality")
+
+        self.assertFalse(verify_unsat_certificate(kind=self.sealed_case.kind,
+                                                 states={State(BombStr("cell"), False, False)}))
+
         class PhantomSet(set):
             def __len__(self):
                 return 1
