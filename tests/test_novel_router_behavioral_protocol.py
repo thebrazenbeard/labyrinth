@@ -109,6 +109,18 @@ class BehavioralProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "precommit"):
             evaluate(manifest, (replacement,))
 
+    def test_precommit_rejects_distinct_bytecode_with_identical_policy_name(self):
+        def abstain(port):
+            return CandidateChoice("ABSTAIN", (), .5)
+
+        def unsat(port):
+            return CandidateChoice("CLAIM_UNSAT", (), .5)
+
+        unsat.__module__ = abstain.__module__
+        unsat.__qualname__ = abstain.__qualname__
+        with self.assertRaisesRegex(ValueError, "duplicate policy name"):
+            precommit(((0, 100),), (abstain, unsat))
+
     def test_invalid_policy_cannot_forge_a_win_and_is_penalized(self):
         def liar(port):
             return CandidateChoice("PLAN", ("COMMIT",), 1.0)
