@@ -91,23 +91,21 @@ class FourthWaveLearningControls(unittest.TestCase):
         self.assertFalse(result.get("verified_success", False))
         self.assertEqual(changed.attempts(), ())
 
-    def test_signed_semantic_aliases_can_pass_gate_despite_effective_n_one(self):
+    def test_signed_cosmetic_aliases_cannot_substitute_for_precommitted_families(self):
         receipt, families = _synthetic_semantic_alias_receipt()
         self.assertEqual(len(families), 1)
         all_trials = [trial for group in receipt["slices"].values() for trial in group]
         self.assertEqual(len(all_trials), 32)
         self.assertEqual(len({t["case_id"] for t in all_trials}), 32)
         self.assertEqual(len({t["prompt_commitment"] for t in all_trials}), 32)
-        # The gate sees 16 independent successes PER slice and a strong paired
-        # p-value; actual semantic independence is NOT represented in schema.
+        # The test-only signer can sign fresh alias IDs and prompt bytes, but
+        # they do not match the separately precommitted policy registry.
         result = decision(receipt)
-        self.assertEqual(result.disposition, "GRADUATED")
-        self.assertTrue(result.state.graduated)
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertFalse(result.state.graduated)
 
     def test_truthful_equally_capable_zero_update_control_prevents_training_grant(self):
-        same_mechanics, families = _synthetic_semantic_alias_receipt(controls_correct=True)
-        self.assertEqual(len(families), 1)
-        result = decision(same_mechanics)
+        result = decision(evaluated_receipt(controls_correct=True))
         self.assertEqual(result.disposition, "STAY")
         self.assertFalse(result.state.graduated)
 

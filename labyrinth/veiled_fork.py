@@ -50,7 +50,8 @@ def check_scenario(s: Scenario) -> None:
         raise ValueError("invalid exit identity")
     names = set()
     for p in s.probes:
-        if type(p) is not Probe or type(p.name) is not str or not p.name or p.name in names:
+        if (type(p) is not Probe or type(p.name) is not str or
+                not 1 <= len(p.name) <= 128 or p.name in names):
             raise ValueError("invalid probe identity")
         names.add(p.name)
         if type(p.answers) is not tuple or len(p.answers) != len(s.exits):

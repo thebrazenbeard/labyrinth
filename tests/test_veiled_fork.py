@@ -136,6 +136,18 @@ class EpistemicExamTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid probe"):
             check_scenario(s)
 
+    def test_probe_name_and_policy_freezer_agree_at_string_boundary(self):
+        # An accepted solvable exam used to return UNKNOWN when its solver's
+        # probe name exceeded the policy-freezer's 128-character value cap.
+        valid = Scenario((0, 1), (Probe("p" * 128, ("left", "right")),), 2)
+        check_scenario(valid)
+        self.assertTrue(brute_force_oracle(valid))
+        self.assertEqual(find_guaranteed_policy(valid)["verdict"], "VERIFIED_WIN")
+
+        invalid = Scenario((0, 1), (Probe("p" * 129, ("left", "right")),), 2)
+        with self.assertRaisesRegex(ValueError, "invalid probe identity"):
+            check_scenario(invalid)
+
     def test_invalid_action_is_charged_and_not_retried(self):
         s = families()["identifiable_fork"]
         r = replay_policy(s, {"kind": "probe", "name": "nonsense", "branches": {}})
