@@ -26,6 +26,17 @@ and print only a redacted failure summary. The parent directory and same-user
 local processes remain outside the source-level privacy boundary; file
 permissions are not an independent custody attestation.
 
+**Windows qualification:** The private file exporter requires `os.fchmod`.
+On Windows Python 3.12 and earlier that API is unavailable; attempting
+`--private-report-file` now fails closed with a redacted
+`private_report_save_failed` summary and exit code 2, without publishing
+private output to stdout. Python 3.13 introduced Windows `fchmod`, but its
+permission-bit behavior does **not** prove POSIX-style mode `0600` access
+control or a verified Windows ACL. Do not claim private file export is
+qualified on Lappy until its exact Python version, filesystem ACLs and
+readback have been checked. The OS-missing-API adversarial regression is a
+simulated source test, not that physical Windows qualification.
+
 For older offline parsers that explicitly require the full receipt on stdout,
 `--emit-private-json-stdout` restores that behavior. It is **unsafe** for CI
 logs, bug-report uploads, shared terminals and ordinary transcript capture.

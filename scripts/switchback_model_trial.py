@@ -804,7 +804,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.private_report_file is not None:
         try:
             _write_private_report_exclusive(result, args.private_report_file)
-        except (OSError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError, AttributeError):
+            # os.fchmod is unavailable on Windows Python <= 3.12. Never
+            # silently downgrade a private receipt to unprotected output.
             print(_canonical(_public_summary(
                 result, private_report_save_failed=True)).decode("utf-8"))
             return 2
