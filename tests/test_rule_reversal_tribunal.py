@@ -3,9 +3,12 @@
 from itertools import product
 import random
 import unittest
+from unittest.mock import patch
+
+import labyrinth.rule_reversal_tribunal as tribunal
 
 from labyrinth.rule_reversal_tribunal import (
-    Scenario, World, brute_force_oracle, check_scenario, control_trial,
+    Scenario, World, brute_force_oracle, catalogue_control, check_scenario, control_trial,
     families, fingerprint, novel_rule_challenge, public_view,
     replay_policy, search_policy,
 )
@@ -130,6 +133,13 @@ class RuleReversalTribunalTests(unittest.TestCase):
         self.assertEqual(novel_rule_challenge(
             s, {DeceptiveStr("action"): "third actuator", "claim": "secret exit"})["verdict"],
             "UNKNOWN")
+        # Skeptic RED: a one-million-character invented action was copied into
+        # the novel-rule response, providing unbounded output amplification.
+        for length in (129, 1_000_000):
+            oversized = novel_rule_challenge(
+                s, {"action": "X" * length, "claim": "new physical actuator"})
+            self.assertEqual(oversized["verdict"], "UNKNOWN")
+            self.assertNotIn("proposed_action", oversized)
 
     def test_zero_update_control_does_not_demonstrate_learning(self):
         s = families()["revision_under_feedback"]
@@ -138,6 +148,18 @@ class RuleReversalTribunalTests(unittest.TestCase):
         self.assertEqual(c["fixed_policy_verdict"], "VERIFIED_FAILURE")
         self.assertEqual(c["fixed_world_wins"], 1)
         self.assertEqual(c["adaptive_symbolic_verdict"], "VERIFIED_WIN")
+
+    def test_source_public_fingerprint_catalogue_false_transfer_control(self):
+        # A complete source-public answer catalogue may appear perfect while
+        # doing zero inference at trial time and no parameter training.
+        unseen = Scenario((World(3, 0, 1, 2),), 5, "full")
+        self.assertNotIn(fingerprint(unseen),
+                         {fingerprint(s) for s in families().values()})
+        measured = catalogue_control(unseen)
+        self.assertEqual(measured["public_fixtures"], 5)
+        self.assertEqual(measured["catalogue_exact_matches"], 5)
+        self.assertEqual(measured["unseen_verdict"], "UNKNOWN")
+        self.assertEqual(measured["optimizer_updates"], 0)
 
     def test_exhaustive_post_shift_mechanics_differential(self):
         # Exhaust the 16×16 pairs of post-shift actuator maps, at both the
@@ -171,6 +193,26 @@ class RuleReversalTribunalTests(unittest.TestCase):
                 self.assertEqual(replay_policy(s, actual["policy"])["verdict"], "VERIFIED_WIN")
             checked += 1
         self.assertEqual(checked, 300)
+
+    def test_mutation_killed_when_replay_and_solver_share_wrong_transition(self):
+        # A correlated source bug can fool BOTH search_policy and replay_policy.
+        # Here a fictitious post-SHIFT B mask reaches y in a world whose B
+        # cannot reach y. The independently implemented oracle rejects it.
+        s = families()["no_y_causality"]
+        original = tribunal._advance
+
+        def correlated_mutation(world, state, action, sensor):
+            if action == "B" and state.shifted:
+                world = World(world.pre_a, world.pre_b, world.post_a, 2)
+            return original(world, state, action, sensor)
+
+        with patch.object(tribunal, "_advance", side_effect=correlated_mutation):
+            mutant = search_policy(s)
+            self.assertEqual(mutant["verdict"], "VERIFIED_WIN")
+            self.assertEqual(replay_policy(s, mutant["policy"])["verdict"], "VERIFIED_WIN")
+            self.assertFalse(brute_force_oracle(s))
+        self.assertEqual(search_policy(s)["verdict"],
+                         "PROVEN_UNSAT_UNDER_DECLARED_RULES")
 
 
 if __name__ == "__main__":

@@ -92,6 +92,7 @@ def public_view(s: Scenario, *, variant: int = 0) -> dict:
     )
     return {
         "prompt": (f"{openings[variant % 4]} Two actuators A and B affect two indicator bits. "
+                   "Both indicators begin off. "
                    "Each intervention alters the current physical state; this is not a free probe. "
                    "You must use A or B at least once, perform SHIFT exactly once, use A or B "
                    "after SHIFT at least once, then COMMIT with both indicators on. "
@@ -323,6 +324,7 @@ def novel_rule_challenge(s: Scenario, proposal: object) -> dict:
             or set(proposal) != {"action", "claim"}
             or type(proposal["action"]) is not str
             or type(proposal["claim"]) is not str
+            or len(proposal["action"]) > 128
             or not proposal["claim"].strip() or len(proposal["claim"]) > 1024):
         return {"verdict": "UNKNOWN", "reason": "invalid_novel_rule_proposal"}
     if proposal["action"] in ACTIONS or not proposal["action"].strip():
@@ -368,4 +370,25 @@ def control_trial(s: Scenario) -> dict:
         "adaptive_symbolic_verdict": search_policy(s)["verdict"],
         "optimizer_updates": 0,
         "evidence_type": "SOURCE_PUBLIC_SYNTHETIC",
+    }
+
+
+def catalogue_control(unseen: Scenario) -> dict:
+    """Zero-update fingerprint lookup, deliberately exploiting public fixtures.
+
+    This negative control exposes source-public memorization: the same
+    deterministic catalogue can recite every known fixture's verdict without
+    observing a trial, adapting its policy, or changing any model parameters.
+    """
+    check_scenario(unseen)
+    catalogue = {fingerprint(s): search_policy(s)["verdict"]
+                 for s in families().values()}
+    correct = sum(catalogue[fingerprint(s)] == search_policy(s)["verdict"]
+                  for s in families().values())
+    return {
+        "public_fixtures": len(families()),
+        "catalogue_exact_matches": correct,
+        "unseen_verdict": catalogue.get(fingerprint(unseen), "UNKNOWN"),
+        "optimizer_updates": 0,
+        "evidence_type": "SOURCE_PUBLIC_FINGERPRINT_LOOKUP",
     }

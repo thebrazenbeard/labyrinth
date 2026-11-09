@@ -6,6 +6,7 @@ examiner process, model-training artifact, or graduation qualification.
 ## Distinct mechanism
 
 The world contains two indicator bits and two physical actuators, A and B.
+Both indicator bits start off, as explicitly disclosed to the candidate.
 An intervention changes the actual state by a two-bit XOR effect. After at
 least one pre-shift intervention, the candidate must invoke `SHIFT`. The
 effects of A and B then change under a hidden per-world causal law. A candidate
@@ -45,7 +46,10 @@ again. The observed response determines whether to `COMMIT` immediately or
 correct with A before committing. All eligible fixed, noncontingent action
 sequences of at most five actions fail at least one world. The fixed four-action
 script `A, SHIFT, A, COMMIT` wins only one of two worlds; the source-public
-adaptive symbolic policy wins both. **Optimizer updates: zero.**
+adaptive symbolic policy wins both. A **zero-update fingerprint catalogue**
+recites all five source-public fixture verdicts correctly (5/5) while
+abstaining on an unseen fingerprint. Neither result proves neural learning.
+**Optimizer updates: zero.**
 
 ## Honesty of proof and new discoveries
 
@@ -69,6 +73,12 @@ primitive dictionaries/strings before any world replay, rejecting dynamic
 Python object keys, deceptive subclasses, cycles and excess depth. This is
 source input hygiene, **not** independent OS or model attestation.
 
+Independent native Skeptic reproduced unbounded novel-rule response
+amplification: an action name of one million characters was accepted as a
+challenge and echoed verbatim. The input boundary now rejects new action
+names longer than 128 characters before constructing the response; 129 and
+1,000,000-character reproductions are preserved as regression tests.
+
 ## Independent evidence
 
 `brute_force_oracle` is a second Boolean belief-state implementation using
@@ -80,7 +90,15 @@ transition function or replayer. The tests compare both verdicts across:
 - **300 seeded randomized** worlds/budgets/sensors;
 - independently enumerated fixed scripts of lengths one through five;
 - invalid action budgets, malformed policy objects, novel ruleset claims,
-  no-feedback UNSAT, genuine incomplete search, and unchanged positive controls.
+  no-feedback UNSAT, genuine incomplete search, unchanged positive controls,
+  and the 5/5 source-public catalogue contamination baseline.
+
+The mutation-killing test deliberately makes the source transition claim a
+nonexistent B-actuator capability after SHIFT. Its **correlated source solver
+and replay both report `VERIFIED_WIN`**, but the separately implemented oracle
+still rejects the declared no-y-causality scenario. Restoring the unmutated
+transition restores the UNSAT verdict. This is a concrete example of why
+replay and solver agreement alone cannot certify a proof.
 
 Run:
 
