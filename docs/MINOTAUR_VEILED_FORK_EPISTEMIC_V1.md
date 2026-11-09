@@ -12,7 +12,10 @@
 | Identifiable fork | 2 | `VERIFIED_WIN` | One discriminating probe followed by a conditional exit. |
 | Too late to know | 1 | `PROVEN_UNSAT_UNDER_DECLARED_RULES` | Same worlds and probe as identifiable fork, but the probe leaves no attempt for exit. |
 | Two-signal mosaic | 3 | `VERIFIED_WIN` | Distinguishing exit requires two independent signals in the worst case. Budget 2 is unsatisfiable. |
+| Adaptive branching advantage | 3 | `VERIFIED_WIN` | No fixed two-probe sequence can resolve opposite-exit worlds; a conditional gate→left/right→commit policy can. |
 | Common safe exit | 1 | `VERIFIED_WIN` | Every world shares exit 1; no probe is required. |
+
+These are **six non-independent counterfactual cases in one epistemic-policy mechanism**, not six independent structural families for graduation statistics.
 
 For each scenario, the independent Boolean partition oracle is compared with a policy-producing belief-state search, then the proposed policy is replayed *unchanged* against every declared world. The two search routines do share the stated observation matrix; this is a finite declared-rule check, **not** independent physical evidence that those semantics are true.
 
@@ -39,6 +42,6 @@ python -m unittest discover -s tests -q
 python -O -m unittest discover -s tests -q
 ```
 
-The source-only fixed-exit policy is compared to a deterministic symbolic planner across the five distinct structures. Fixed policies carry **zero optimizer updates**. The symbolic planner performs exact source-public inference; its successes do not establish neural learning. A 1,000-case seeded randomized differential check helps detect mismatches within the stated oracle; it is **not** 1,000 independent structural families. Published code and seeds are visible to the candidate; no secret holdout custody, neural parameter delta, model weight identity, or checkpoint-reload evidence is provided.
+The source-only fixed-exit policy is compared to a deterministic symbolic planner across six related cases. Fixed policies carry **zero optimizer updates**. The symbolic planner performs exact source-public inference; its successes do not establish neural learning. A 1,000-case seeded randomized differential check helps detect mismatches within the stated oracle; it is **not** 1,000 independent structural families. Published code and seeds are visible to the candidate; no secret holdout custody, neural parameter delta, model weight identity, or checkpoint-reload evidence is provided.
 
 No changes to protected branches, installations, services, host model runs, or graduation gates are proposed here.

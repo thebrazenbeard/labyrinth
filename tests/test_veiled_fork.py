@@ -1,6 +1,7 @@
 """Independent public-seam adversarial tests for Veiled Fork v1."""
 
 import json
+from itertools import permutations
 import random
 import unittest
 
@@ -80,6 +81,24 @@ class EpistemicExamTests(unittest.TestCase):
         result = find_guaranteed_policy(s)
         self.assertEqual(result["verdict"], "VERIFIED_WIN")
         self.assertEqual(result["policy"], {"kind": "commit", "exit": 1})
+
+    def test_adaptive_probe_policy_beats_every_fixed_two_probe_script(self):
+        # For each nonadaptive pair, at least two opposite-exit worlds look
+        # identical; the candidate must choose its second probe conditionally.
+        s = families()["adaptive_branching_advantage"]
+        probes = list(s.probes)
+        for first, second in permutations(probes, 2):
+            ambiguous = [(a, b) for a in range(len(s.exits))
+                         for b in range(a + 1, len(s.exits))
+                         if s.exits[a] != s.exits[b]
+                         and (first.answers[a], second.answers[a]) ==
+                         (first.answers[b], second.answers[b])]
+            self.assertTrue(ambiguous, f"fixed probe pair {first.name}/{second.name} resolved all worlds")
+        solved = find_guaranteed_policy(s)
+        self.assertEqual(solved["verdict"], "VERIFIED_WIN")
+        self.assertEqual(replay_policy(s, solved["policy"])["verdict"], "VERIFIED_WIN")
+        self.assertTrue(brute_force_oracle(s))
+        self.assertFalse(brute_force_oracle(Scenario(s.exits, s.probes, 2)))
 
     def test_bounded_search_does_not_upgrade_no_known_win_to_unsat(self):
         s = families()["two_signal_mosaic"]

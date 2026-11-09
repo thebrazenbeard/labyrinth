@@ -278,7 +278,7 @@ def challenge_novel_rule(s: Scenario, proposal: object) -> dict:
 
 
 def families() -> dict[str, Scenario]:
-    """Mechanically distinct information/budget structures, not seed aliases."""
+    """Counterfactual scenarios within ONE epistemic planning family."""
     return {
         "unobservable_fork": Scenario((0, 1), (Probe("echo", ("same", "same")),), 4),
         "identifiable_fork": Scenario((0, 1), (Probe("inspect", ("left", "right")),), 2),
@@ -286,6 +286,13 @@ def families() -> dict[str, Scenario]:
         "two_signal_mosaic": Scenario((0, 1, 1, 0), (
             Probe("amber", ("0", "0", "1", "1")),
             Probe("cobalt", ("0", "1", "0", "1")),
+        ), 3),
+        # No fixed two-probe *sequence* separates opposite-exit worlds,
+        # but gate->(left if A, right if B)->commit succeeds with budget 3.
+        "adaptive_branching_advantage": Scenario((0, 1, 1, 0), (
+            Probe("gate", ("A", "A", "B", "B")),
+            Probe("left", ("0", "1", "0", "0")),
+            Probe("right", ("0", "0", "0", "1")),
         ), 3),
         "common_safe_exit": Scenario((1, 1, 1), (Probe("decoy", ("a", "b", "c")),), 1),
     }
