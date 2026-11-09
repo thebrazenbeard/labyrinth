@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from hashlib import sha256
 import json
+import math
 
 
 NODES = 5
@@ -350,6 +351,29 @@ def _canonical(value: dict[str, object]) -> str:
                       ensure_ascii=True, allow_nan=False)
 
 
+def _exact_json(value: object, depth: int = 0) -> bool:
+    """Deny Python value subclasses that can lie about comparisons.
+
+    A str subclass can serialize as `VERIFIED_WIN` while claiming to compare
+    equal to `VERIFIED_FAILURE`.  The replay boundary accepts exact JSON
+    primitives only, not arbitrary in-process Python objects.
+    """
+    if depth > 12:
+        return False
+    if value is None or type(value) in (str, bool, int):
+        return True
+    if type(value) is float:
+        return math.isfinite(value)
+    if type(value) is list:
+        return len(value) <= 128 and all(
+            _exact_json(item, depth + 1) for item in value)
+    if type(value) is dict:
+        return len(value) <= 128 and all(
+            type(key) is str and _exact_json(item, depth + 1)
+            for key, item in value.items())
+    return False
+
+
 def adjudicate(case: Case, proposal: object) -> dict[str, object]:
     if not _valid_case(case) or type(proposal) is not dict:
         raise ValueError("invalid input")
@@ -415,6 +439,8 @@ def _independent_probe_trace(case: Case, trace: object) -> bool:
         action = row["action"]
         if type(action) is not str or len(action) > 32:
             return False
+        if type(row["before"]) is not str or type(row["after"]) is not str:
+            return False
         recognized = action in PROBE_ACTIONS
         if action == "RESET":
             advanced = _raw_initial(case)
@@ -436,7 +462,8 @@ def _independent_probe_trace(case: Case, trace: object) -> bool:
 
 def _raw_core_is_valid(case: Case, proposal: object, core: object) -> bool:
     """Distinct receipt verifier; never regenerate by calling adjudicate."""
-    if type(core) is not dict or type(proposal) is not dict:
+    if (type(core) is not dict or type(proposal) is not dict or
+            not _exact_json(core) or not _exact_json(proposal)):
         return False
     fields = {"schema", "evidence_class", "source_commit", "private_custody",
               "neural_learning_verified", "graduation_eligible", "case_id", "seed",
@@ -460,30 +487,54 @@ def _raw_core_is_valid(case: Case, proposal: object, core: object) -> bool:
             core["graduation_eligible"] is not False or
             type(core["seed"]) is not int or core["seed"] != case.seed or
             core["case_id"] != case.case_id or
+            type(core["reason"]) is not str or
             core["verified_success"] is not (core["verdict"] == "VERIFIED_WIN")):
         return False
     kind = proposal.get("kind")
     if kind == "PLAN" and set(proposal) == {"kind", "actions"}:
         return (core["verdict"] == _raw_plan_verdict(case, proposal["actions"]) and
-                core["counterexample"] is None)
+                core["counterexample"] is None and
+                core["reason"] == "TWO_PLAN_CHECKS_AGREE")
     if kind == "CLAIM_UNSAT" and set(proposal) == {"kind"}:
         witness = _raw_closure_witness(case)
         if witness is None:
-            return (core["verdict"] in (
-                "PROVEN_UNSAT_UNDER_DECLARED_RULES", "NO_KNOWN_WIN") and
-                core["counterexample"] is None)
+            # A complete, independently corroborated UNSAT closure cannot be
+            # silently downgraded to NO_KNOWN_WIN by rewriting the unkeyed
+            # receipt. Only an actually incomplete/disagreeing source search
+            # justifies that conservative verdict.
+            source = search(case)
+            if (type(source) is not dict or
+                    type(source.get("complete")) is not bool or
+                    type(source.get("verdict")) is not str):
+                return False
+            source_proved = (source["complete"] is True and
+                             source["verdict"] ==
+                             "PROVEN_UNSAT_UNDER_DECLARED_RULES")
+            expected_verdict = ("PROVEN_UNSAT_UNDER_DECLARED_RULES" if source_proved
+                                else "NO_KNOWN_WIN")
+            expected_reason = ("TWO_FINITE_CLOSURES_AGREE" if source_proved
+                               else "INCOMPLETE_OR_DISAGREEING_SOURCE_SEARCH")
+            return (core["verdict"] == expected_verdict and
+                    core["reason"] == expected_reason and
+                    core["counterexample"] is None)
         return (core["verdict"] == "VERIFIED_FAILURE" and
+                core["reason"] == "INDEPENDENT_WIN_COUNTEREXAMPLE" and
                 _raw_plan_verdict(case, core["counterexample"]) == "VERIFIED_WIN")
     if kind == "NOVEL_RULE" and set(proposal) == {"kind", "description"} and (
             type(proposal["description"]) is str and
             0 < len(proposal["description"]) <= 2000):
-        return core["verdict"] == "NOVEL_RULESET_CHALLENGE"
-    return core["verdict"] == "UNKNOWN" and core["counterexample"] is None
+        return (core["verdict"] == "NOVEL_RULESET_CHALLENGE" and
+                core["reason"] == "UNVERIFIED_EXTERNAL_RULE" and
+                core["counterexample"] is None)
+    return (core["verdict"] == "UNKNOWN" and
+            core["reason"] == "INVALID_PROPOSAL" and
+            core["counterexample"] is None)
 
 
 def verify_session_receipt(receipt: object) -> bool:
     """Source-public replay without the session emitter or scorer generator."""
-    if type(receipt) is not dict or type(receipt.get("sha256")) is not str:
+    if (type(receipt) is not dict or not _exact_json(receipt) or
+            type(receipt.get("sha256")) is not str):
         return False
     try:
         case = make_case(receipt["seed"])

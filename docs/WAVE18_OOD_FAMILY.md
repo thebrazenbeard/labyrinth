@@ -111,6 +111,23 @@ corrupted. Probe exceptions and malformed states are charged and sealed
 instead of escaping into free retries. These are source-level single-fault
 controls, not an independent host signer or secure process sandbox.
 
+The receipt checker also validates the explanation and counterexample fields:
+rehashing the public checksum after substituting an inaccurate `reason` or
+fabricating a `NOVEL_RULE` counterexample must fail replay. This protects
+source-level semantic consistency only; a party controlling the source and
+case registry can still forge unkeyed receipts.
+Python subclasses of JSON primitives are rejected recursively at the replay
+boundary. In particular, an adversarial `str` subtype cannot serialize a
+false `VERIFIED_WIN` while overriding equality to fool the independent goal
+check, or substitute false probe observation strings. The adversarial subtype
+must be rejected even after both public checksums are recomputed; this is
+still an in-process source-level guard, not a credentialed attestation.
+An independent closure and a complete source search must also agree on the
+*strength* of the terminal claim: a genuine
+`PROVEN_UNSAT_UNDER_DECLARED_RULES` receipt cannot be relabeled
+`NO_KNOWN_WIN` merely by rehashing it. The conservative verdict remains
+admissible when the actual source search is incomplete or disagrees.
+
 ## Leakage and qualification — explicitly negative
 
 The proposed seed block `100–199` is **not a private heldout inventory**.
