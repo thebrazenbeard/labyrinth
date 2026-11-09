@@ -115,7 +115,7 @@ and validate structurally novel rule families before calculating effective n.
 
 ## Wave20 hostile manifest re-admission (stacked on PR #174)
 
-An adversarial review reproduced three additional **source-level FAILS** in the
+An adversarial review reproduced four additional **source-level FAILS** in the
 source-public protocol. These are distinct from the historical Wave18 counts:
 
 1. `precommit(((0, 0),), ...)` rejected a duplicate train/heldout seed, but
@@ -127,13 +127,18 @@ source-public protocol. These are distinct from the historical Wave18 counts:
 3. A custom `str` subclass implementing deceptive equality as the choice
    `kind` made the evaluator index an empty `PLAN` actions tuple and abort the
    batch with `IndexError`, instead of charging `INVALID_DECISION`.
+4. A `MappingProxyType` wrapping a totals dict whose `str`-subclass key later
+   changed its hash behavior raised an uncaught `RuntimeError` inside
+   `verify_local_report()` rather than returning a failed verification.
 
 The repair revalidates the exact tuple roster, unique train/heldout seeds,
 bounded budget, unique policy identities and canonical manifest digest at each
 consumption boundary. Decision kinds must be primitive strings; the witness
-calculation additionally guards against empty actions. Each failure now has
-a source-level regression test, including a spoofed-subclass candidate and
-a self-rehashed forged roster. Full normal and optimized suite commands:
+calculation additionally guards against empty actions. Report totals require
+primitive string keys and their examination fails closed on anomalous
+comparison/hash behavior. Each failure now has a source-level regression test,
+including spoofed-subclass objects and a self-rehashed forged roster. Full
+normal and optimized suite commands:
 
 ```
 python -m unittest discover -s tests -q

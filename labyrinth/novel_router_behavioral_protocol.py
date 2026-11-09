@@ -532,6 +532,12 @@ def verify_local_report(manifest, report):
         "total_calls": sum(r.calls for r in records),
         "optimizer_updates": 0,
     }
-    return (set(report.totals) == set(expected) and
-            all(type(report.totals[key]) is type(value) and
-                report.totals[key] == value for key, value in expected.items()))
+    try:
+        return (all(type(key) is str for key in report.totals) and
+                set(report.totals) == set(expected) and
+                all(type(report.totals[key]) is type(value) and
+                    report.totals[key] == value for key, value in expected.items()))
+    except Exception:
+        # A read-only mapping does not make custom keys/values safe to hash,
+        # compare, or retrieve. Invalid reports cannot abort a verifier batch.
+        return False

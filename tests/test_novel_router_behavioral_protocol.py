@@ -99,6 +99,27 @@ class BehavioralProtocolTests(unittest.TestCase):
         empty = BehavioralReport("forged", (), zeros)
         self.assertFalse(verify_local_report(fake, empty))
 
+    def test_mutating_hash_in_report_totals_fails_closed(self):
+        # MappingProxyType protects reassignment, not malicious Python key
+        # behavior; a later hash operation must not crash verification.
+        class UnstableKey(str):
+            sabotage = False
+
+            def __hash__(self):
+                if self.sabotage:
+                    raise RuntimeError("malicious totals key")
+                return str.__hash__(self)
+
+        manifest = precommit(((0, 100),), (fixed_witness,))
+        report = evaluate(manifest, (fixed_witness,))
+        hostile_key = UnstableKey("count")
+        totals = {hostile_key: report.totals["count"]}
+        totals.update({key: value for key, value in report.totals.items()
+                       if key != "count"})
+        hostile_key.sabotage = True
+        self.assertFalse(verify_local_report(
+            manifest, dataclasses.replace(report, totals=MappingProxyType(totals))))
+
     def test_deceptive_choice_kind_fails_closed_without_aborting_batch(self):
         manifest = precommit(((0, 100),), (_misleading_kind_policy,))
         report = evaluate(manifest, (_misleading_kind_policy,))
