@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from hashlib import sha256
 import json
+import math
 
 
 NODES = 5
@@ -350,6 +351,29 @@ def _canonical(value: dict[str, object]) -> str:
                       ensure_ascii=True, allow_nan=False)
 
 
+def _exact_json(value: object, depth: int = 0) -> bool:
+    """Deny Python value subclasses that can lie about comparisons.
+
+    A str subclass can serialize as `VERIFIED_WIN` while claiming to compare
+    equal to `VERIFIED_FAILURE`.  The replay boundary accepts exact JSON
+    primitives only, not arbitrary in-process Python objects.
+    """
+    if depth > 12:
+        return False
+    if value is None or type(value) in (str, bool, int):
+        return True
+    if type(value) is float:
+        return math.isfinite(value)
+    if type(value) is list:
+        return len(value) <= 128 and all(
+            _exact_json(item, depth + 1) for item in value)
+    if type(value) is dict:
+        return len(value) <= 128 and all(
+            type(key) is str and _exact_json(item, depth + 1)
+            for key, item in value.items())
+    return False
+
+
 def adjudicate(case: Case, proposal: object) -> dict[str, object]:
     if not _valid_case(case) or type(proposal) is not dict:
         raise ValueError("invalid input")
@@ -415,6 +439,8 @@ def _independent_probe_trace(case: Case, trace: object) -> bool:
         action = row["action"]
         if type(action) is not str or len(action) > 32:
             return False
+        if type(row["before"]) is not str or type(row["after"]) is not str:
+            return False
         recognized = action in PROBE_ACTIONS
         if action == "RESET":
             advanced = _raw_initial(case)
@@ -436,7 +462,8 @@ def _independent_probe_trace(case: Case, trace: object) -> bool:
 
 def _raw_core_is_valid(case: Case, proposal: object, core: object) -> bool:
     """Distinct receipt verifier; never regenerate by calling adjudicate."""
-    if type(core) is not dict or type(proposal) is not dict:
+    if (type(core) is not dict or type(proposal) is not dict or
+            not _exact_json(core) or not _exact_json(proposal)):
         return False
     fields = {"schema", "evidence_class", "source_commit", "private_custody",
               "neural_learning_verified", "graduation_eligible", "case_id", "seed",
@@ -494,7 +521,8 @@ def _raw_core_is_valid(case: Case, proposal: object, core: object) -> bool:
 
 def verify_session_receipt(receipt: object) -> bool:
     """Source-public replay without the session emitter or scorer generator."""
-    if type(receipt) is not dict or type(receipt.get("sha256")) is not str:
+    if (type(receipt) is not dict or not _exact_json(receipt) or
+            type(receipt.get("sha256")) is not str):
         return False
     try:
         case = make_case(receipt["seed"])

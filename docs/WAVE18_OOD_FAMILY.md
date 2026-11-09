@@ -116,6 +116,12 @@ rehashing the public checksum after substituting an inaccurate `reason` or
 fabricating a `NOVEL_RULE` counterexample must fail replay. This protects
 source-level semantic consistency only; a party controlling the source and
 case registry can still forge unkeyed receipts.
+Python subclasses of JSON primitives are rejected recursively at the replay
+boundary. In particular, an adversarial `str` subtype cannot serialize a
+false `VERIFIED_WIN` while overriding equality to fool the independent goal
+check, or substitute false probe observation strings. The adversarial subtype
+must be rejected even after both public checksums are recomputed; this is
+still an in-process source-level guard, not a credentialed attestation.
 
 ## Leakage and qualification — explicitly negative
 
