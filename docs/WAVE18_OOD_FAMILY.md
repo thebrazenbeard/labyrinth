@@ -122,6 +122,11 @@ false `VERIFIED_WIN` while overriding equality to fool the independent goal
 check, or substitute false probe observation strings. The adversarial subtype
 must be rejected even after both public checksums are recomputed; this is
 still an in-process source-level guard, not a credentialed attestation.
+An independent closure and a complete source search must also agree on the
+*strength* of the terminal claim: a genuine
+`PROVEN_UNSAT_UNDER_DECLARED_RULES` receipt cannot be relabeled
+`NO_KNOWN_WIN` merely by rehashing it. The conservative verdict remains
+admissible when the actual source search is incomplete or disagrees.
 
 ## Leakage and qualification — explicitly negative
 

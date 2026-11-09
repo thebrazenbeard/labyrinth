@@ -8,6 +8,7 @@ own declared reason/counterexample fields against the finite verdict.
 from copy import deepcopy
 from hashlib import sha256
 import unittest
+from unittest.mock import patch
 
 from labyrinth import novel_router_ood_family as ood
 
@@ -66,6 +67,27 @@ class OodReceiptMathTests(unittest.TestCase):
         forged = deepcopy(honest)
         forged["adjudication"]["reason"] = "EXACT_VERIFIED_WIN"
         self.assertFalse(ood.verify_session_receipt(_rehash(forged)))
+
+    def test_rehashed_proven_unsat_cannot_downgrade_to_no_known_win(self):
+        case = ood.make_case(0)
+        honest = ood.ProbeSession(case).submit({"kind": "CLAIM_UNSAT"})
+        self.assertEqual(honest["verdict"], "PROVEN_UNSAT_UNDER_DECLARED_RULES")
+        self.assertTrue(ood.search(case)["complete"])
+        forged = deepcopy(honest)
+        forged["verdict"] = "NO_KNOWN_WIN"
+        forged["adjudication"]["verdict"] = "NO_KNOWN_WIN"
+        forged["adjudication"]["reason"] = (
+            "INCOMPLETE_OR_DISAGREEING_SOURCE_SEARCH")
+        self.assertFalse(ood.verify_session_receipt(_rehash(forged)))
+
+    def test_genuinely_incomplete_search_can_retain_no_known_win(self):
+        case = ood.make_case(0)
+        incomplete = {"verdict": "NO_KNOWN_WIN", "complete": False,
+                      "nodes_explored": 1, "witness": None}
+        with patch.object(ood, "search", return_value=incomplete):
+            honest = ood.ProbeSession(case).submit({"kind": "CLAIM_UNSAT"})
+            self.assertEqual(honest["verdict"], "NO_KNOWN_WIN")
+            self.assertTrue(ood.verify_session_receipt(honest))
 
     def test_evilstr_false_verified_win_does_not_replay(self):
         case = ood.make_case(0)

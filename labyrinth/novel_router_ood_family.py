@@ -498,11 +498,23 @@ def _raw_core_is_valid(case: Case, proposal: object, core: object) -> bool:
     if kind == "CLAIM_UNSAT" and set(proposal) == {"kind"}:
         witness = _raw_closure_witness(case)
         if witness is None:
-            expected_reason = {
-                "PROVEN_UNSAT_UNDER_DECLARED_RULES": "TWO_FINITE_CLOSURES_AGREE",
-                "NO_KNOWN_WIN": "INCOMPLETE_OR_DISAGREEING_SOURCE_SEARCH",
-            }.get(core["verdict"])
-            return (expected_reason is not None and
+            # A complete, independently corroborated UNSAT closure cannot be
+            # silently downgraded to NO_KNOWN_WIN by rewriting the unkeyed
+            # receipt. Only an actually incomplete/disagreeing source search
+            # justifies that conservative verdict.
+            source = search(case)
+            if (type(source) is not dict or
+                    type(source.get("complete")) is not bool or
+                    type(source.get("verdict")) is not str):
+                return False
+            source_proved = (source["complete"] is True and
+                             source["verdict"] ==
+                             "PROVEN_UNSAT_UNDER_DECLARED_RULES")
+            expected_verdict = ("PROVEN_UNSAT_UNDER_DECLARED_RULES" if source_proved
+                                else "NO_KNOWN_WIN")
+            expected_reason = ("TWO_FINITE_CLOSURES_AGREE" if source_proved
+                               else "INCOMPLETE_OR_DISAGREEING_SOURCE_SEARCH")
+            return (core["verdict"] == expected_verdict and
                     core["reason"] == expected_reason and
                     core["counterexample"] is None)
         return (core["verdict"] == "VERIFIED_FAILURE" and
