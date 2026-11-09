@@ -321,10 +321,10 @@ def evaluate(manifest, policies):
 
 
 def verify_local_record(manifest, record):
-    """Recompute source receipt from frozen case and charged trace.
+    """Recompute source receipt and derivable grading fields from frozen case.
 
-    Checks semantic replay, not that the candidate actually emitted the plan,
-    used the asserted calls/time, or remained isolated from host-private data.
+    This does NOT attest that the candidate emitted the recorded confidence
+    or plan, used the recorded calls/time, or lacked host-private access.
     """
     if type(manifest) is not TrialManifest or type(record) is not TrialRecord:
         return False
@@ -332,10 +332,32 @@ def verify_local_record(manifest, record):
         if (manifest.sha256 != _digest({
                 "schema": SCHEMA, "pairs": manifest.pairs,
                 "policies": manifest.policies, "budget": asdict(manifest.budget)}) or
+                type(record.budget) is not Budget or
                 record.budget != manifest.budget or
+                type(record.pair_index) is not int or
                 not 0 <= record.pair_index < len(manifest.pairs) or
+                type(record.split) is not str or
                 record.split not in ("TRAIN", "HELDOUT") or
+                type(record.policy) is not str or
                 record.policy not in {name for name, _ in manifest.policies} or
+                type(record.probes) is not int or
+                not 0 <= record.probes <= manifest.budget.max_probes or
+                type(record.calls) is not int or
+                not record.probes <= record.calls <= manifest.budget.max_calls or
+                type(record.elapsed_ms) is not int or record.elapsed_ms < 0 or
+                type(record.terminal) is not str or
+                record.terminal not in ("SUBMITTED", "BUDGET_EXHAUSTED",
+                                        "INVALID_DECISION", "POLICY_ERROR") or
+                type(record.proposal_kind) is not str or
+                type(record.solved_by_source) is not bool or
+                type(record.witnessed_by_public_probes) is not bool or
+                type(record.candidate_confidence) not in (float, int) or
+                not math.isfinite(record.candidate_confidence) or
+                not 0 <= record.candidate_confidence <= 1 or
+                any(type(value) not in (float, int) or not math.isfinite(value)
+                    for value in (record.confidence_brier,
+                                  record.abstention_penalty,
+                                  record.false_win_penalty, record.loss)) or
                 type(record.receipt_json) is not str or
                 record.receipt_sha256 != sha256(record.receipt_json.encode()).hexdigest()):
             return False
@@ -356,15 +378,46 @@ def verify_local_record(manifest, record):
             return False
         private_seed = manifest.pairs[record.pair_index][
             0 if record.split == "TRAIN" else 1]
-        session = novel.ProbeSession(novel.make_case(private_seed))
+        case = novel.make_case(private_seed)
+        session = novel.ProbeSession(case)
         for action in actions:
             if type(action) is not str:
                 return False
             session.probe(action)
-        expected = session.submit(deepcopy(source["adjudication"]["proposal"]))
+        proposal = source["adjudication"]["proposal"]
+        expected_witness = bool(
+            proposal["kind"] == "PLAN" and
+            type(proposal["actions"]) is list and
+            proposal["actions"][-1:] == ["COMMIT"] and
+            proposal["actions"][:-1] == actions and
+            _witness(session.view(), actions))
+        expected = session.submit(deepcopy(proposal))
+        closure = novel.search(case)
+        if (not closure["complete"] or
+                closure["verdict"] not in ("VERIFIED_WIN",
+                                           "PROVEN_UNSAT_UNDER_DECLARED_RULES")):
+            return False
+        solvable = closure["verdict"] == "VERIFIED_WIN"
+        if (record.terminal != "SUBMITTED" and
+                (proposal["kind"] != "ABSTAIN" or
+                 record.candidate_confidence != .5)):
+            return False
+        brier = round((record.candidate_confidence - float(solvable)) ** 2, 8)
+        abstention = .4 if proposal["kind"] == "ABSTAIN" else 0.
+        false_win = (1. if proposal["kind"] == "PLAN" and
+                     expected["verdict"] != "VERIFIED_WIN" else 0.)
+        false_unsat = 1. if proposal["kind"] == "CLAIM_UNSAT" and solvable else 0.
+        penalty = round(false_win + false_unsat, 8)
         return (_json(expected) == record.receipt_json and
                 source["verdict"] == record.source_verdict and
-                source["adjudication"]["seed"] == private_seed)
+                source["adjudication"]["seed"] == private_seed and
+                record.proposal_kind == proposal["kind"] and
+                record.solved_by_source is solvable and
+                record.witnessed_by_public_probes is expected_witness and
+                record.confidence_brier == brier and
+                record.abstention_penalty == abstention and
+                record.false_win_penalty == penalty and
+                record.loss == round(brier + abstention + penalty, 8))
     except (ValueError, TypeError, KeyError, IndexError, AttributeError,
-            RecursionError, OverflowError):
+            RecursionError, OverflowError, RuntimeError):
         return False
