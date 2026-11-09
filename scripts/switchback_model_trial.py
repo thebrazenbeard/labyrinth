@@ -718,12 +718,21 @@ def _public_summary(report: dict[str, object], *, private_report_saved: bool = F
     }
 
 
+def _private_file_platform_qualified() -> bool:
+    """POSIX file-mode API is necessary here; Windows ACLs are unqualified."""
+    return os.name == "posix" and callable(getattr(os, "fchmod", None))
+
+
 def _write_private_report_exclusive(report: dict[str, object], path: str) -> None:
     """Finish a mode-0600 host-private report before atomic exclusive publish.
 
     An existing final filename (including a symlink) is never replaced. This
     does not isolate another process running under the same OS account.
     """
+    # Check BEFORE even constructing a path or staging private bytes. Windows
+    # fchmod (Python >=3.13) does not attest POSIX-style owner-only ACLs.
+    if not _private_file_platform_qualified():
+        raise OSError("private file publication requires qualified POSIX mode controls")
     if type(path) is not str or not Path(path).is_absolute():
         raise ValueError("private report target must be an absolute path")
     destination = Path(path)
