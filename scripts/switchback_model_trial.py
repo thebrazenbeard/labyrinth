@@ -777,8 +777,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--authorize-command", action="store_true")
     parser.add_argument("--command", nargs=argparse.REMAINDER, default=[])
     args = parser.parse_args(argv)
-    if args.private_report_file is not None and not Path(
-            args.private_report_file).is_absolute():
+    # On an unqualified OS, the exporter itself will fail closed. Do not
+    # construct a native Path first: platform qualification takes precedence
+    # over interpreting an unsupported private-file destination.
+    if (args.private_report_file is not None and
+            _private_file_platform_qualified() and not Path(
+            args.private_report_file).is_absolute()):
         parser.error("--private-report-file requires an absolute path")
     config = TrialConfig(args.seed, args.generation_seed, args.mode,
                          args.max_calls, args.timeout, args.total_timeout,
