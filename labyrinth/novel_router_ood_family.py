@@ -460,25 +460,36 @@ def _raw_core_is_valid(case: Case, proposal: object, core: object) -> bool:
             core["graduation_eligible"] is not False or
             type(core["seed"]) is not int or core["seed"] != case.seed or
             core["case_id"] != case.case_id or
+            type(core["reason"]) is not str or
             core["verified_success"] is not (core["verdict"] == "VERIFIED_WIN")):
         return False
     kind = proposal.get("kind")
     if kind == "PLAN" and set(proposal) == {"kind", "actions"}:
         return (core["verdict"] == _raw_plan_verdict(case, proposal["actions"]) and
-                core["counterexample"] is None)
+                core["counterexample"] is None and
+                core["reason"] == "TWO_PLAN_CHECKS_AGREE")
     if kind == "CLAIM_UNSAT" and set(proposal) == {"kind"}:
         witness = _raw_closure_witness(case)
         if witness is None:
-            return (core["verdict"] in (
-                "PROVEN_UNSAT_UNDER_DECLARED_RULES", "NO_KNOWN_WIN") and
-                core["counterexample"] is None)
+            expected_reason = {
+                "PROVEN_UNSAT_UNDER_DECLARED_RULES": "TWO_FINITE_CLOSURES_AGREE",
+                "NO_KNOWN_WIN": "INCOMPLETE_OR_DISAGREEING_SOURCE_SEARCH",
+            }.get(core["verdict"])
+            return (expected_reason is not None and
+                    core["reason"] == expected_reason and
+                    core["counterexample"] is None)
         return (core["verdict"] == "VERIFIED_FAILURE" and
+                core["reason"] == "INDEPENDENT_WIN_COUNTEREXAMPLE" and
                 _raw_plan_verdict(case, core["counterexample"]) == "VERIFIED_WIN")
     if kind == "NOVEL_RULE" and set(proposal) == {"kind", "description"} and (
             type(proposal["description"]) is str and
             0 < len(proposal["description"]) <= 2000):
-        return core["verdict"] == "NOVEL_RULESET_CHALLENGE"
-    return core["verdict"] == "UNKNOWN" and core["counterexample"] is None
+        return (core["verdict"] == "NOVEL_RULESET_CHALLENGE" and
+                core["reason"] == "UNVERIFIED_EXTERNAL_RULE" and
+                core["counterexample"] is None)
+    return (core["verdict"] == "UNKNOWN" and
+            core["reason"] == "INVALID_PROPOSAL" and
+            core["counterexample"] is None)
 
 
 def verify_session_receipt(receipt: object) -> bool:

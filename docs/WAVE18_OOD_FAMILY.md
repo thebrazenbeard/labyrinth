@@ -111,6 +111,12 @@ corrupted. Probe exceptions and malformed states are charged and sealed
 instead of escaping into free retries. These are source-level single-fault
 controls, not an independent host signer or secure process sandbox.
 
+The receipt checker also validates the explanation and counterexample fields:
+rehashing the public checksum after substituting an inaccurate `reason` or
+fabricating a `NOVEL_RULE` counterexample must fail replay. This protects
+source-level semantic consistency only; a party controlling the source and
+case registry can still forge unkeyed receipts.
+
 ## Leakage and qualification — explicitly negative
 
 The proposed seed block `100–199` is **not a private heldout inventory**.
