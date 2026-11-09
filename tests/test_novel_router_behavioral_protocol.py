@@ -13,6 +13,7 @@ from labyrinth.novel_router_behavioral_protocol import (
     fixed_witness,
     precommit,
     verify_local_record,
+    verify_local_report,
 )
 
 _POLICY_BLOCKED = []
@@ -189,6 +190,16 @@ class BehavioralProtocolTests(unittest.TestCase):
         def always_abstain(port):
             return CandidateChoice("ABSTAIN", (), .5)
 
+        class ChameleonVerdict(str):
+            def __eq__(self, other):
+                return True
+
+            __hash__ = str.__hash__
+
+        class ChameleonHash(str):
+            def __ne__(self, other):
+                return False
+
         manifest = precommit(((0, 100),), (always_abstain,))
         record = evaluate(manifest, (always_abstain,)).trials[0]
         self.assertTrue(verify_local_record(manifest, record))
@@ -209,6 +220,8 @@ class BehavioralProtocolTests(unittest.TestCase):
             "probes": True,
             "elapsed_ms": -1,
             "pair_index": True,
+            "source_verdict": ChameleonVerdict("VERIFIED_WIN"),
+            "receipt_sha256": ChameleonHash("deadbeef"),
         }
         for field, value in mutations.items():
             with self.subTest(field=field):
@@ -232,6 +245,43 @@ class BehavioralProtocolTests(unittest.TestCase):
             manifest, dataclasses.replace(one_probe, probes=True)))
         self.assertFalse(verify_local_record(
             manifest, dataclasses.replace(second_pair, pair_index=True)))
+
+    def test_record_replay_rejects_impossible_budget_terminal_and_time(self):
+        def always_abstain(port):
+            return CandidateChoice("ABSTAIN", (), .5)
+
+        manifest = precommit(((0, 100),), (always_abstain,))
+        record = evaluate(manifest, (always_abstain,)).trials[0]
+        self.assertEqual((record.probes, record.calls), (0, 0))
+        self.assertTrue(verify_local_record(manifest, record))
+        self.assertFalse(verify_local_record(
+            manifest, dataclasses.replace(record, terminal="BUDGET_EXHAUSTED")))
+        self.assertFalse(verify_local_record(
+            manifest, dataclasses.replace(
+                record, elapsed_ms=int(manifest.budget.max_seconds * 1000) + 1000)))
+
+    def test_complete_report_binds_rows_to_precommitted_policy_order(self):
+        def always_abstain(port):
+            return CandidateChoice("ABSTAIN", (), .5)
+
+        manifest = precommit(((0, 100),), (feedback_witness, always_abstain),
+                             Budget(max_seconds=3))
+        report = evaluate(manifest, (feedback_witness, always_abstain))
+        self.assertTrue(verify_local_report(manifest, report))
+        self.assertEqual(report.trials[0].policy, manifest.policies[0][0])
+        self.assertEqual(report.trials[1].policy, manifest.policies[1][0])
+        forged = dataclasses.replace(
+            report.trials[0], policy=report.trials[1].policy)
+        self.assertTrue(verify_local_record(manifest, forged))  # Unattested local identity.
+        self.assertFalse(verify_local_report(
+            manifest, dataclasses.replace(
+                report, trials=(forged, *report.trials[1:]))))
+        altered_totals = dict(report.totals)
+        altered_totals["verified_wins"] += 1
+        from types import MappingProxyType
+        self.assertFalse(verify_local_report(
+            manifest, dataclasses.replace(
+                report, totals=MappingProxyType(altered_totals))))
 
     def test_post_hoc_time_violation_is_fail_closed_but_not_preemptive(self):
         manifest = precommit(((0, 100),), (_slow_hostile,),
