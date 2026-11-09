@@ -186,9 +186,28 @@ class CandidateSession:
         self._terminal = False
 
     def start(self) -> dict[str, object]:
-        if self._attempts:
+        if self._attempts or self._terminal:
             raise ValueError("start may only be called before the first action")
-        return public_view(self._exam)
+        try:
+            view = public_view(self._exam)
+            expected_keys = {"prompt", "legal_action_vocabulary", "maximum_actions",
+                             "initial_observation"}
+            if (type(view) is not dict
+                    or any(type(key) is not str for key in view)
+                    or set(view) != expected_keys
+                    or type(view["prompt"]) is not str or not view["prompt"].strip()
+                    or type(view["initial_observation"]) is not str
+                    or not view["initial_observation"].strip()
+                    or type(view["legal_action_vocabulary"]) is not list
+                    or any(type(action) is not str for action in view["legal_action_vocabulary"])
+                    or view["legal_action_vocabulary"] != list(ACTIONS)
+                    or type(view["maximum_actions"]) is not int
+                    or view["maximum_actions"] != MAX_ACTIONS):
+                raise TypeError("malformed candidate public view")
+            return {**view, "legal_action_vocabulary": list(view["legal_action_vocabulary"])}
+        except Exception as exc:
+            self._terminal = True
+            raise RuntimeError("public view failed; abort evaluation") from exc
 
     def act(self, action: object) -> dict[str, object]:
         from .constant_exam_verifier import TraceResult, verify_trace  # Evaluator only.
@@ -229,6 +248,8 @@ class CandidateSession:
         self._terminal = won or self._attempts >= MAX_ACTIONS
         try:
             observation = observe(self._exam, self._state)
+            if type(observation) is not str or not observation.strip():
+                raise TypeError("malformed candidate observation")
         except Exception as exc:
             self._terminal = True
             raise RuntimeError("observation failed; abort evaluation") from exc

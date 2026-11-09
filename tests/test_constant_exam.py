@@ -218,6 +218,23 @@ class ConstantExamTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             failed_observation.act("north")
 
+        malformed_observation = CandidateSession(self.open_case)
+        with patch.object(exam_module, "observe", return_value={"private": "not text"}):
+            with self.assertRaisesRegex(RuntimeError, "abort evaluation"):
+                malformed_observation.act("north")
+        with self.assertRaises(ValueError):
+            malformed_observation.act("north")
+
+    def test_session_quarantines_malformed_initial_public_view(self):
+        session = CandidateSession(self.open_case)
+        with patch.object(exam_module, "observe", return_value={"private": "not text"}):
+            with self.assertRaisesRegex(RuntimeError, "abort evaluation"):
+                session.start()
+        with self.assertRaises(ValueError):
+            session.start()
+        with self.assertRaises(ValueError):
+            session.act("north")
+
     def test_session_rejects_noncanonical_hidden_boolean_state(self):
         session = CandidateSession(self.open_case)
         session.act("north")
