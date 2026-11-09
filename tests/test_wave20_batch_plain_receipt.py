@@ -7,6 +7,7 @@ arbitrary Python subclasses must not get to redefine verdict comparisons.
 from copy import deepcopy
 import tracemalloc
 import unittest
+from unittest import mock
 
 from scripts import novel_router_batch_trial as batch
 from scripts import novel_router_model_trial as single
@@ -71,6 +72,15 @@ class Wave20PlainReceiptTests(unittest.TestCase):
         finally:
             tracemalloc.stop()
         self.assertLess(peak, 5 * 1024 * 1024)
+
+    def test_exact_node_cap_does_not_charge_exit_sentinels(self):
+        # A graph with five ordinary nodes must fit a five-node budget;
+        # internal traversal bookkeeping must not alter the contract.
+        with mock.patch.object(batch, "MAX_RECEIPT_NODES", 5):
+            self.assertTrue(batch._plain_receipt_tree({
+                "cases": [None, None, None]}))
+            self.assertFalse(batch._plain_receipt_tree({
+                "cases": [None, None, None, None]}))
 
 
 if __name__ == "__main__":
