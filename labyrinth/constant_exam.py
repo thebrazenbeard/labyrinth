@@ -58,7 +58,8 @@ def make_exam(seed: int, *, split: str = "dev", variant: int = 0,
               kind: str = "apparently_sealed") -> Exam:
     if type(seed) is not int or type(variant) is not int or variant < 0:
         raise ValueError("seed must be an integer and variant a nonnegative integer")
-    if kind not in _KINDS or split not in ("train", "dev", "test"):
+    if (type(kind) is not str or type(split) is not str
+            or kind not in _KINDS or split not in ("train", "dev", "test")):
         raise ValueError("unsupported kind or split")
     tag = f"labyrinth-constant-exam-v1\x00{seed}\x00{split}\x00{kind}".encode()
     return Exam(sha256(tag).hexdigest()[:20], seed, split, variant, kind)
@@ -176,6 +177,8 @@ class CandidateSession:
     """
 
     def __init__(self, exam: Exam):
+        if type(exam) is not Exam or type(exam.kind) is not str or exam.kind not in _KINDS:
+            raise ValueError("unsupported evaluator exam")
         self._exam = exam
         self._state = State()
         self._trace: list[str] = []
@@ -183,12 +186,31 @@ class CandidateSession:
         self._terminal = False
 
     def start(self) -> dict[str, object]:
-        if self._attempts:
+        if self._attempts or self._terminal:
             raise ValueError("start may only be called before the first action")
-        return public_view(self._exam)
+        try:
+            view = public_view(self._exam)
+            expected_keys = {"prompt", "legal_action_vocabulary", "maximum_actions",
+                             "initial_observation"}
+            if (type(view) is not dict
+                    or any(type(key) is not str for key in view)
+                    or set(view) != expected_keys
+                    or type(view["prompt"]) is not str or not view["prompt"].strip()
+                    or type(view["initial_observation"]) is not str
+                    or not view["initial_observation"].strip()
+                    or type(view["legal_action_vocabulary"]) is not list
+                    or any(type(action) is not str for action in view["legal_action_vocabulary"])
+                    or view["legal_action_vocabulary"] != list(ACTIONS)
+                    or type(view["maximum_actions"]) is not int
+                    or view["maximum_actions"] != MAX_ACTIONS):
+                raise TypeError("malformed candidate public view")
+            return {**view, "legal_action_vocabulary": list(view["legal_action_vocabulary"])}
+        except Exception as exc:
+            self._terminal = True
+            raise RuntimeError("public view failed; abort evaluation") from exc
 
     def act(self, action: object) -> dict[str, object]:
-        from .constant_exam_verifier import verify_trace  # Import from evaluator only.
+        from .constant_exam_verifier import TraceResult, verify_trace  # Evaluator only.
 
         if self._terminal:
             raise ValueError("attempt already ended")
@@ -197,17 +219,42 @@ class CandidateSession:
         previous = self._state
         if valid:
             self._trace.append(action)
-            self._state = step(self._exam, previous, action)
-            verified = verify_trace(kind=self._exam.kind, actions=tuple(self._trace))
-            if (verified.outcome == "INVALID_TRACE"
+            try:
+                self._state = step(self._exam, previous, action)
+                verified = verify_trace(kind=self._exam.kind, actions=tuple(self._trace))
+                disagreement = (
+                    type(self._state) is not State
+                    or type(self._state.place) is not str
+                    or type(self._state.coin) is not bool
+                    or type(self._state.open_gate) is not bool
+                    or type(verified) is not TraceResult
+                    or type(verified.outcome) is not str
+                    or type(verified.final_room) is not str
+                    or type(verified.final_token) is not bool
+                    or type(verified.final_gate) is not bool
                     or verified.final_room != self._state.place
-                    or (verified.outcome == "VERIFIED_WIN") != (self._state.place == "freedom")):
+                    or verified.final_token != self._state.coin
+                    or verified.final_gate != self._state.open_gate
+                    or verified.outcome != ("VERIFIED_WIN" if self._state.place == "freedom"
+                                            else "NOT_WON")
+                )
+            except Exception as exc:
+                self._terminal = True
+                raise RuntimeError("game/verifier failed; abort evaluation") from exc
+            if disagreement:
                 self._terminal = True
                 raise RuntimeError("game/verifier disagree; abort evaluation")
         won = self._state.place == "freedom"
         self._terminal = won or self._attempts >= MAX_ACTIONS
+        try:
+            observation = observe(self._exam, self._state)
+            if type(observation) is not str or not observation.strip():
+                raise TypeError("malformed candidate observation")
+        except Exception as exc:
+            self._terminal = True
+            raise RuntimeError("observation failed; abort evaluation") from exc
         return {
-            "observation": observe(self._exam, self._state),
+            "observation": observation,
             "actions_remaining": MAX_ACTIONS - self._attempts,
             "status": ("INVALID_ACTION" if not valid else "VERIFIED_WIN" if won
                        else "UNSOLVED" if self._terminal else "IN_PROGRESS"),
