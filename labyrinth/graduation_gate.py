@@ -160,7 +160,11 @@ class GraduationPolicy:
             raise ValueError("a graduation objective requires at least 90% valid output format")
         if self.min_gain_over_controls < 0.10:
             raise ValueError("training-effect objectives require a nontrivial declared gain")
-        if self.objective_kind not in ("training_effect", "skill_mastery"):
+        # Rich comparisons on str subclasses can disagree with their JSON
+        # serialization, switching admission objectives without changing the
+        # pinned policy fingerprint. Require an exact primitive here.
+        if (type(self.objective_kind) is not str
+                or self.objective_kind not in ("training_effect", "skill_mastery")):
             raise ValueError("objective_kind must distinguish mastery from training effect")
         if self.objective_kind == "skill_mastery" and self.min_accuracy == 1:
             raise ValueError("finite samples cannot establish perfect population mastery")

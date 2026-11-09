@@ -38,6 +38,18 @@ def _bound_relabel(receipt, relabels, *, max_attempts=None):
 
 
 class SemanticFamilyGateTests(unittest.TestCase):
+    def test_deceptive_string_subclass_cannot_switch_graduation_objective(self):
+        """Do not let Python rich comparisons bypass signed policy semantics."""
+
+        class ChameleonObjective(str):
+            def __eq__(self, other):
+                return other in ("training_effect", "skill_mastery")
+
+        ordinary = decision(evaluated_receipt(controls_correct=True), policy=POLICY)
+        self.assertEqual(ordinary.disposition, "STAY")
+        with self.assertRaises(ValueError):
+            replace(POLICY, objective_kind=ChameleonObjective("training_effect"))
+
     def test_invalid_attempt_type_fails_cleanly_before_registry_comparison(self):
         for bad in ("3", True, None):
             with self.subTest(value=bad), self.assertRaises(ValueError):
