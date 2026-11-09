@@ -288,12 +288,18 @@ def decide_graduation(
     if type(policy) is not GraduationPolicy or type(state) is not GateState:
         raise TypeError("expected GraduationPolicy and trusted GateState")
     # Frozen dataclasses are not hostile-code isolation: object.__setattr__
-    # and another thread can change fields after __post_init__. Privately
-    # snapshot the nested registry and state, then validate and use the same
-    # snapshots for fingerprinting and all subsequent admission decisions.
-    policy = deepcopy(policy)
-    state = deepcopy(state)
-    GraduationPolicy.__post_init__(policy)
+    # and another thread can change fields after __post_init__. Check before
+    # invoking copy callbacks; snapshot nested fields; then recheck and use
+    # only those private snapshots throughout the admission decision.
+    try:
+        GraduationPolicy.__post_init__(policy)
+        policy = deepcopy(policy)
+        state = deepcopy(state)
+        GraduationPolicy.__post_init__(policy)
+    except Exception as exc:
+        # Even a hostile __deepcopy__ callback cannot crash the admission
+        # routine or turn a malformed trusted input into a passing policy.
+        raise ValueError("invalid trusted policy or state snapshot") from exc
     if (type(state.next_attempt) is not int or state.next_attempt < 1
             or type(state.consumed_run_ids) is not frozenset
             or any(type(r) is not str or not _ID.fullmatch(r) for r in state.consumed_run_ids)
