@@ -25,6 +25,7 @@ cannot satisfy this gate.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 import hashlib
 import hmac
@@ -286,6 +287,13 @@ def decide_graduation(
     # Trusted state likewise must not carry programmable field behavior.
     if type(policy) is not GraduationPolicy or type(state) is not GateState:
         raise TypeError("expected GraduationPolicy and trusted GateState")
+    # Frozen dataclasses are not hostile-code isolation: object.__setattr__
+    # and another thread can change fields after __post_init__. Privately
+    # snapshot the nested registry and state, then validate and use the same
+    # snapshots for fingerprinting and all subsequent admission decisions.
+    policy = deepcopy(policy)
+    state = deepcopy(state)
+    GraduationPolicy.__post_init__(policy)
     if (type(state.next_attempt) is not int or state.next_attempt < 1
             or type(state.consumed_run_ids) is not frozenset
             or any(type(r) is not str or not _ID.fullmatch(r) for r in state.consumed_run_ids)
