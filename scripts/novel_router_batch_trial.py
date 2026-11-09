@@ -61,6 +61,45 @@ def _exact_number(actual: object, expected: int | float) -> bool:
     return type(actual) is type(expected) and actual == expected
 
 
+def _plain_receipt_tree(root: object) -> bool:
+    """Reject live Python callbacks before digesting or comparing a receipt.
+
+    In-memory source reports use tuples that JSON serializes as arrays. Other
+    container/scalar subclasses can redefine equality, and a rehashed lying
+    string has previously made the verifier accept the wrong schema. This is
+    a Python API trust boundary, not independent provenance authentication.
+    """
+    pending = [(root, 0, False)]
+    active: set[int] = set()
+    inspected = 0
+    while pending:
+        value, depth, leaving = pending.pop()
+        if leaving:
+            active.remove(id(value))
+            continue
+        inspected += 1
+        if inspected > 250_000 or depth > 96:
+            return False
+        kind = type(value)
+        if value is None or kind in (str, int, float, bool):
+            continue
+        if kind not in (dict, list, tuple):
+            return False
+        identity = id(value)
+        if identity in active:
+            return False
+        active.add(identity)
+        pending.append((value, depth, True))
+        if kind is dict:
+            for key, child in value.items():
+                if type(key) is not str:
+                    return False
+                pending.append((child, depth + 1, False))
+        else:
+            pending.extend((child, depth + 1, False) for child in value)
+    return True
+
+
 @dataclass(frozen=True)
 class BatchConfig:
     case_seeds: tuple[int, ...]
@@ -355,7 +394,8 @@ def run_batch(config: BatchConfig, spec: single.AdapterSpec) -> dict[str, object
 
 
 def verify_batch_receipt(report: object) -> bool:
-    if (type(report) is not dict or report.get("schema") != SCHEMA or
+    if (not _plain_receipt_tree(report) or type(report) is not dict or
+            report.get("schema") != SCHEMA or
             set(report) != REPORT_KEYS or
             type(report.get("manifest")) is not dict or
             type(report.get("cases")) is not list or
