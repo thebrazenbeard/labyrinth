@@ -313,6 +313,57 @@ class CausalLatchOODIndependentTests(unittest.TestCase):
             self.assertEqual(session.submit({"kind": "CLAIM_UNSAT"})["reason"],
                              "INDEPENDENT_TRANSITION_DISAGREEMENT")
 
+    def test_submission_cannot_promote_source_scorer_fake_success(self):
+        case = dut.make_case(2)
+        proposal = {"kind": "PLAN", "actions": ["COMMIT"]}
+        self.assertEqual(dut.adjudicate(case, proposal)["verdict"],
+                         "VERIFIED_FAILURE")
+        forged = dict(dut.adjudicate(case, proposal))
+        forged["verdict"] = "VERIFIED_WIN"
+        forged["verified_success"] = True
+        forged["reason"] = "INJECTED_SHARED_SCORER_WIN"
+        unsigned = {key: value for key, value in forged.items() if key != "sha256"}
+        forged["sha256"] = sha256(dut._canonical(unsigned).encode()).hexdigest()
+        session = dut.ProbeSession(case)
+        with patch.object(dut, "adjudicate", return_value=forged):
+            receipt = session.submit(proposal)
+        self.assertFalse(receipt["verified_success"])
+        self.assertNotEqual(receipt["verdict"], "VERIFIED_WIN")
+        self.assertTrue(session.view()["finished"])
+
+    def test_reset_cannot_silently_import_corrupt_constructor_state(self):
+        case = dut.make_case(2)
+        session = dut.ProbeSession(case)
+        malformed = dut.State(case.initial_bits ^ 1)
+        with patch.object(dut, "initial_state", return_value=malformed):
+            view = session.probe("RESET")
+        self.assertTrue(view["finished"])
+        self.assertEqual(view["current_bits"], f"{case.initial_bits:05b}")
+        result = session.submit({"kind": "PLAN", "actions": ["COMMIT"]})
+        self.assertFalse(result["verified_success"])
+        self.assertIn("INDEPENDENT", result["reason"])
+
+    def test_probe_and_submit_faults_remain_charged_terminal_events(self):
+        case = dut.make_case(2)
+        for fault in (RuntimeError("source probe crashed"), object()):
+            session = dut.ProbeSession(case)
+            with patch.object(dut, "step", side_effect=fault if isinstance(
+                    fault, Exception) else None, return_value=fault):
+                view = session.probe("TOGGLE_0")
+            self.assertTrue(view["finished"])
+            self.assertEqual(len(view["observations"]), 1)
+            self.assertEqual(session.submit({"kind": "CLAIM_UNSAT"})["reason"],
+                             "INDEPENDENT_TRANSITION_DISAGREEMENT")
+
+        submission = dut.ProbeSession(case)
+        with patch.object(dut, "adjudicate", side_effect=RuntimeError("scorer crash")):
+            failed = submission.submit({"kind": "CLAIM_UNSAT"})
+        self.assertTrue(submission.view()["finished"])
+        self.assertFalse(failed["verified_success"])
+        self.assertEqual(failed["reason"], "BLOCKED_SUBMISSION_EVALUATOR")
+        self.assertEqual(submission.submit({"kind": "PLAN", "actions": ["COMMIT"]}),
+                         failed)
+
 
 if __name__ == "__main__":
     unittest.main()

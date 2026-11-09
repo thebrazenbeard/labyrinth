@@ -75,7 +75,8 @@ python -m labyrinth.novel_router_ood_family --seed 0 --claim-unsat
 
 | Evidence | Measured result |
 |---|---:|
-| Focused tests normal / optimized | **10/10 PASS / 10/10 PASS** |
+| Focused tests normal / optimized | **13/13 PASS / 13/13 PASS** |
+| Full applicable repository suite normal / optimized | **314/314 PASS, 42 optional SKIP** in each mode |
 | Generated source cases independently adjudicated | **200** |
 | Finite wins | **119** |
 | Finite UNSAT under declared rules | **81** |
@@ -87,6 +88,9 @@ python -m labyrinth.novel_router_ood_family --seed 0 --claim-unsat
 | Source scorer false-WIN mutation | **Blocked** by independent raw-state check |
 | Shared State constructor genesis mutation | **Blocked** by primitive genesis |
 | Corrupted source step falsely proving UNSAT | **Blocked** by independent closure |
+| Forged/rehashed adjudicator WIN promoted by session | **Blocked** by independent core semantics |
+| Post-init RESET installing corrupted genesis | **Blocked**, terminal with canonical public state |
+| Crashing/malformed probe or submission | **Charged terminal quarantine**, no free retries |
 
 An independently implemented Boolean threshold reference on primitive
 tuples performs backward dynamic programming over all legal remaining
@@ -97,6 +101,15 @@ Capped search returns `NO_KNOWN_WIN`. The adjudicator cross-checks any
 PLAN outcome against a second raw-state replay and any UNSAT claim against
 independent finite DFS, retaining valid alternative solutions. The public
 probe path also checks source transition parity before reporting effects.
+The session independently replays each charged public probe record, checks
+exact case/proposal/custody metadata and checksums, and verifies the core
+verdict against primitive physics **without calling the mutable `adjudicate`
+emitter**. A single-function scorer mutation no longer self-certifies a false
+win through `ProbeSession.submit`. Post-init RESET checks independent genesis
+and returns terminal, canonical public feedback when its constructor is
+corrupted. Probe exceptions and malformed states are charged and sealed
+instead of escaping into free retries. These are source-level single-fault
+controls, not an independent host signer or secure process sandbox.
 
 ## Leakage and qualification — explicitly negative
 

@@ -148,6 +148,16 @@ def _raw_initial(case: Case) -> tuple[int, int, int, int, bool]:
     return (case.initial_bits, 0, 0, 0, False)
 
 
+def _trusted_state_from_raw(raw: tuple) -> State:
+    """Quarantine state without invoking a potentially modified constructor."""
+    fresh = object.__new__(State)
+    for field, value in zip(("bits", "sealed", "ticks", "seals_used",
+                             "post_seal_pulse", "committed", "won"),
+                            (*raw, False, False)):
+        object.__setattr__(fresh, field, value)
+    return fresh
+
+
 def _raw_next(case: Case, state: tuple, action: str) -> tuple | None:
     """Separate reference physics: no step/synchronous_pulse/State helpers."""
     bits, sealed, time, used_seals, after_seals = state
@@ -393,6 +403,120 @@ def adjudicate(case: Case, proposal: object) -> dict[str, object]:
     return output
 
 
+def _independent_probe_trace(case: Case, trace: object) -> bool:
+    """Replay every charged public observation without the source step."""
+    if type(trace) is not list or len(trace) > MAX_PROBES:
+        return False
+    state = _raw_initial(case)
+    for row in trace:
+        if type(row) is not dict or set(row) != {
+                "action", "valid", "applied", "before", "after"}:
+            return False
+        action = row["action"]
+        if type(action) is not str or len(action) > 32:
+            return False
+        recognized = action in PROBE_ACTIONS
+        if action == "RESET":
+            advanced = _raw_initial(case)
+        elif recognized:
+            advanced = _raw_next(case, state, action)
+        else:
+            advanced = None
+        applied = advanced is not None
+        if (row["valid"] is not recognized or
+                row["applied"] is not applied or
+                row["before"] != f"{state[0]:05b}"):
+            return False
+        if applied:
+            state = advanced
+        if row["after"] != f"{state[0]:05b}":
+            return False
+    return True
+
+
+def _raw_core_is_valid(case: Case, proposal: object, core: object) -> bool:
+    """Distinct receipt verifier; never regenerate by calling adjudicate."""
+    if type(core) is not dict or type(proposal) is not dict:
+        return False
+    fields = {"schema", "evidence_class", "source_commit", "private_custody",
+              "neural_learning_verified", "graduation_eligible", "case_id", "seed",
+              "verdict", "verified_success", "reason", "counterexample",
+              "proposal", "sha256"}
+    if set(core) != fields or type(core["sha256"]) is not str:
+        return False
+    try:
+        unsigned = {key: value for key, value in core.items() if key != "sha256"}
+        if sha256(_canonical(unsigned).encode()).hexdigest() != core["sha256"]:
+            return False
+        if _canonical(core["proposal"]) != _canonical(proposal):
+            return False
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if (core["schema"] != "labyrinth.causal-latch-ood-receipt.v1" or
+            core["evidence_class"] != "SOURCE_PUBLIC_SYNTHETIC" or
+            core["source_commit"] != "UNBOUND" or
+            core["private_custody"] is not False or
+            core["neural_learning_verified"] is not False or
+            core["graduation_eligible"] is not False or
+            type(core["seed"]) is not int or core["seed"] != case.seed or
+            core["case_id"] != case.case_id or
+            core["verified_success"] is not (core["verdict"] == "VERIFIED_WIN")):
+        return False
+    kind = proposal.get("kind")
+    if kind == "PLAN" and set(proposal) == {"kind", "actions"}:
+        return (core["verdict"] == _raw_plan_verdict(case, proposal["actions"]) and
+                core["counterexample"] is None)
+    if kind == "CLAIM_UNSAT" and set(proposal) == {"kind"}:
+        witness = _raw_closure_witness(case)
+        if witness is None:
+            return (core["verdict"] in (
+                "PROVEN_UNSAT_UNDER_DECLARED_RULES", "NO_KNOWN_WIN") and
+                core["counterexample"] is None)
+        return (core["verdict"] == "VERIFIED_FAILURE" and
+                _raw_plan_verdict(case, core["counterexample"]) == "VERIFIED_WIN")
+    if kind == "NOVEL_RULE" and set(proposal) == {"kind", "description"} and (
+            type(proposal["description"]) is str and
+            0 < len(proposal["description"]) <= 2000):
+        return core["verdict"] == "NOVEL_RULESET_CHALLENGE"
+    return core["verdict"] == "UNKNOWN" and core["counterexample"] is None
+
+
+def verify_session_receipt(receipt: object) -> bool:
+    """Source-public replay without the session emitter or scorer generator."""
+    if type(receipt) is not dict or type(receipt.get("sha256")) is not str:
+        return False
+    try:
+        case = make_case(receipt["seed"])
+        expected_keys = {"schema", "evidence_class", "private_custody",
+                         "neural_learning_verified", "graduation_eligible", "case_id",
+                         "seed", "probe_count", "probe_trace", "probe_sha256",
+                         "verdict", "verified_success", "adjudication", "sha256"}
+        if set(receipt) != expected_keys:
+            return False
+        unsigned = {key: value for key, value in receipt.items() if key != "sha256"}
+        if sha256(_canonical(unsigned).encode()).hexdigest() != receipt["sha256"]:
+            return False
+        trace = receipt["probe_trace"]
+        core = receipt["adjudication"]
+        return (receipt["schema"] == "labyrinth.causal-latch-ood-session.v1" and
+                receipt["evidence_class"] == "SOURCE_PUBLIC_SYNTHETIC" and
+                receipt["private_custody"] is False and
+                receipt["neural_learning_verified"] is False and
+                receipt["graduation_eligible"] is False and
+                receipt["case_id"] == case.case_id and
+                type(receipt["seed"]) is int and receipt["seed"] == case.seed and
+                type(receipt["probe_count"]) is int and
+                receipt["probe_count"] == len(trace) and
+                receipt["probe_sha256"] == sha256(
+                    _canonical({"trace": trace}).encode()).hexdigest() and
+                _independent_probe_trace(case, trace) and
+                _raw_core_is_valid(case, core["proposal"], core) and
+                receipt["verdict"] == core["verdict"] and
+                receipt["verified_success"] is core["verified_success"])
+    except (KeyError, ValueError, TypeError, OverflowError, RecursionError):
+        return False
+
+
 class ProbeSession:
     """Educational charged public observations, NOT a private host sandbox."""
 
@@ -420,6 +544,16 @@ class ProbeSession:
                      "finished": self._finished})
         return view
 
+    def _terminal_probe_fault(self, action: str, before: str,
+                              reason: str) -> dict[str, object]:
+        self._history.append({"action": action, "valid": True,
+                              "applied": False, "before": before,
+                              "after": None})
+        self._finished = True
+        self._result = {"verdict": "UNKNOWN", "reason": reason,
+                        "verified_success": False}
+        return self.view()
+
     def probe(self, action: object) -> dict[str, object]:
         if self._finished:
             return self.view()
@@ -438,29 +572,50 @@ class ProbeSession:
         applied = False
         if valid:
             if action == "RESET":
-                self._state = initial_state(self._case)
+                try:
+                    candidate = initial_state(self._case)
+                    acceptable = ((candidate.bits, candidate.sealed, candidate.ticks,
+                                   candidate.seals_used, candidate.post_seal_pulse) ==
+                                  _raw_initial(self._case))
+                except Exception:
+                    acceptable = False
+                if not acceptable:
+                    # A failed RESET must still leave a known safe canonical
+                    # public state, without exposing corrupted constructor
+                    # contents or granting another attempt.
+                    self._state = _trusted_state_from_raw(_raw_initial(self._case))
+                    return self._terminal_probe_fault(
+                        action, before, "INDEPENDENT_GENESIS_DISAGREEMENT")
+                self._state = candidate
                 applied = True
             else:
                 source_state = (self._state.bits, self._state.sealed,
                                 self._state.ticks, self._state.seals_used,
                                 self._state.post_seal_pulse)
-                expected = _raw_next(self._case, source_state, action)
+                try:
+                    expected = _raw_next(self._case, source_state, action)
+                except Exception:
+                    return self._terminal_probe_fault(
+                        action, before, "INDEPENDENT_TRANSITION_DISAGREEMENT")
+                source_fault = False
                 try:
                     evolved = step(self._case, self._state, action)
                 except ValueError:
                     evolved = None
-                if ((expected is None) != (evolved is None) or
-                        (expected is not None and evolved is not None and
-                         (evolved.bits, evolved.sealed, evolved.ticks,
-                          evolved.seals_used, evolved.post_seal_pulse) != expected)):
-                    self._history.append({"action": action, "valid": True,
-                                          "applied": False, "before": before,
-                                          "after": None})
-                    self._finished = True
-                    self._result = {"verdict": "UNKNOWN",
-                                    "reason": "INDEPENDENT_TRANSITION_DISAGREEMENT",
-                                    "verified_success": False}
-                    return self.view()
+                except Exception:
+                    evolved = None
+                    source_fault = True
+                try:
+                    source_fields = (None if evolved is None else
+                                     (evolved.bits, evolved.sealed, evolved.ticks,
+                                      evolved.seals_used, evolved.post_seal_pulse))
+                except Exception:
+                    source_fields = None
+                    source_fault = True
+                if (source_fault or (expected is None) != (evolved is None) or
+                        (expected is not None and source_fields != expected)):
+                    return self._terminal_probe_fault(
+                        action, before, "INDEPENDENT_TRANSITION_DISAGREEMENT")
                 if evolved is not None:
                     self._state = evolved
                     applied = True
@@ -474,17 +629,30 @@ class ProbeSession:
             return deepcopy(self._result) if self._result else {
                 "verdict": "UNKNOWN", "verified_success": False}
         self._finished = True
-        core = adjudicate(self._case, proposal)
-        result = {"schema": "labyrinth.causal-latch-ood-session.v1",
-                  "evidence_class": "SOURCE_PUBLIC_SYNTHETIC",
-                  "private_custody": False, "neural_learning_verified": False,
-                  "graduation_eligible": False,
-                  "probe_count": len(self._history),
-                  "probe_trace": deepcopy(self._history),
-                  "verdict": core["verdict"],
-                  "verified_success": core["verified_success"],
-                  "adjudication": core}
-        result["sha256"] = sha256(_canonical(result).encode()).hexdigest()
+        try:
+            if not _independent_probe_trace(self._case, self._history):
+                raise ValueError("inconsistent public probe trace")
+            core = adjudicate(self._case, proposal)
+            if not _raw_core_is_valid(self._case, proposal, core):
+                raise ValueError("independent core verdict disagrees")
+            trace = deepcopy(self._history)
+            result = {"schema": "labyrinth.causal-latch-ood-session.v1",
+                      "evidence_class": "SOURCE_PUBLIC_SYNTHETIC",
+                      "private_custody": False, "neural_learning_verified": False,
+                      "graduation_eligible": False,
+                      "case_id": self._case.case_id, "seed": self._case.seed,
+                      "probe_count": len(trace), "probe_trace": trace,
+                      "probe_sha256": sha256(_canonical({"trace": trace}).encode()).hexdigest(),
+                      "verdict": core["verdict"],
+                      "verified_success": core["verified_success"],
+                      "adjudication": core}
+            result["sha256"] = sha256(_canonical(result).encode()).hexdigest()
+            if not verify_session_receipt(result):
+                raise ValueError("independent session replay disagrees")
+        except Exception:
+            result = {"verdict": "EVALUATOR_DISAGREEMENT",
+                      "reason": "BLOCKED_SUBMISSION_EVALUATOR",
+                      "verified_success": False}
         self._result = result
         return deepcopy(result)
 
