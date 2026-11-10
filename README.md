@@ -27,6 +27,8 @@ source-development challenges, not privately held-out graduation tests:
 
 ```bash
 python -m labyrinth.minotaur_cross_exam
+python -m labyrinth minotaur-exam --seed 17 --variant 2
+python -m labyrinth minotaur-exam --seed 17 --report minotaur-public-receipt.json
 python -m unittest tests.test_minotaur_cross_exam tests.test_epistemic_shift_exam -q
 python -m unittest discover -s tests -q
 ```
@@ -40,6 +42,18 @@ and independently replayed counterfactuals. Its best public symbolic control
 already encodes all six declared mechanisms, so success proves **neither**
 weight updates **nor** transfer by a model. The evaluator still shares a
 Python process with any in-process candidate; this is not private custody.
+
+`minotaur-exam` is a separate, offline, JSON-receipted **public symbolic
+control**, currently exercising two distinct declared-rule mechanics: two
+Constant chamber cases (an independently replayed legal escape and an
+independently checked finite-state UNSAT closure), plus all six Veiled Fork
+contingent-policy cases (independent Boolean existence oracle and replay for
+positive policies). The command returns a nonzero exit code if its independent
+checks disagree, and its `--report` destination is write-once. Its seed and
+wording variant **do not generate independent structural holdouts**. Both
+algorithms still rely on the source-declared scenario and rules; neither an
+external model, secret evaluator, neural update, nor genuine model transfer is
+tested. A certified UNSAT result is restricted to those declared finite rules.
 
 See the five exam protocols in `docs/CONSTANT_EXAM_PROTOCOL.md`,
 `docs/MINOTAUR_DIVERSE_EXAM_PROTOCOL.md`,
