@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import labyrinth.rule_reversal_tribunal as tribunal
-from labyrinth.rule_reversal_independent_oracle import can_guarantee
+from labyrinth.rule_reversal_independent_oracle import can_guarantee, verifies_witness
 
 
 def _masks(s):
@@ -22,8 +22,10 @@ class RuleReversalIndependentOracleTests(unittest.TestCase):
 
     def test_oracle_is_physically_separate_from_shared_transition(self):
         s = tribunal.families()["revision_under_feedback"]
+        witness = tribunal.search_policy(s)["policy"]
         with patch.object(tribunal, "_advance", side_effect=RuntimeError("shared engine broken")):
             self.assertTrue(can_guarantee(_masks(s), s.budget, s.sensor))
+            self.assertTrue(verifies_witness(_masks(s), s.budget, s.sensor, witness))
 
     def test_shared_false_unsat_is_vetoed_not_certified(self):
         s = tribunal.families()["revision_under_feedback"]
@@ -42,6 +44,55 @@ class RuleReversalIndependentOracleTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "NO_KNOWN_WIN")
         self.assertFalse(result["exhaustive"])
 
+    def test_replay_callback_cannot_mutate_emitted_winning_witness(self):
+        s = tribunal.families()["revision_under_feedback"]
+        original_replay = tribunal.replay_policy
+
+        def dishonest_callback(scenario, candidate):
+            verified = original_replay(scenario, candidate)
+            self.assertEqual(verified["verdict"], "VERIFIED_WIN")
+            candidate.clear()
+            candidate["action"] = "COMMIT"
+            return verified
+
+        with patch.object(tribunal, "replay_policy", side_effect=dishonest_callback):
+            claimed = tribunal.search_policy(s)
+        self.assertEqual(claimed["verdict"], "VERIFIED_WIN")
+        self.assertEqual(original_replay(s, claimed["policy"])["verdict"],
+                         "VERIFIED_WIN", "emitted witness must be the one verified")
+
+    def test_independent_witness_vetoes_shared_fabricated_replay_win(self):
+        s = tribunal.families()["revision_under_feedback"]
+        original_advance = tribunal._advance
+
+        def forged_commit(world, state, action, sensor):
+            if action == "COMMIT":
+                return state, "COMMITTED", True, True
+            return original_advance(world, state, action, sensor)
+
+        with (patch.object(tribunal, "_advance", side_effect=forged_commit),
+              patch.object(tribunal, "replay_policy",
+                           return_value={"verdict": "VERIFIED_WIN"})):
+            claimed = tribunal.search_policy(s)
+        self.assertEqual(claimed["verdict"], "UNKNOWN")
+        self.assertEqual(claimed["reason"], "independent_witness_disagreement")
+
+    def test_rich_comparison_subclass_cannot_forge_replay_agreement(self):
+        s = tribunal.families()["revision_under_feedback"]
+
+        class Liar(str):
+            def __eq__(self, other):
+                return other == "VERIFIED_WIN"
+
+            def __ne__(self, other):
+                return other != "VERIFIED_WIN"
+
+        with patch.object(tribunal, "replay_policy",
+                          return_value={"verdict": Liar("VERIFIED_FAILURE")}):
+            claimed = tribunal.search_policy(s)
+        self.assertEqual(claimed["verdict"], "UNKNOWN")
+        self.assertEqual(claimed["reason"], "solver_replay_disagreement")
+
     def test_seeded_fuzz_uses_full_six_world_eight_action_space(self):
         rng = random.Random(20261110)
         checked = wins = unsat = 0
@@ -58,6 +109,8 @@ class RuleReversalIndependentOracleTests(unittest.TestCase):
             if expected:
                 self.assertEqual(tribunal.replay_policy(s, solved["policy"])["verdict"],
                                  "VERIFIED_WIN")
+                self.assertTrue(verifies_witness(_masks(s), s.budget,
+                                                s.sensor, solved["policy"]))
                 wins += 1
             else:
                 unsat += 1

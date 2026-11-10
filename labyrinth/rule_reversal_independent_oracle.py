@@ -11,6 +11,62 @@ or a proof about new actions outside those rules.
 from functools import lru_cache
 
 
+def verifies_witness(world_masks: tuple[tuple[int, int, int, int], ...],
+                     budget: int, sensor: str, witness: object) -> bool:
+    """Independently execute the *exact emitted policy* in every declared world.
+
+    Existence of some valid policy is not evidence that a particular offered
+    witness wins. The primitive state/observation implementation here has no
+    dependency on the source replay, search, `_advance`, or `_State`.
+    """
+    if (type(world_masks) is not tuple or not 1 <= len(world_masks) <= 6
+            or type(budget) is not int or not 1 <= budget <= 8
+            or type(sensor) is not str or sensor not in ("full", "parity", "sealed")
+            or any(type(w) is not tuple or len(w) != 4
+                   or any(type(mask) is not int or mask not in (0, 1, 2, 3)
+                          for mask in w) for w in world_masks)):
+        raise ValueError("invalid independent witness problem")
+
+    for masks in world_masks:
+        bits = shifted = had_pre = had_post = 0
+        node = witness
+        for _ in range(budget):
+            if type(node) is not dict or type(node.get("action")) is not str:
+                return False
+            action = node["action"]
+            if action == "COMMIT":
+                if set(node) != {"action"} or (bits, shifted, had_pre, had_post) != (3, 1, 1, 1):
+                    return False
+                break
+            if action not in ("A", "B", "SHIFT") or set(node) != {"action", "branches"}:
+                return False
+            branches = node["branches"]
+            if type(branches) is not dict:
+                return False
+            if action == "SHIFT":
+                if shifted or not had_pre:
+                    return False
+                shifted = 1
+            else:
+                choice = 0 if action == "A" else 1
+                bits ^= masks[choice + 2 * shifted]
+                if shifted:
+                    had_post = 1
+                else:
+                    had_pre = 1
+            epoch = "POST:" if shifted else "PRE:"
+            if sensor == "full":
+                observation = epoch + format(bits, "02b")
+            elif sensor == "parity":
+                observation = epoch + "P" + str(((bits & 1) + ((bits >> 1) & 1)) % 2)
+            else:
+                observation = epoch + "SEALED"
+            node = branches.get(observation)
+        else:
+            return False
+    return True
+
+
 def can_guarantee(world_masks: tuple[tuple[int, int, int, int], ...],
                   budget: int, sensor: str) -> bool:
     """Can one observation-dependent policy reach both indicators in all worlds?"""

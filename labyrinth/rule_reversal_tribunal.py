@@ -18,7 +18,7 @@ from functools import lru_cache
 import hashlib
 import json
 
-from .rule_reversal_independent_oracle import can_guarantee
+from .rule_reversal_independent_oracle import can_guarantee, verifies_witness
 
 
 VERDICTS = frozenset({
@@ -273,10 +273,24 @@ def search_policy(s: Scenario, *, node_limit: int = 250000) -> dict:
     if not independent_exists:
         return {"verdict": "UNKNOWN", "reason": "independent_oracle_disagreement",
                 "rules_fingerprint": fingerprint(s)}
-    if replay_policy(s, policy)["verdict"] != "VERIFIED_WIN":
+    # The source replay is an external callback from this search's point of
+    # view. It must never receive the same mutable object we later publish:
+    # a callback that mutates its argument after verification could turn an
+    # authentic WIN into an invalid emitted witness (TOCTOU).
+    witness = _freeze_policy(policy, s.budget)
+    source_replay = replay_policy(s, _freeze_policy(witness, s.budget))
+    if (type(source_replay) is not dict
+            or type(source_replay.get("verdict")) is not str
+            or source_replay["verdict"] != "VERIFIED_WIN"):
         return {"verdict": "UNKNOWN", "reason": "solver_replay_disagreement",
                 "rules_fingerprint": fingerprint(s)}
-    return {"verdict": "VERIFIED_WIN", "policy": policy, "exhaustive": True,
+    if not verifies_witness(
+        tuple((w.pre_a, w.pre_b, w.post_a, w.post_b) for w in s.worlds),
+        s.budget, s.sensor, witness,
+    ):
+        return {"verdict": "UNKNOWN", "reason": "independent_witness_disagreement",
+                "rules_fingerprint": fingerprint(s)}
+    return {"verdict": "VERIFIED_WIN", "policy": witness, "exhaustive": True,
             "searched_belief_states": len(visited), "rules_fingerprint": fingerprint(s)}
 
 
