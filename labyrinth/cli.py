@@ -121,12 +121,14 @@ def _parser() -> argparse.ArgumentParser:
     rg.add_argument("--allow-remote-ollama", action="store_true")
     rg.add_argument("--report", metavar="JSON", help="Exclusively create a JSON report")
     minotaur = subcommands.add_parser(
-        "minotaur-exam", help="Run two source-public Minotaur families with deterministic controls",
+        "minotaur-exam", help="Run source-public Minotaur families with deterministic controls",
     )
     minotaur.add_argument("--seed", type=_public_exam_seed, default=2026,
                           help="Constant-exam prompt seed, not an independent structural holdout")
     minotaur.add_argument("--variant", type=_public_exam_variant, default=0,
                           help="Constant-exam wording variant (0..31), mechanics unchanged")
+    minotaur.add_argument("--exact-cover", action="store_true",
+                          help="Opt in to a third, exact-cover mechanic (public v2 receipt; not neural transfer)")
     minotaur.add_argument("--report", metavar="JSON", help="Exclusively create a JSON receipt")
     subcommands.add_parser("train-hf", help="Opt-in bounded LoRA update of an existing local HF checkpoint")
     subcommands.add_parser("eval-hf", help="Reload and evaluate a saved HF LoRA pilot in a new process")
@@ -200,7 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "minotaur-exam":
             from .minotaur_public_exam import run_public_exam
 
-            report = run_public_exam(seed=args.seed, variant=args.variant)
+            report = run_public_exam(seed=args.seed, variant=args.variant,
+                                     include_exact_cover=args.exact_cover)
         else:
             adapter = _load_model(args)
             if args.command == "run":
