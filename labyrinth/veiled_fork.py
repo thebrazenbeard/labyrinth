@@ -219,11 +219,23 @@ def find_guaranteed_policy(s: Scenario, *, node_limit: int = 100000) -> dict:
                 "searched_belief_states": len(seen), "exhaustive": True,
                 "quantifier": "one public observation policy wins for every possible world",
                 "rules_fingerprint": fingerprint(s)}
-    audited = replay_policy(s, policy)
-    if audited["verdict"] != "VERIFIED_WIN":
+    # Replay is allowed to inspect (and, in hostile in-process settings, even
+    # mutate) the object passed to it. Never return that same mutable object
+    # as the supposedly verified witness. Freeze two independent primitive
+    # snapshots *before* verification: one remains the output witness, while
+    # only the other is exposed to the independent replayer.
+    try:
+        witness = _freeze_public_policy(policy, s.action_budget)
+        replay_input = _freeze_public_policy(witness, s.action_budget)
+    except ValueError:
+        return {"verdict": "UNKNOWN", "reason": "solver_policy_snapshot_rejected",
+                "rules_fingerprint": fingerprint(s)}
+    audited = replay_policy(s, replay_input)
+    if (type(audited) is not dict or type(audited.get("verdict")) is not str
+            or audited["verdict"] != "VERIFIED_WIN"):
         return {"verdict": "UNKNOWN", "reason": "solver/replayer disagreement",
                 "rules_fingerprint": fingerprint(s)}
-    return {"verdict": "VERIFIED_WIN", "policy": policy,
+    return {"verdict": "VERIFIED_WIN", "policy": witness,
             "searched_belief_states": len(seen), "exhaustive": True,
             "rules_fingerprint": fingerprint(s)}
 
