@@ -1,13 +1,17 @@
 """Behavioral protocol tests: public policy, private evaluator, frozen trials."""
 
 import dataclasses
+from hashlib import sha256
 import json
 import time
 import unittest
+from types import MappingProxyType
 
 from labyrinth.novel_router_behavioral_protocol import (
     Budget,
+    BehavioralReport,
     CandidateChoice,
+    TrialManifest,
     evaluate,
     feedback_witness,
     fixed_witness,
@@ -45,6 +49,15 @@ def _unsupported_unsat(port):
 _MUTABLE_POLICY_DECISION = "ABSTAIN"
 
 
+class _MisleadingKind(str):
+    def __eq__(self, other):
+        return True
+
+
+def _misleading_kind_policy(port):
+    return CandidateChoice(_MisleadingKind("PLAN"), (), .5)
+
+
 def _global_dependency_control(port):
     if _MUTABLE_POLICY_DECISION == "PLAN":
         return CandidateChoice("PLAN", ("COMMIT",), 1.0)
@@ -57,6 +70,87 @@ def _slow_hostile(port):
 
 
 class BehavioralProtocolTests(unittest.TestCase):
+    def test_all_consumers_reject_forged_duplicate_train_heldout_manifest(self):
+        # A self-hashed manifest is not an admitted precommit. Train and heldout
+        # cannot be the same case even when the declared SHA is recomputed.
+        manifest = precommit(((0, 100),), (fixed_witness,))
+        duplicate_pairs = ((0, 0),)
+        payload = {"schema": "labyrinth.novel-router-behavioral-protocol.v1",
+                   "pairs": duplicate_pairs, "policies": manifest.policies,
+                   "budget": dataclasses.asdict(manifest.budget)}
+        duplicate = dataclasses.replace(
+            manifest, pairs=duplicate_pairs,
+            sha256=sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                                  ensure_ascii=True, allow_nan=False).encode()).hexdigest())
+        with self.assertRaisesRegex(ValueError, "precommit|manifest"):
+            evaluate(duplicate, (fixed_witness,))
+
+        # A genuine zero-update source record cannot elevate this invalid roster.
+        valid_report = evaluate(manifest, (fixed_witness,))
+        forged_report = dataclasses.replace(valid_report,
+                                            manifest_sha256=duplicate.sha256)
+        self.assertFalse(verify_local_report(duplicate, forged_report))
+        self.assertFalse(verify_local_record(duplicate, forged_report.trials[0]))
+
+    def test_empty_self_declared_report_is_not_verified(self):
+        fake = TrialManifest((), (), Budget(), "forged")
+        real = evaluate(precommit(((0, 100),), (fixed_witness,)), (fixed_witness,))
+        zeros = MappingProxyType({name: 0 for name in real.totals})
+        empty = BehavioralReport("forged", (), zeros)
+        self.assertFalse(verify_local_report(fake, empty))
+
+    def test_mutating_hash_in_report_totals_fails_closed(self):
+        # MappingProxyType protects reassignment, not malicious Python key
+        # behavior; a later hash operation must not crash verification.
+        class UnstableKey(str):
+            sabotage = False
+
+            def __hash__(self):
+                if self.sabotage:
+                    raise RuntimeError("malicious totals key")
+                return str.__hash__(self)
+
+        manifest = precommit(((0, 100),), (fixed_witness,))
+        report = evaluate(manifest, (fixed_witness,))
+        hostile_key = UnstableKey("count")
+        totals = {hostile_key: report.totals["count"]}
+        totals.update({key: value for key, value in report.totals.items()
+                       if key != "count"})
+        hostile_key.sabotage = True
+        self.assertFalse(verify_local_report(
+            manifest, dataclasses.replace(report, totals=MappingProxyType(totals))))
+
+    def test_malicious_record_identity_subclasses_do_not_crash_report(self):
+        # Independent Skeptic counterexample: the report verifier compared
+        # untrusted row fields before the record verifier type-checked them.
+        class ExplodingInt(int):
+            def __ne__(self, other):
+                raise RuntimeError("hostile pair_index comparison")
+
+        class ExplodingStr(str):
+            def __ne__(self, other):
+                raise RuntimeError("hostile row identity comparison")
+
+        manifest = precommit(((0, 1),), (fixed_witness,))
+        report = evaluate(manifest, (fixed_witness,))
+        self.assertTrue(verify_local_report(manifest, report))
+        for field, value in (("pair_index", ExplodingInt(0)),
+                             ("split", ExplodingStr("TRAIN")),
+                             ("policy", ExplodingStr(report.trials[0].policy))):
+            with self.subTest(field=field):
+                bad = dataclasses.replace(report, trials=(
+                    dataclasses.replace(report.trials[0], **{field: value}),
+                    *report.trials[1:]))
+                self.assertFalse(verify_local_report(manifest, bad))
+
+    def test_deceptive_choice_kind_fails_closed_without_aborting_batch(self):
+        manifest = precommit(((0, 100),), (_misleading_kind_policy,))
+        report = evaluate(manifest, (_misleading_kind_policy,))
+        self.assertTrue(verify_local_report(manifest, report))
+        self.assertEqual(len(report.trials), 2)
+        self.assertTrue(all(row.terminal == "INVALID_DECISION" and
+                            row.proposal_kind == "ABSTAIN" for row in report.trials))
+
     def test_freezes_identical_limits_before_policy_trials(self):
         manifest = precommit(((0, 100), (1, 101)),
                              (fixed_witness, feedback_witness),

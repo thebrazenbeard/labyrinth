@@ -112,3 +112,49 @@ For serious model qualification, freeze a hidden source-independent trial roster
 and code/runtime artifacts under separate host custody, launch actual candidates
 in qualified constrained child processes, independently witness time and I/O,
 and validate structurally novel rule families before calculating effective n.
+
+## Wave20 hostile manifest re-admission (stacked on PR #174)
+
+An adversarial review reproduced five additional **source-level FAILS** in the
+source-public protocol. These are distinct from the historical Wave18 counts:
+
+1. `precommit(((0, 0),), ...)` rejected a duplicate train/heldout seed, but
+   `evaluate()` accepted a manually constructed manifest with the same duplicate
+   pair and recalculated self-declared SHA. Both slots then scored the identical
+   case as if it constituted heldout evidence.
+2. `verify_local_report()` accepted an empty manifest and fabricated empty
+   zero-valued report because no individual record reached its replay checker.
+3. A custom `str` subclass implementing deceptive equality as the choice
+   `kind` made the evaluator index an empty `PLAN` actions tuple and abort the
+   batch with `IndexError`, instead of charging `INVALID_DECISION`.
+4. A `MappingProxyType` wrapping a totals dict whose `str`-subclass key later
+   changed its hash behavior raised an uncaught `RuntimeError` inside
+   `verify_local_report()` rather than returning a failed verification.
+5. An independent Skeptic reattack found `verify_local_report()` comparing
+   untrusted row `pair_index`, `split`, and `policy` before primitive type
+   admission. `int` and `str` subclasses overriding `__ne__` could raise a
+   `RuntimeError` and abort report verification. All three fields now have
+   exact-type guards before comparison.
+
+The repair revalidates the exact tuple roster, unique train/heldout seeds,
+bounded budget, unique policy identities and canonical manifest digest at each
+consumption boundary. Decision kinds must be primitive strings; the witness
+calculation additionally guards against empty actions. Report totals require
+primitive string keys and their examination fails closed on anomalous
+comparison/hash behavior. Each failure now has a source-level regression test,
+including spoofed-subclass objects and a self-rehashed forged roster. Full
+normal and optimized suite commands:
+
+```
+python -m unittest discover -s tests -q
+python -O -m unittest discover -s tests -q
+```
+
+**Evidence ceiling remains unchanged:** these are local source-replay integrity
+properties, not independent roster custody. A malicious producer can still
+create a *different valid* manifest and compute its digest. A self-declared
+digest cannot prove a trial was precommitted before observations, a policy
+actually executed unaltered, or that candidate code lacked source access.
+The built-in controls execute **zero optimizer updates** and no trainable model
+checkpoint is loaded, compared, saved, or reloaded. Neither higher source wins
+nor lower declared loss demonstrates neural learning or structural transfer.

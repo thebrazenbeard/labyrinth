@@ -7,7 +7,7 @@ import json
 import unittest
 
 from labyrinth.graduation_gate import (
-    GateState, GraduationPolicy, SCHEMA, _one_sided_exact_paired_p,
+    GateState, GraduationPolicy, SemanticCaseCommitment, SCHEMA, _one_sided_exact_paired_p,
     _one_sided_mastery_tail_p, decide_graduation,
 )
 
@@ -15,11 +15,33 @@ from labyrinth.graduation_gate import (
 KEY = b"independent-test-custodian-secret-32-bytes-not-for-production"
 MODEL = "a" * 64
 BASE = "f" * 64
+
+
+def _semantic_sha(label):
+    return hashlib.sha256(f"semantic-registry:{label}".encode()).hexdigest()
+
+
+_PREDECLARED_RUNS = ("fresh-run-001", "fresh-run-002")
+_REGISTRY = tuple(
+    [SemanticCaseCommitment(attempt, run_id, "train", f"train-{i:03d}",
+                            hashlib.sha256(f"train:{i - 1}".encode()).hexdigest(),
+                            _semantic_sha(f"train-{i}"))
+       for attempt, run_id in enumerate(_PREDECLARED_RUNS, start=1)
+       for i in (1, 2)]
+    + [SemanticCaseCommitment(attempt, run_id, name, f"{run_id}-{name}-{index:03d}",
+                              hashlib.sha256(
+                                  f"prompt:{run_id}:{name}:{index}".encode()).hexdigest(),
+                              _semantic_sha(f"{run_id}:{name}:{index}"))
+       for attempt, run_id in enumerate(_PREDECLARED_RUNS, start=1)
+       for name in ("heldout", "transfer")
+       for index in range(16)]
+)
 POLICY = GraduationPolicy(
     objective_id="register-program-reasoning-v1", trainee_sha256=MODEL, base_sha256=BASE,
     session_nonce="0123456789abcdef" * 2, max_attempts=2,
     expected_evaluator_sha256="b" * 64,
     expected_conditions_sha256="c" * 64,
+    independent_semantic_registry=_REGISTRY,
 )
 
 
@@ -43,6 +65,7 @@ def evaluated_receipt(*, attempt=1, run_id="fresh-run-001", candidate_correct=Tr
         "training_case_ids": ["train-001", "train-002"],
         "training_prompt_commitments": [hashlib.sha256(f"train:{i}".encode()).hexdigest()
                                         for i in range(2)],
+        "training_semantic_family_ids": [_semantic_sha(f"train-{i}") for i in (1, 2)],
         "arm_checkpoint_sha256s": {
             "candidate": MODEL, "baseline": BASE,
             "zero_update": "d" * 64, "corrupted": "e" * 64,
@@ -54,6 +77,7 @@ def evaluated_receipt(*, attempt=1, run_id="fresh-run-001", candidate_correct=Tr
             slice_name: [
                 {
                     "case_id": f"{run_id}-{slice_name}-{index:03d}",
+                    "semantic_family_id": _semantic_sha(f"{run_id}:{slice_name}:{index}"),
                     "prompt_commitment": hashlib.sha256(
                         f"prompt:{run_id}:{slice_name}:{index}".encode()).hexdigest(),
                     "candidate_correct": candidate_correct,
@@ -86,7 +110,7 @@ def evaluated_receipt(*, attempt=1, run_id="fresh-run-001", candidate_correct=Tr
 
 def independently_signed(receipt):
     raw = json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
-    signature = hmac.new(KEY, b"labyrinth.minotaur.graduation.v1\x00" + raw,
+    signature = hmac.new(KEY, b"labyrinth.minotaur.graduation.v2\x00" + raw,
                          hashlib.sha256).hexdigest()
     return raw, signature
 
@@ -412,7 +436,7 @@ class MinotaurGraduationTests(unittest.TestCase):
 
     def test_signed_duplicate_json_keys_fail_closed(self):
         raw = b'{"schema":"duplicate","schema":"'+SCHEMA.encode()+b'"}'
-        sig = hmac.new(KEY, b"labyrinth.minotaur.graduation.v1\x00"+raw,
+        sig = hmac.new(KEY, b"labyrinth.minotaur.graduation.v2\x00"+raw,
                        hashlib.sha256).hexdigest()
         self.assertEqual(decide_graduation(POLICY, GateState(), raw, sig,
                          independent_evaluator_key=KEY).disposition, "BLOCKED")

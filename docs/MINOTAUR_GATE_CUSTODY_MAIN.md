@@ -10,6 +10,29 @@ accounts for rejected attempts. The evaluator signing key must be held by
 a separately trusted private evaluator; this repository does not
 provision or hold such a key.
 
+The experimental v2 attestation also requires a policy-frozen
+`SemanticCaseCommitment` registry **authored and held independently of the
+trainee and the evaluator's unilateral control**. Each entry binds attempt,
+run, slice, case ID, prompt commitment and a reviewed **mechanical equivalence
+class**, not a seed, wording or rotated-map fingerprint. Every preregistered
+case must appear in its attempt; post-hoc favorable-subset selection blocks.
+Each heldout/transfer slice needs at least eight distinct semantic families,
+and paired significance counts conservative all-correct family clusters, not
+wording variants. Training, evaluation slices and later attempts cannot reuse
+a semantic family. Legacy v1 signed receipts explicitly return `BLOCKED`.
+
+These remain conditional software checks, **not an authenticated semantic
+oracle**. Source code cannot establish that a custodian classified mechanics
+honestly, prompts were truly unseen or reported model checkpoints ever ran.
+A colluding registry issuer can still fabricate distinct labels. Independent
+registry custody, actual examiner execution and operational readback remain
+**UNVERIFIED**; therefore no real qualification is established here.
+The added consumed-family IDs are persisted in the same HMAC-protected SQLite
+state, which does **not** prevent restoration of an entire previously valid
+database snapshot. Anti-rollback/anti-replay across full-state replacement
+requires a host-owned monotonic witness or append-only external custody;
+neither is established by these unit tests.
+
 labyrinth.graduation_state supplies transactional SQLite record
 updates with a separate custodian-owned state-MAC secret. The user or
 trusted operator must initialize each campaign and keep database/key
