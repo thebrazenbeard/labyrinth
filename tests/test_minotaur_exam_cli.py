@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from labyrinth import constant_exam
+from labyrinth import constant_exam_verifier as constant_verifier
 from labyrinth import minotaur_public_exam
 from labyrinth import veiled_fork
 
@@ -24,6 +25,141 @@ def invoke(*arguments: str, optimized: bool = False) -> subprocess.CompletedProc
 
 
 class MinotaurExamCLITests(unittest.TestCase):
+    def test_unserializable_solver_metadata_does_not_break_fork_receipt(self):
+        original = veiled_fork.find_guaranteed_policy
+
+        def poisoned_solver(scenario):
+            return {**original(scenario), "searched_belief_states": object()}
+
+        with patch.object(veiled_fork, "find_guaranteed_policy", side_effect=poisoned_solver):
+            receipt = minotaur_public_exam._fork_case(
+                veiled_fork.families()["unobservable_fork"],
+            )
+        serialized = json.loads(json.dumps(receipt))
+        self.assertIsNone(serialized["searched_belief_states"])
+        self.assertEqual(serialized["verdict"], "PROVEN_UNSAT_UNDER_DECLARED_RULES")
+
+    def test_invalid_constant_witness_and_expansion_metadata_fail_closed(self):
+        forged = constant_exam.Search(
+            "UNSOLVED", witness=(object(),), expansions=object(),
+        )
+        with patch.object(constant_exam, "search", return_value=forged):
+            receipt = minotaur_public_exam._constant_case(17, 0, "apparently_sealed")
+        serialized = json.loads(json.dumps(receipt))
+        self.assertEqual(serialized["verdict"], "UNKNOWN")
+        self.assertEqual(serialized["solver_status"], "INVALID_SOLVER_WITNESS")
+        self.assertEqual(serialized["witness_actions"], [])
+        self.assertIsNone(serialized["finite_states_explored"])
+
+    def test_deceptive_independent_trace_cannot_certify_fake_win(self):
+        class FalseIndependent(str):
+            def __eq__(self, other):
+                return other == "VERIFIED_WIN"
+
+        fake = type("Result", (), {"outcome": FalseIndependent("VERIFIED_FAILURE")})()
+        with patch.object(constant_verifier, "verify_trace", return_value=fake):
+            receipt = minotaur_public_exam._constant_case(17, 0, "apparently_sealed")
+        serialized = json.loads(json.dumps(receipt))
+        self.assertEqual(serialized["verdict"], "UNKNOWN")
+        self.assertFalse(serialized["independent_check_agrees"])
+        self.assertEqual(serialized["independent_verdict"], "INVALID_INDEPENDENT_VERDICT")
+        self.assertEqual(serialized["fixed_script_verdict"], "INVALID_FIXED_SCRIPT_VERDICT")
+
+    def test_nonboolean_unsat_certificate_cannot_claim_proof(self):
+        with patch.object(constant_verifier, "verify_unsat_certificate", return_value=1):
+            receipt = minotaur_public_exam._constant_case(17, 0, "sealed_control")
+        serialized = json.loads(json.dumps(receipt))
+        self.assertEqual(serialized["verdict"], "UNKNOWN")
+        self.assertFalse(serialized["independent_certificate_valid"])
+        self.assertFalse(serialized["independent_check_agrees"])
+
+    def test_deceptive_fork_fixed_script_receipt_is_rejected(self):
+        class FalseReplay(str):
+            def __eq__(self, other):
+                return other == "VERIFIED_WIN"
+
+        truthful = veiled_fork.replay_policy
+
+        def poisoned_replay(scenario, policy):
+            result = truthful(scenario, policy)
+            if policy == {"kind": "commit", "exit": 0}:
+                return {"verdict": FalseReplay("VERIFIED_FAILURE")}
+            return result
+
+        with patch.object(veiled_fork, "replay_policy", side_effect=poisoned_replay):
+            receipt = minotaur_public_exam._fork_case(
+                veiled_fork.families()["unobservable_fork"],
+            )
+        serialized = json.loads(json.dumps(receipt))
+        self.assertEqual(serialized["fixed_script_verdict"], "INVALID_FIXED_SCRIPT_VERDICT")
+
+    def test_deceptive_constant_solver_status_cannot_claim_independent_agreement(self):
+        class FalseStatus(str):
+            def __eq__(self, other):
+                return other == "VERIFIED_WIN"
+
+        exam = constant_exam.make_exam(17, kind="apparently_sealed")
+        truthful = constant_exam.search(exam)
+        fake = constant_exam.Search(
+            FalseStatus("UNSAT_IN_DECLARED_FINITE_MODEL"), truthful.witness,
+            truthful.reachable, truthful.expansions,
+        )
+        with patch.object(constant_exam, "search", return_value=fake):
+            result = minotaur_public_exam._constant_case(17, 0, "apparently_sealed")
+        serialized = json.loads(json.dumps(result))
+        self.assertEqual(serialized["solver_status"], "INVALID_SOLVER_STATUS")
+        self.assertEqual(serialized["verdict"], "UNKNOWN")
+        self.assertFalse(serialized["independent_check_agrees"])
+
+    def test_deceptive_solver_verdict_cannot_turn_unsat_into_verified_win(self):
+        """A Python str subclass must not disagree with its JSON receipt."""
+
+        class FalseWin(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                return other == "PROVEN_UNSAT_UNDER_DECLARED_RULES"
+
+        scenario = veiled_fork.families()["unobservable_fork"]
+        with patch.object(veiled_fork, "find_guaranteed_policy", return_value={
+                "verdict": FalseWin("VERIFIED_WIN"), "exhaustive": True,
+        }):
+            result = minotaur_public_exam._fork_case(scenario)
+        serialized = json.loads(json.dumps(result))
+        self.assertFalse(serialized["independent_oracle_exists"])
+        self.assertFalse(serialized["independent_oracle_agrees"])
+        self.assertEqual(serialized["verdict"], "UNKNOWN")
+
+    def test_deceptive_replay_verdict_cannot_certify_losing_policy(self):
+        class LyingReplay(str):
+            def __eq__(self, other):
+                return other == "VERIFIED_WIN"
+
+        scenario = veiled_fork.families()["identifiable_fork"]
+        fake_solver = {"verdict": "VERIFIED_WIN",
+                       "policy": {"kind": "commit", "exit": 0}}
+        fake_replay = {"verdict": LyingReplay("VERIFIED_FAILURE")}
+        with patch.object(veiled_fork, "find_guaranteed_policy", return_value=fake_solver), \
+                patch.object(veiled_fork, "replay_policy", return_value=fake_replay):
+            result = minotaur_public_exam._fork_case(scenario)
+        serialized = json.loads(json.dumps(result))
+        self.assertFalse(serialized["independent_oracle_agrees"])
+        self.assertEqual(serialized["verdict"], "UNKNOWN")
+        self.assertEqual(serialized["independent_replay_verdict"], "INVALID_REPLAY_VERDICT")
+
+    def test_nonboolean_oracle_result_cannot_claim_independent_agreement(self):
+        class LyingOracle(int):
+            def __bool__(self):
+                return True
+
+        scenario = veiled_fork.families()["identifiable_fork"]
+        with patch.object(veiled_fork, "brute_force_oracle", return_value=LyingOracle(0)):
+            result = minotaur_public_exam._fork_case(scenario)
+        serialized = json.loads(json.dumps(result))
+        self.assertFalse(serialized["independent_oracle_exists"])
+        self.assertFalse(serialized["independent_oracle_agrees"])
+        self.assertEqual(serialized["verdict"], "UNKNOWN")
+
     def test_public_control_runs_distinct_mechanics_with_independent_checks(self):
         result = invoke("--seed", "17", "--variant", "2")
         self.assertEqual(result.returncode, 0, result.stderr)
