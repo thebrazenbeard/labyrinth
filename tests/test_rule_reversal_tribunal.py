@@ -194,7 +194,7 @@ class RuleReversalTribunalTests(unittest.TestCase):
             checked += 1
         self.assertEqual(checked, 300)
 
-    def test_mutation_killed_when_replay_and_solver_share_wrong_transition(self):
+    def test_shared_solver_and_replay_mutation_is_vetoed_before_grading(self):
         # A correlated source bug can fool BOTH search_policy and replay_policy.
         # Here a fictitious post-SHIFT B mask reaches y in a world whose B
         # cannot reach y. The independently implemented oracle rejects it.
@@ -208,8 +208,11 @@ class RuleReversalTribunalTests(unittest.TestCase):
 
         with patch.object(tribunal, "_advance", side_effect=correlated_mutation):
             mutant = search_policy(s)
-            self.assertEqual(mutant["verdict"], "VERIFIED_WIN")
-            self.assertEqual(replay_policy(s, mutant["policy"])["verdict"], "VERIFIED_WIN")
+            # Shared solver and replay transitions used to manufacture a
+            # VERIFIED_WIN in a physically unwinnable world. A separate
+            # primitive-state oracle must veto that correlated false proof.
+            self.assertEqual(mutant["verdict"], "UNKNOWN")
+            self.assertEqual(mutant["reason"], "independent_oracle_disagreement")
             self.assertFalse(brute_force_oracle(s))
         self.assertEqual(search_policy(s)["verdict"],
                          "PROVEN_UNSAT_UNDER_DECLARED_RULES")

@@ -4,6 +4,9 @@ import json
 from itertools import product
 import random
 import unittest
+from unittest.mock import patch
+
+import labyrinth.veiled_fork as fork
 
 from labyrinth.veiled_fork import (
     Probe, Scenario, brute_force_oracle, challenge_novel_rule,
@@ -44,6 +47,41 @@ class StateDependentBranchKey(str):
 
 
 class EpistemicExamTests(unittest.TestCase):
+    def test_solver_returns_the_exact_witness_independently_replayed(self):
+        """A replay callback cannot mutate the already-verified output policy."""
+        scenario = families()["identifiable_fork"]
+        genuine_replay = fork.replay_policy
+        observed = []
+
+        def replay_then_mutate(s, candidate):
+            result = genuine_replay(s, candidate)
+            observed.append(result["verdict"])
+            candidate.clear()
+            candidate.update({"kind": "commit", "exit": 999})
+            return result
+
+        with patch.object(fork, "replay_policy", side_effect=replay_then_mutate):
+            outcome = fork.find_guaranteed_policy(scenario)
+        self.assertEqual(observed, ["VERIFIED_WIN"])
+        self.assertEqual(outcome["verdict"], "VERIFIED_WIN")
+        self.assertEqual(genuine_replay(scenario, outcome["policy"])["verdict"],
+                         "VERIFIED_WIN")
+
+    def test_verifier_rich_comparison_cannot_forge_verified_win(self):
+        class Liar(str):
+            def __eq__(self, other):
+                return other == "VERIFIED_WIN"
+
+            def __ne__(self, other):
+                return other != "VERIFIED_WIN"
+
+        scenario = families()["identifiable_fork"]
+        with patch.object(fork, "replay_policy",
+                          return_value={"verdict": Liar("VERIFIED_FAILURE")}):
+            outcome = fork.find_guaranteed_policy(scenario)
+        self.assertEqual(outcome["verdict"], "UNKNOWN")
+        self.assertNotIn("policy", outcome)
+
     def test_each_hidden_world_has_a_clairvoyant_winning_commit(self):
         scenario = families()["unobservable_fork"]
         for world, exit_ in enumerate(scenario.exits):
