@@ -20,6 +20,42 @@ def _bounded_count(value: object) -> int | None:
     return value if type(value) is int and 0 <= value <= 1_000_000 else None
 
 
+def _plain_policy(node: object, remaining: int, budget: list[int]) -> dict | None:
+    """Boundedly snapshot exact primitive policy nodes without custom copy hooks.
+
+    The independent replayer receives a *different* copy. Its callbacks must
+    never retain or mutate the policy later emitted as verified evidence.
+    """
+    if type(node) is not dict or remaining <= 0 or len(node) > 3:
+        return None
+    budget[0] -= 1
+    if budget[0] < 0 or any(type(key) is not str for key in node):
+        return None
+    kind = node.get("kind")
+    if type(kind) is not str:
+        return None
+    if kind == "commit" and set(node) == {"kind", "exit"}:
+        exit_code = node["exit"]
+        if type(exit_code) is int and exit_code in (0, 1):
+            return {"kind": "commit", "exit": exit_code}
+        return None
+    if kind != "probe" or set(node) != {"kind", "name", "branches"}:
+        return None
+    name, branches = node["name"], node["branches"]
+    if (type(name) is not str or len(name) > 128 or type(branches) is not dict
+            or not 1 <= len(branches) <= 16):
+        return None
+    copied_branches = {}
+    for answer, next_node in branches.items():
+        if type(answer) is not str or len(answer) > 128:
+            return None
+        copied_node = _plain_policy(next_node, remaining - 1, budget)
+        if copied_node is None:
+            return None
+        copied_branches[answer] = copied_node
+    return {"kind": "probe", "name": name, "branches": copied_branches}
+
+
 def _constant_case(seed: int, variant: int, kind: str) -> dict:
     exam = constant.make_exam(seed, split="dev", variant=variant, kind=kind)
     result = constant.search(exam)
@@ -87,15 +123,24 @@ def _fork_case(scenario: fork.Scenario) -> dict:
     solver_verdict = solved.get("verdict")
     if type(solver_verdict) is not str:
         solver_verdict = "INVALID_SOLVER_VERDICT"
-    witness = solved.get("policy")
-    if witness is None:
+    raw_witness = solved.get("policy")
+    witness = (_plain_policy(raw_witness, scenario.action_budget, [128])
+               if raw_witness is not None else None)
+    if raw_witness is None:
         replay_verdict = "NOT_RUN"
+    elif witness is None:
+        replay_verdict = "INVALID_POLICY"
     else:
-        replay_result = fork.replay_policy(scenario, witness)
+        # Verify a disposable copy; publish the untouched, separately captured
+        # policy. Otherwise replay callbacks can mutate post-verification data.
+        replay_input = _plain_policy(witness, scenario.action_budget, [128])
+        replay_result = fork.replay_policy(scenario, replay_input)
         replay_verdict = (replay_result.get("verdict")
                           if type(replay_result) is dict else None)
         if type(replay_verdict) is not str:
             replay_verdict = "INVALID_REPLAY_VERDICT"
+        elif replay_input != witness:
+            replay_verdict = "INVALID_MUTATED_REPLAY_INPUT"
     if solver_verdict == "VERIFIED_WIN":
         agrees = independent_exists is True and replay_verdict == "VERIFIED_WIN"
     elif solver_verdict == "PROVEN_UNSAT_UNDER_DECLARED_RULES":

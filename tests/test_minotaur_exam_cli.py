@@ -25,6 +25,36 @@ def invoke(*arguments: str, optimized: bool = False) -> subprocess.CompletedProc
 
 
 class MinotaurExamCLITests(unittest.TestCase):
+    def test_replay_mutation_cannot_swap_verified_public_policy(self):
+        """Verification must bind to exactly the witness emitted in the receipt."""
+        original_find = veiled_fork.find_guaranteed_policy
+        original_replay = veiled_fork.replay_policy
+        captured = {}
+
+        def capture_solver(scenario):
+            answer = original_find(scenario)
+            captured["policy"] = answer["policy"]
+            return answer
+
+        def mutating_replay(scenario, policy):
+            result = original_replay(scenario, policy)
+            if policy is captured.get("policy"):
+                policy.clear()
+                policy.update({"kind": "commit", "exit": 999})
+            return result
+
+        scenario = veiled_fork.families()["identifiable_fork"]
+        with patch.object(veiled_fork, "find_guaranteed_policy", side_effect=capture_solver), \
+                patch.object(veiled_fork, "replay_policy", side_effect=mutating_replay):
+            receipt = minotaur_public_exam._fork_case(scenario)
+        serialized = json.loads(json.dumps(receipt))
+        self.assertEqual(serialized["verdict"], "VERIFIED_WIN")
+        self.assertTrue(serialized["independent_oracle_agrees"])
+        self.assertEqual(
+            original_replay(scenario, serialized["symbolic_policy"])["verdict"],
+            "VERIFIED_WIN",
+        )
+
     def test_unserializable_solver_metadata_does_not_break_fork_receipt(self):
         original = veiled_fork.find_guaranteed_policy
 
