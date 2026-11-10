@@ -6,3 +6,5 @@ build/
 dist/
 .venv/
 reports/
+config.bat
+node_modules
