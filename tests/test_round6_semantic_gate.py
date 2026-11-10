@@ -4,13 +4,20 @@ Only test-key HMAC fixtures are used. No real private evaluator, model, or
 production graduation is invoked.
 """
 
-from dataclasses import replace
+from dataclasses import fields, replace
 from hashlib import sha256
 import hmac
+import inspect
 import json
+import threading
 import unittest
+from unittest.mock import patch
 
-from labyrinth.graduation_gate import GateState, SemanticCaseCommitment, decide_graduation
+from labyrinth import graduation_gate as gate
+from labyrinth.graduation_gate import (
+    GateState, GraduationPolicy, SemanticCaseCommitment,
+    _policy_fingerprint, decide_graduation,
+)
 from tests.test_graduation_gate import KEY, POLICY, decision, evaluated_receipt
 
 
@@ -38,6 +45,93 @@ def _bound_relabel(receipt, relabels, *, max_attempts=None):
 
 
 class SemanticFamilyGateTests(unittest.TestCase):
+    def test_malformed_policy_deepcopy_callback_cannot_crash_gate(self):
+        class ExplosiveObjective(str):
+            def __deepcopy__(self, memo):
+                raise RuntimeError("hostile deep-copy callback")
+
+        tampered = replace(POLICY)
+        object.__setattr__(tampered, "objective_kind", ExplosiveObjective("training_effect"))
+        with self.assertRaises(ValueError):
+            decision(evaluated_receipt(controls_correct=True), policy=tampered)
+
+    def test_concurrent_mutation_after_admission_cannot_switch_objective(self):
+        """The signed objective must be snapshotted for the full decision."""
+
+        class ChameleonObjective(str):
+            def __eq__(self, other):
+                return other in ("training_effect", "skill_mastery")
+
+        policy = replace(POLICY)
+        actual_compare = gate.hmac.compare_digest
+        altered = []
+
+        def tamper_during_digest(first, second):
+            if not altered:
+                worker = threading.Thread(target=lambda: object.__setattr__(
+                    policy, "objective_kind", ChameleonObjective("training_effect")))
+                worker.start()
+                worker.join()
+                altered.append(True)
+            return actual_compare(first, second)
+
+        with patch.object(gate.hmac, "compare_digest", side_effect=tamper_during_digest):
+            verdict = decision(evaluated_receipt(controls_correct=True), policy=policy)
+        self.assertTrue(altered)
+        self.assertEqual(_policy_fingerprint(policy), _policy_fingerprint(POLICY))
+        self.assertEqual(verdict.disposition, "STAY")
+
+    def test_policy_subclass_cannot_hide_different_objective_from_fingerprint(self):
+        """A policy's admission semantics must match its serialized identity."""
+
+        class TrojanPolicy(GraduationPolicy):
+            def __getattribute__(self, name):
+                if (name == "objective_kind"
+                        and inspect.currentframe().f_back.f_code.co_name == "decide_graduation"):
+                    return "skill_mastery"
+                return super().__getattribute__(name)
+
+        adversarial = TrojanPolicy(**{f.name: getattr(POLICY, f.name)
+                                      for f in fields(POLICY)})
+        self.assertEqual(_policy_fingerprint(POLICY), _policy_fingerprint(adversarial))
+        self.assertEqual(decision(evaluated_receipt(controls_correct=True),
+                                  policy=POLICY).disposition, "STAY")
+        with self.assertRaises(TypeError):
+            decision(evaluated_receipt(controls_correct=True), policy=adversarial)
+
+    def test_trusted_state_subclass_not_admitted(self):
+        class MockTrustedState(GateState):
+            pass
+
+        with self.assertRaises(TypeError):
+            decision(evaluated_receipt(), MockTrustedState())
+
+    def test_frozen_policy_mutation_cannot_reinterpret_signed_objective(self):
+        class ChameleonObjective(str):
+            def __eq__(self, other):
+                return other in ("training_effect", "skill_mastery")
+
+        tampered = replace(POLICY)
+        object.__setattr__(tampered, "objective_kind", ChameleonObjective("training_effect"))
+        self.assertIs(type(tampered), GraduationPolicy)
+        self.assertEqual(_policy_fingerprint(tampered), _policy_fingerprint(POLICY))
+        self.assertEqual(decision(evaluated_receipt(controls_correct=True),
+                                  policy=POLICY).disposition, "STAY")
+        with self.assertRaises(ValueError):
+            decision(evaluated_receipt(controls_correct=True), policy=tampered)
+
+    def test_deceptive_string_subclass_cannot_switch_graduation_objective(self):
+        """Do not let Python rich comparisons bypass signed policy semantics."""
+
+        class ChameleonObjective(str):
+            def __eq__(self, other):
+                return other in ("training_effect", "skill_mastery")
+
+        ordinary = decision(evaluated_receipt(controls_correct=True), policy=POLICY)
+        self.assertEqual(ordinary.disposition, "STAY")
+        with self.assertRaises(ValueError):
+            replace(POLICY, objective_kind=ChameleonObjective("training_effect"))
+
     def test_invalid_attempt_type_fails_cleanly_before_registry_comparison(self):
         for bad in ("3", True, None):
             with self.subTest(value=bad), self.assertRaises(ValueError):

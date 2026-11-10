@@ -25,6 +25,7 @@ cannot satisfy this gate.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 import hashlib
 import hmac
@@ -160,7 +161,11 @@ class GraduationPolicy:
             raise ValueError("a graduation objective requires at least 90% valid output format")
         if self.min_gain_over_controls < 0.10:
             raise ValueError("training-effect objectives require a nontrivial declared gain")
-        if self.objective_kind not in ("training_effect", "skill_mastery"):
+        # Rich comparisons on str subclasses can disagree with their JSON
+        # serialization, switching admission objectives without changing the
+        # pinned policy fingerprint. Require an exact primitive here.
+        if (type(self.objective_kind) is not str
+                or self.objective_kind not in ("training_effect", "skill_mastery")):
             raise ValueError("objective_kind must distinguish mastery from training effect")
         if self.objective_kind == "skill_mastery" and self.min_accuracy == 1:
             raise ValueError("finite samples cannot establish perfect population mastery")
@@ -277,8 +282,24 @@ def decide_graduation(
     or untrusted receipts never graduate or consume an authenticated attempt.
     """
 
-    if not isinstance(policy, GraduationPolicy) or not isinstance(state, GateState):
+    # Subclasses can override __getattribute__ and make admission-time policy
+    # comparisons differ from the dataclass fields serialized into its digest.
+    # Trusted state likewise must not carry programmable field behavior.
+    if type(policy) is not GraduationPolicy or type(state) is not GateState:
         raise TypeError("expected GraduationPolicy and trusted GateState")
+    # Frozen dataclasses are not hostile-code isolation: object.__setattr__
+    # and another thread can change fields after __post_init__. Check before
+    # invoking copy callbacks; snapshot nested fields; then recheck and use
+    # only those private snapshots throughout the admission decision.
+    try:
+        GraduationPolicy.__post_init__(policy)
+        policy = deepcopy(policy)
+        state = deepcopy(state)
+        GraduationPolicy.__post_init__(policy)
+    except Exception as exc:
+        # Even a hostile __deepcopy__ callback cannot crash the admission
+        # routine or turn a malformed trusted input into a passing policy.
+        raise ValueError("invalid trusted policy or state snapshot") from exc
     if (type(state.next_attempt) is not int or state.next_attempt < 1
             or type(state.consumed_run_ids) is not frozenset
             or any(type(r) is not str or not _ID.fullmatch(r) for r in state.consumed_run_ids)
