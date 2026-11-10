@@ -5,7 +5,9 @@ arbitrary Python subclasses must not get to redefine verdict comparisons.
 """
 
 from copy import deepcopy
+import tracemalloc
 import unittest
+from unittest import mock
 
 from scripts import novel_router_batch_trial as batch
 from scripts import novel_router_model_trial as single
@@ -57,6 +59,28 @@ class Wave20PlainReceiptTests(unittest.TestCase):
         tampered = deepcopy(self.baseline)
         tampered["manifest"]["new_cycle"] = tampered
         self.assertFalse(batch.verify_batch_receipt(tampered))
+
+    def test_overwide_container_is_rejected_before_queue_amplification(self):
+        # Skeptic counterexample: the first guard queued every element of a
+        # 350k-wide list, allocating ~24 MiB despite its 250k-node budget.
+        # Prepare the hostile object before measuring *verifier* allocations.
+        attack = {"cases": [None] * 350_000}
+        tracemalloc.start()
+        try:
+            self.assertFalse(batch.verify_batch_receipt(attack))
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 5 * 1024 * 1024)
+
+    def test_exact_node_cap_does_not_charge_exit_sentinels(self):
+        # A graph with five ordinary nodes must fit a five-node budget;
+        # internal traversal bookkeeping must not alter the contract.
+        with mock.patch.object(batch, "MAX_RECEIPT_NODES", 5):
+            self.assertTrue(batch._plain_receipt_tree({
+                "cases": [None, None, None]}))
+            self.assertFalse(batch._plain_receipt_tree({
+                "cases": [None, None, None, None]}))
 
 
 if __name__ == "__main__":

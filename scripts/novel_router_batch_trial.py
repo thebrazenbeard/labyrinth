@@ -26,6 +26,7 @@ from scripts import novel_router_model_trial as single
 SCHEMA = "labyrinth.novel-router-precommitted-batch.v1"
 MAX_CASES = 32
 MAX_BATCH_CALLS = MAX_CASES * (novel.MAX_PROBES + 1)
+MAX_RECEIPT_NODES = 250_000
 ADMISSION_OVERHEAD_SECONDS = 1.0
 SOURCE_LABEL = "SOURCE_PUBLIC_MULTI_CASE_PROCESS_UNATTESTED"
 PRIVATE_LABEL = "HOST_PRIVATE_CASE_SEEDS_AND_RAW_MODEL_OUTPUT"
@@ -72,13 +73,15 @@ def _plain_receipt_tree(root: object) -> bool:
     pending = [(root, 0, False)]
     active: set[int] = set()
     inspected = 0
+    queued = 1  # Unvisited nodes; exclude container-exit sentinels.
     while pending:
         value, depth, leaving = pending.pop()
         if leaving:
             active.remove(id(value))
             continue
+        queued -= 1
         inspected += 1
-        if inspected > 250_000 or depth > 96:
+        if inspected > MAX_RECEIPT_NODES or depth > 96:
             return False
         kind = type(value)
         if value is None or kind in (str, int, float, bool):
@@ -88,8 +91,13 @@ def _plain_receipt_tree(root: object) -> bool:
         identity = id(value)
         if identity in active:
             return False
+        # Do not expand an oversized list/dict into hundreds of thousands of
+        # pending tuples *before* the visited-node budget is checked.
+        if len(value) > MAX_RECEIPT_NODES - inspected - queued:
+            return False
         active.add(identity)
         pending.append((value, depth, True))
+        queued += len(value)
         if kind is dict:
             for key, child in value.items():
                 if type(key) is not str:

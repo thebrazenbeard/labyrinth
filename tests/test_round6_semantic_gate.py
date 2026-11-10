@@ -45,6 +45,16 @@ def _bound_relabel(receipt, relabels, *, max_attempts=None):
 
 
 class SemanticFamilyGateTests(unittest.TestCase):
+    def test_malformed_policy_deepcopy_callback_cannot_crash_gate(self):
+        class ExplosiveObjective(str):
+            def __deepcopy__(self, memo):
+                raise RuntimeError("hostile deep-copy callback")
+
+        tampered = replace(POLICY)
+        object.__setattr__(tampered, "objective_kind", ExplosiveObjective("training_effect"))
+        with self.assertRaises(ValueError):
+            decision(evaluated_receipt(controls_correct=True), policy=tampered)
+
     def test_concurrent_mutation_after_admission_cannot_switch_objective(self):
         """The signed objective must be snapshotted for the full decision."""
 
