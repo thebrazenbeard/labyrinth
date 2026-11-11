@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 import hashlib
 import json
+import unicodedata
 
 
 VERDICTS = frozenset({
@@ -381,7 +382,16 @@ def novel_rule_challenge(s: Scenario, proposal: object) -> dict:
     if (type(action) is not str or not 1 <= len(action) <= 64
             or type(reason) is not str or not 1 <= len(reason) <= 128):
         return {"verdict": "UNKNOWN", "reason": "invalid_novel_proposal"}
-    if action.strip().upper() in {"RUN", "WAIT"}:
+    # A blank/format-control 'action' is not a discoverable rule. Compatibility
+    # spellings of RUN/WAIT must also not be laundered into novelty, even when
+    # their original Unicode bytes differ from the declared ASCII opcodes.
+    canonical_action = unicodedata.normalize("NFKC", action).strip()
+    canonical_reason = unicodedata.normalize("NFKC", reason).strip()
+    if (not canonical_action or not canonical_reason
+            or any(unicodedata.category(ch).startswith("C")
+                   for ch in canonical_action + canonical_reason)):
+        return {"verdict": "UNKNOWN", "reason": "invalid_novel_proposal"}
+    if canonical_action.upper() in {"RUN", "WAIT"}:
         return {"verdict": "UNKNOWN", "reason": "action_already_declared"}
     return {"verdict": "NOVEL_RULESET_CHALLENGE",
             "independent_verification": "NOT_PERFORMED",
