@@ -15,7 +15,7 @@ from .hf_pilot import (
     EVAL_SCHEMA, _adapter_manifest, _checkpoint_manifest, _validate_sharded_index,
 )
 from .hf_report_audit import audit_hf_report
-from .runner import _MAX_JSON_BYTES, _reject_nonfinite_json, _unique_json_pairs, load_json
+from .runner import _MAX_JSON_BYTES, _reject_nonfinite_json, _unique_json_pairs
 
 SCHEMA = "labyrinth.hf-persistence-audit.v1"
 
@@ -77,8 +77,12 @@ def audit_hf_persistence(run_dir: str | Path, reload_report: str | Path,
         training = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_json_pairs,
                               parse_constant=_reject_nonfinite_json)
         reload_path = Path(reload_report)
-        _read_regular_bounded(reload_path)
-        reload = load_json(reload_path, strict=True)
+        reload_bytes = _read_regular_bounded(reload_path)
+        # Parse only the exact bytes that passed bounded nonsymlink validation.
+        # Reopening the path here can follow a swapped symlink or different file.
+        reload = json.loads(reload_bytes.decode("utf-8"),
+                            object_pairs_hook=_unique_json_pairs,
+                            parse_constant=_reject_nonfinite_json)
     except (OSError, ValueError, TypeError, UnicodeError, RecursionError,
             json.JSONDecodeError) as exc:
         fail(f"invalid input receipt or directory: {exc}")

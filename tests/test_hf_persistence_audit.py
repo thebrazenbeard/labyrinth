@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tests.test_hf_report_audit import pilot_fixture
 from labyrinth.hf_pilot import EVAL_SCHEMA
@@ -99,6 +100,33 @@ class HfPersistenceAuditTests(unittest.TestCase):
         self.reload["adapter_sha256"] = {"adapter_model.safetensors": "0" * 64}
         self._write_reload()
         self.assertEqual(self._audit()["status"], "FAIL")
+
+    def test_reload_validation_and_parsing_use_one_verified_snapshot(self):
+        # The initial regular reload receipt is inconsistent. Replacing its
+        # path after the bounded nonsymlink read must not replace the bytes
+        # being evaluated with a valid, symlink-backed second read.
+        from labyrinth import hf_persistence_audit as auditor
+
+        clean = self.root / "other_reload.json"
+        clean.write_text(json.dumps(self.reload), encoding="utf-8")
+        self.reload["training_report_sha256"] = "0" * 64
+        self._write_reload()
+
+        original_read = auditor._read_regular_bounded
+
+        def swap_after_verified_read(path):
+            raw = original_read(path)
+            if Path(path) == self.reload_path:
+                self.reload_path.unlink()
+                self.reload_path.symlink_to(clean)
+            return raw
+
+        with patch.object(auditor, "_read_regular_bounded",
+                          side_effect=swap_after_verified_read):
+            result = self._audit()
+        self.assertEqual(result["status"], "FAIL", result)
+        self.assertTrue(any("training-report bytes" in reason
+                            for reason in result["failures"]), result)
 
     def test_duplicate_key_reload_json_is_rejected(self):
         self.reload_path.write_text('{"schema":"x","schema":"y"}', encoding="utf-8")
