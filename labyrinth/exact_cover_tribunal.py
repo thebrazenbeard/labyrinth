@@ -185,13 +185,47 @@ def search_allocation(s: Scenario, *, node_limit: int = 100_000) -> dict:
             "certificate_scope": "exact_cover_of_declared_crews_with_declared_budget"}
 
 
+def _independent_specific_cover(s: Scenario, proposed_allocation: object) -> bool:
+    """Independently verify the *offered* witness with disjoint bitmasks.
+
+    Existence of some solution does not establish that a purported surprise
+    is itself valid. This calculation does not call the source replay or DFS.
+    """
+    if (type(proposed_allocation) is not tuple
+            or len(proposed_allocation) > s.budget
+            or any(type(i) is not int or not 0 <= i < len(s.crews)
+                   for i in proposed_allocation)):
+        return False
+    site_bits = {site: 1 << index for index, site in enumerate(s.sites)}
+    occupied = 0
+    for crew_index in proposed_allocation:
+        for site in s.crews[crew_index]:
+            bit = site_bits[site]
+            if occupied & bit:
+                return False
+            occupied |= bit
+    return occupied == (1 << len(s.sites)) - 1
+
+
 def adjudicate_unexpected(s: Scenario, proposed_allocation: object,
                            prior_verdict: str) -> dict:
     """A valid surprise supersedes the previous solver verdict without bias."""
     if type(prior_verdict) is not str or prior_verdict not in VERDICTS:
         return {"verdict": "UNKNOWN", "reason": "invalid_prior_verdict"}
+    check_scenario(s)
+    independent_win = _independent_specific_cover(s, proposed_allocation)
     checked = verify_allocation(s, proposed_allocation)
-    if checked["verdict"] == "VERIFIED_WIN":
+    if (type(checked) is not dict
+            or type(checked.get("verdict")) is not str
+            or checked["verdict"] not in ("VERIFIED_WIN", "VERIFIED_FAILURE")
+            or type(checked.get("rules_fingerprint")) is not str
+            or checked["rules_fingerprint"] != fingerprint(s)
+            or (checked["verdict"] == "VERIFIED_WIN") != independent_win):
+        return {"verdict": "UNKNOWN", "independently_replayed": False,
+                "overturned_prior": False,
+                "reason": "unexpected_solution_verifier_disagreement",
+                "rules_fingerprint": fingerprint(s)}
+    if independent_win:
         return {"verdict": "VERIFIED_WIN", "independently_replayed": True,
                 "overturned_prior": prior_verdict != "VERIFIED_WIN",
                 "rules_fingerprint": checked["rules_fingerprint"]}
