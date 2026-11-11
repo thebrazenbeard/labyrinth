@@ -9,6 +9,7 @@ trains a neural model or supports a claim of learned structural transfer.
 """
 
 from dataclasses import dataclass
+from itertools import permutations
 import hashlib
 import json
 import unicodedata
@@ -79,19 +80,29 @@ def fingerprint(s):
 
 
 def mechanics_fingerprint(s):
-    """Constraint-set ID invariant to world order and redundant duplicates.
+    """Role-preserving, label-invariant ID for this finite constraint set.
 
-    It is not a full semantic-isomorphism equivalence class: e.g. renaming
-    observation indices may preserve solvability without preserving this ID.
+    World order, duplicate worlds, and consistent local observation renaming
+    cannot manufacture a new mechanic. This does NOT establish semantic
+    equivalence across different rulesets or certify independent custody.
     """
     check_scenario(s)
+    constraints = {(w.left_obs, w.right_obs, w.required_parity)
+                   for w in s.worlds}
+    # Each actor has at most four local labels, so exhaustive canonicalization
+    # requires at most 4! * 4! = 576 finite label assignments.
+    canonical_constraints = min(
+        tuple(sorted((left_perm[left], right_perm[right], parity)
+                     for left, right, parity in constraints))
+        for left_perm in permutations(range(s.left_observations))
+        for right_perm in permutations(range(s.right_observations))
+    )
     payload = {
         "mechanics": "distributed-parity-v1",
         "left_observations": s.left_observations,
         "right_observations": s.right_observations,
         "total_on_budget": s.total_on_budget,
-        "constraints": sorted({(w.left_obs, w.right_obs, w.required_parity)
-                               for w in s.worlds}),
+        "constraints": canonical_constraints,
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

@@ -193,6 +193,42 @@ class DistributedParityTribunalTests(unittest.TestCase):
         self.assertNotEqual(public_view(original)["case_fingerprint"],
                             public_view(reversed_worlds)["case_fingerprint"])
 
+    def test_observation_relabeling_is_same_mechanics_not_new_family(self):
+        # A consistent renaming of private observation indices cannot become
+        # a new independent mechanical transfer family.
+        source = Scenario((World(0, 0, 0), World(0, 1, 1),
+                           World(1, 2, 1), World(2, 0, 0)), 3, 3, 3)
+        lperm, rperm = (2, 0, 1), (1, 2, 0)
+        relabeled = Scenario(
+            tuple(World(lperm[w.left_obs], rperm[w.right_obs],
+                        w.required_parity) for w in source.worlds),
+            3, 3, 3)
+        self.assertNotEqual(fingerprint(source), fingerprint(relabeled))
+        self.assertEqual(mechanics_fingerprint(source),
+                         mechanics_fingerprint(relabeled))
+
+    def test_random_local_label_permutations_preserve_mechanics(self):
+        rng = random.Random(0xC0FFEE)
+        for seed in range(40):
+            left, right = rng.randint(2, 4), rng.randint(2, 4)
+            worlds = tuple(
+                World(rng.randrange(left), rng.randrange(right),
+                      rng.randrange(2))
+                for _ in range(rng.randint(1, 12))
+            )
+            budget = rng.randint(0, left + right)
+            source = Scenario(worlds, left, right, budget)
+            left_labels, right_labels = list(range(left)), list(range(right))
+            rng.shuffle(left_labels)
+            rng.shuffle(right_labels)
+            transformed = Scenario(
+                tuple(World(left_labels[w.left_obs], right_labels[w.right_obs],
+                            w.required_parity) for w in reversed(worlds)),
+                left, right, budget)
+            with self.subTest(seed=seed):
+                self.assertEqual(mechanics_fingerprint(source),
+                                 mechanics_fingerprint(transformed))
+
     def test_exact_schema_rejects_python_bool_and_oversized_world(self):
         s = families()["coordinated_parity"]
         for case in (replace(s, left_observations=True),
