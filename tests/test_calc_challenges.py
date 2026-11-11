@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from fractions import Fraction
+from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -86,11 +87,13 @@ class CalcChallengeTests(unittest.TestCase):
             generate_calc_training_challenges(seed=3, count=1, split="eval")
 
     def test_forged_calc_module_source_is_rejected_before_cases(self):
-        with tempfile.NamedTemporaryFile(mode="wb") as forged:
-            forged.write(b"this is not the audited Calc algebra module")
-            forged.flush()
+        # Close the forged file before the verifier reopens it. Windows
+        # otherwise denies the read and tests file sharing, not pin checking.
+        with tempfile.TemporaryDirectory() as directory:
+            forged = Path(directory) / "forged_algebra.py"
+            forged.write_bytes(b"this is not the audited Calc algebra module")
             impostor = SimpleNamespace(
-                __file__=forged.name,
+                __file__=str(forged),
                 Polynomial=lambda *_: None,
                 determinant=lambda *_: 0,
             )

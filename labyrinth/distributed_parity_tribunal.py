@@ -9,6 +9,7 @@ trains a neural model or supports a claim of learned structural transfer.
 """
 
 from dataclasses import dataclass
+from itertools import permutations
 import hashlib
 import json
 import unicodedata
@@ -79,19 +80,44 @@ def fingerprint(s):
 
 
 def mechanics_fingerprint(s):
-    """Constraint-set ID invariant to world order and redundant duplicates.
+    """Bounded identity of reachably equivalent, symmetric parity mechanics.
 
-    It is not a full semantic-isomorphism equivalence class: e.g. renaming
-    observation indices may preserve solvability without preserving this ID.
+    Distinct case receipts remain in fingerprint(s). Here, an observation index
+    absent from every possible world cannot affect any winning policy: its bit
+    can always be zero. The silent actors also have symmetric roles. Canonical
+    identity therefore removes unreachable slots and allows actor exchange,
+    alongside world reordering, duplicate worlds and local label permutations.
+    This does not prove arbitrary cross-ruleset equivalence or private custody.
     """
     check_scenario(s)
+    constraints = {(w.left_obs, w.right_obs, w.required_parity)
+                   for w in s.worlds}
+    left_used = tuple(sorted({left for left, _, _ in constraints}))
+    right_used = tuple(sorted({right for _, right, _ in constraints}))
+    left_index = {label: i for i, label in enumerate(left_used)}
+    right_index = {label: i for i, label in enumerate(right_used)}
+    reachable = tuple((left_index[left], right_index[right], parity)
+                      for left, right, parity in constraints)
+    orientations = (
+        (len(left_used), len(right_used), reachable),
+        (len(right_used), len(left_used),
+         tuple((right, left, parity) for left, right, parity in reachable)),
+    )
+    # Max 2 * 4! * 4! = 1152 finite assignments, independent of world order.
+    active_left, active_right, canonical_constraints = min(
+        (n_left, n_right,
+         tuple(sorted((left_perm[left], right_perm[right], parity)
+                      for left, right, parity in worlds)))
+        for n_left, n_right, worlds in orientations
+        for left_perm in permutations(range(n_left))
+        for right_perm in permutations(range(n_right))
+    )
     payload = {
-        "mechanics": "distributed-parity-v1",
-        "left_observations": s.left_observations,
-        "right_observations": s.right_observations,
+        "mechanics": "distributed-parity-mechanics-v3",
+        "active_left_observations": active_left,
+        "active_right_observations": active_right,
         "total_on_budget": s.total_on_budget,
-        "constraints": sorted({(w.left_obs, w.right_obs, w.required_parity)
-                               for w in s.worlds}),
+        "constraints": canonical_constraints,
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
