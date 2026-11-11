@@ -41,7 +41,22 @@ HELDOUT and TRANSFER from those runs is rejected for split overlap.
 4. Matched family-level results for candidate, base, zero-update,
    corrupted-label, and memorizer controls. All paraphrases of one mechanic
    count as **one** unit. A perfect memorizer blocks an equally perfect
-   candidate: no control gain, no transfer credit.
+   candidate: no control gain, no transfer credit. In **each** heldout and
+   transfer split the candidate must pass at least 75% of declared families,
+   exceed **each** matched control by at least ten percentage points, **and**
+   pass a one-sided exact paired-family sign test at `p <= 0.05` against
+   every control separately. Family outcomes are all-or-nothing across a
+   family's paraphrases, and tied candidate/control outcomes are excluded
+   from the sign test. This is a conservative conjunctive prescreen, not a
+   claim of a calibrated population generalization rate.
+
+   **Counterexample, reproduced before the correction:** a candidate that
+   passes all eight families while each control passes seven of the same
+   eight cleared the old `>= 10%` gain-only screen (12.5 percentage points).
+   It has just one discordant matched family: an exact one-sided sign-test
+   `p = 1/2`, not meaningful paired evidence. The regression now blocks it.
+   A synthetic seven-out-of-eight candidate facing controls that fail every
+   family still reaches only the pending-custody disposition.
 
 ## Verdict and epistemic limit
 
@@ -52,9 +67,13 @@ fixture can return only `PENDING_INDEPENDENT_CUSTODY`, **never**
 
 The source-visible evaluator may lie about structural labels, model identity,
 optimizer steps, heldout secrecy, or observed correctness. No code inside the
-trainee's process can authenticate those physical claims. The screen does not
-estimate a population-level transfer p-value; downstream independent
-qualification must supply appropriate statistical evidence.
+trainee's process can authenticate those physical claims. The exact conditional
+sign-test tail assumes independent, exchangeable declared family-level
+discordances under its null; it cannot establish that the *actual* mechanical
+families are independent, assess an external transfer population, or account
+for evaluator fabrication. Downstream independent qualification must supply
+appropriate controlled model execution, semantic independence review,
+precommitted study design, and statistical evidence.
 
 The negative-control tests also show that two **isomorphic exact-cover graphs**
 with renamed sites and reordered crews receive different raw provenance

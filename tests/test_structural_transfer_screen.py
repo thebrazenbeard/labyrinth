@@ -227,6 +227,84 @@ class StructuralTransferScreenTests(unittest.TestCase):
                 self.assertEqual(result.disposition, "BLOCKED")
                 self.assertIn(control, " ".join(result.reasons))
 
+    def test_one_of_eight_paired_family_gain_is_not_statistically_credible(self):
+        """A 12.5-point advantage from one discordant family has p=1/2.
+
+        The prior 10-point aggregate threshold accepted this as a favorable
+        prescreen, even though each control was correct on seven of eight
+        matched mechanical families in BOTH evaluation splits.
+        """
+        manifest = self.manifest()
+        report, _ = signed_result(manifest)
+        rows = []
+        for row in report.rows:
+            # Only family zero yields a candidate win over matched controls;
+            # all other families agree with the candidate's correct answer.
+            control_pass = not row.case_id.endswith("-0-0")
+            rows.append(replace(row, base_correct=control_pass,
+                                zero_correct=control_pass,
+                                corrupted_correct=control_pass,
+                                memorizer_correct=control_pass))
+        narrow_gain = replace(report, rows=tuple(rows))
+        signature = hmac.new(
+            KEY, b"labyrinth.structural-transfer-screen.v1\x00"
+            + canonical_report(narrow_gain), "sha256").hexdigest()
+        result = assess(manifest, narrow_gain,
+                        signature_hex=signature, independent_key=KEY)
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertIn("paired", " ".join(result.reasons))
+
+    def test_seven_of_eight_paired_family_wins_remain_pending_custody(self):
+        """Strong synthetic matched evidence is never proof of neural learning."""
+        manifest = self.manifest()
+        report, _ = signed_result(manifest)
+        one_failure_each_split = replace(report, rows=tuple(
+            replace(row, candidate_correct=False)
+            if row.case_id.endswith("-7-0") else row
+            for row in report.rows))
+        signature = hmac.new(
+            KEY, b"labyrinth.structural-transfer-screen.v1\x00"
+            + canonical_report(one_failure_each_split), "sha256").hexdigest()
+        result = assess(manifest, one_failure_each_split,
+                        signature_hex=signature, independent_key=KEY)
+        self.assertEqual(result.disposition, "PENDING_INDEPENDENT_CUSTODY")
+        self.assertFalse(result.neural_learning_verified)
+        self.assertFalse(result.private_exam_qualified)
+
+    def test_six_paired_wins_one_loss_are_not_an_effect_certification(self):
+        """A large unpaired score gap is not necessarily paired significance.
+
+        Candidate 7/8, controls 2/8: six wins, one loss, one tied success.
+        The exact conditional tail is 8/128 = 0.0625, above alpha 0.05.
+        """
+        manifest = self.manifest()
+        report, _ = signed_result(manifest)
+        rows = []
+        for row in report.rows:
+            family = int(row.case_id.split("-")[1])
+            rows.append(replace(
+                row, candidate_correct=family != 7,
+                base_correct=family in (0, 7),
+                zero_correct=family in (0, 7),
+                corrupted_correct=family in (0, 7),
+                memorizer_correct=family in (0, 7),
+            ))
+        paired_report = replace(report, rows=tuple(rows))
+        signature = hmac.new(
+            KEY, b"labyrinth.structural-transfer-screen.v1\x00"
+            + canonical_report(paired_report), "sha256").hexdigest()
+        result = assess(manifest, paired_report,
+                        signature_hex=signature, independent_key=KEY)
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertIn("paired", " ".join(result.reasons))
+
+    def test_all_tied_families_do_not_supply_paired_evidence(self):
+        """Zero discordant families mean p=1, even if both models pass 8/8."""
+        from labyrinth.structural_transfer_screen import _paired_family_gain_significant
+
+        self.assertFalse(_paired_family_gain_significant((True,) * 8, (True,) * 8))
+        self.assertFalse(_paired_family_gain_significant((False,) * 8, (False,) * 8))
+
     def test_unsigned_or_altered_receipt_fails_closed(self):
         manifest = self.manifest()
         report, signature = signed_result(manifest)

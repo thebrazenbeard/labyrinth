@@ -71,40 +71,57 @@ def _public(value: Mapping[str, Any]) -> str:
         raise ValueError("public view must be a mapping")
     active_containers: set[int] = set()
     visited_nodes = 0
+    visited_characters = 0
 
-    def inspect(node: Any, path: tuple[object, ...] = ()) -> None:
-        nonlocal visited_nodes
+    def snapshot(node: Any, path: tuple[object, ...] = ()) -> Any:
+        """Validate and copy once; never serialize an uninspected source object."""
+        nonlocal visited_nodes, visited_characters
         visited_nodes += 1
         if len(path) > 32 or visited_nodes > 20_000:
             raise ValueError("public view nesting or node budget exceeded")
         is_mapping = isinstance(node, Mapping)
         is_sequence = isinstance(node, (list, tuple))
         if not is_mapping and not is_sequence:
-            return
+            # A host-controlled scalar subclass may execute arbitrary methods
+            # during json.dumps. Only inert JSON primitives cross this seam.
+            if type(node) not in (str, int, float, bool, type(None)):
+                raise ValueError("unsupported public value type")
+            if type(node) is str:
+                visited_characters += len(node)
+                if visited_characters > MAX_PUBLIC_CHARACTERS:
+                    raise ValueError("public view exceeds 16000-character limit")
+            return node
         identity = id(node)
         if identity in active_containers:
             raise ValueError("public view cycle")
         active_containers.add(identity)
         try:
             if is_mapping:
+                result: dict[str, Any] = {}
                 for key, child in node.items():
+                    if type(key) is not str:
+                        raise ValueError("evaluator-only or malformed public field")
                     # Oracle Chamber's public answer transcript has one
                     # explicitly allowed bit at answers[index].answer.
                     public_query_bit = (key == "answer" and len(path) == 2
                                         and path[0] == "answers"
                                         and type(path[1]) is int and type(child) is int
                                         and child in (0, 1))
-                    if (type(key) is not str or
-                            (key in _PRIVATE_FIELDS and not public_query_bit)):
+                    if key in _PRIVATE_FIELDS and not public_query_bit:
                         raise ValueError("evaluator-only or malformed public field")
-                    inspect(child, (*path, key))
+                    if key in result:
+                        raise ValueError("duplicate public field")
+                    visited_characters += len(key)
+                    if visited_characters > MAX_PUBLIC_CHARACTERS:
+                        raise ValueError("public view exceeds 16000-character limit")
+                    result[key] = snapshot(child, (*path, key))
+                return result
             else:
-                for index, child in enumerate(node):
-                    inspect(child, (*path, index))
+                return [snapshot(child, (*path, index))
+                        for index, child in enumerate(node)]
         finally:
             active_containers.remove(identity)
-    inspect(value)
-    raw = _json(dict(value))
+    raw = _json(snapshot(value))
     _require_unicode_scalars(raw)
     if len(raw) > MAX_PUBLIC_CHARACTERS:
         raise ValueError("public view exceeds 16000-character limit")
@@ -307,7 +324,8 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
     if type(seed) is not int or not 0 <= seed < 2**31:
         raise ValueError("invalid evaluation seed")
     public_json = _public(public_start)
-    budget = _validated_budget(public_start, max_model_calls)
+    public_snapshot = json.loads(public_json)
+    budget = _validated_budget(public_snapshot, max_model_calls)
     call_limit = min(max_model_calls, budget + 1)
     # Subclasses may override generate() and perform arbitrary, even remote,
     # effects. Only the two exact frozen control implementations are trusted.
@@ -324,7 +342,7 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
     # locality, inference weights, provider, or independence from cloud APIs.
     provenance = "DETERMINISTIC_CONTROL" if fixed else "MODEL_ADAPTER_UNATTESTED"
     session = session_factory()
-    initial = _session_view(session, first=True)
+    initial = json.loads(_public(_session_view(session, first=True)))
     last_feedback = initial
     binding = _bind_public_start(session, public_json, initial)
     history: list[dict[str, Any]] = []
@@ -369,6 +387,7 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
             else:
                 feedback = session.submit(_claim_for_host(content))
             feedback_json = _public(feedback)
+            feedback = json.loads(feedback_json)
         except Exception:
             turns.append(TurnReceipt(request, response, None, "EVALUATOR_ERROR"))
             final = "EVALUATOR_ERROR"
@@ -377,7 +396,10 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
         last_feedback = feedback
         history.append({"decision": json.loads(response), "feedback": json.loads(feedback_json)})
         final = _verdict(feedback)
-        initial = (session.view() if hasattr(session, "view") else feedback)
+        # The action/claim feedback is the *recorded* source of truth. A second
+        # view() call here could contradict it, granting an unrecorded win by
+        # combining its verdict with feedback's escape witness.
+        initial = feedback
         if decision == "CLAIM":
             break
     if not turns and _terminal(initial):
@@ -414,14 +436,14 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
         if type(receipt.max_model_calls) is not int or not 1 <= receipt.max_model_calls <= MAX_ACTIONS:
             return False
         session = session_factory()
-        initial = _session_view(session, first=True)
+        initial = json.loads(_public(_session_view(session, first=True)))
         last_feedback = initial
         if receipt.public_binding != _bind_public_start(session, receipt.public_start_json,
                                                         initial):
             return False
         if not receipt.turns and not _terminal(initial):
             return False
-        budget = _validated_budget(public_start, MAX_ACTIONS)
+        budget = _validated_budget(json.loads(receipt.public_start_json), MAX_ACTIONS)
         call_limit = min(receipt.max_model_calls, budget + 1)
         charged_actions = 0
         history: list[dict[str, Any]] = []
@@ -458,10 +480,11 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
             feedback_json = _public(feedback)
             if feedback_json != turn.public_feedback_json:
                 return False
+            feedback = json.loads(feedback_json)
             history.append({"decision": json.loads(turn.response_text),
                             "feedback": json.loads(feedback_json)})
             last_feedback = feedback
-            initial = (session.view() if hasattr(session, "view") else feedback)
+            initial = feedback
             last = _verdict(initial)
             if decision == "CLAIM" and index < len(receipt.turns) - 1:
                 return False
