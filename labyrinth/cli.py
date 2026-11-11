@@ -129,6 +129,8 @@ def _parser() -> argparse.ArgumentParser:
                           help="Constant-exam wording variant (0..31), mechanics unchanged")
     minotaur.add_argument("--exact-cover", action="store_true",
                           help="Opt in to a third, exact-cover mechanic (public v2 receipt; not neural transfer)")
+    minotaur.add_argument("--temporal-repair", action="store_true",
+                          help="With --exact-cover, opt in to a fourth timed-repair mechanic (public v3)")
     minotaur.add_argument("--report", metavar="JSON", help="Exclusively create a JSON receipt")
     subcommands.add_parser("train-hf", help="Opt-in bounded LoRA update of an existing local HF checkpoint")
     subcommands.add_parser("eval-hf", help="Reload and evaluate a saved HF LoRA pilot in a new process")
@@ -203,7 +205,8 @@ def main(argv: list[str] | None = None) -> int:
             from .minotaur_public_exam import run_public_exam
 
             report = run_public_exam(seed=args.seed, variant=args.variant,
-                                     include_exact_cover=args.exact_cover)
+                                     include_exact_cover=args.exact_cover,
+                                     include_temporal_repair=args.temporal_repair)
         else:
             adapter = _load_model(args)
             if args.command == "run":
