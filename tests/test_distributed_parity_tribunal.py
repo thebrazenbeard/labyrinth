@@ -207,6 +207,46 @@ class DistributedParityTribunalTests(unittest.TestCase):
         self.assertEqual(mechanics_fingerprint(source),
                          mechanics_fingerprint(relabeled))
 
+    def test_unused_observation_slots_do_not_manufacture_new_mechanics(self):
+        # An observation never appearing in a possible world is unreachable.
+        # It can always be assigned zero, leaving the win/UNSAT rules intact.
+        source = Scenario((World(0, 0, 1), World(0, 1, 0)), 2, 2, 1)
+        padded = Scenario((World(2, 1, 1), World(2, 3, 0)), 4, 4, 1)
+        self.assertNotEqual(fingerprint(source), fingerprint(padded))
+        self.assertEqual(test_owned_oracle(source), test_owned_oracle(padded))
+        self.assertEqual(mechanics_fingerprint(source), mechanics_fingerprint(padded))
+
+    def test_swapping_symmetric_actors_keeps_mechanical_identity(self):
+        source = Scenario((World(0, 0, 0), World(1, 0, 1),
+                           World(2, 1, 0)), 3, 2, 2)
+        swapped = Scenario(
+            tuple(World(w.right_obs, w.left_obs, w.required_parity)
+                  for w in source.worlds), 2, 3, 2)
+        self.assertNotEqual(fingerprint(source), fingerprint(swapped))
+        self.assertEqual(test_owned_oracle(source), test_owned_oracle(swapped))
+        self.assertEqual(mechanics_fingerprint(source), mechanics_fingerprint(swapped))
+
+    def test_random_unreachable_padding_and_actor_swap(self):
+        rng = random.Random(0xD1572026)
+        for seed in range(40):
+            worlds = tuple(World(rng.randrange(2), rng.randrange(2),
+                                 rng.randrange(2))
+                           for _ in range(rng.randint(1, 10)))
+            budget = rng.randint(0, 4)
+            source = Scenario(worlds, 2, 2, budget)
+            left_map, right_map = rng.sample(range(4), 2), rng.sample(range(4), 2)
+            padded_swapped = Scenario(
+                tuple(World(right_map[w.right_obs], left_map[w.left_obs],
+                            w.required_parity) for w in reversed(worlds)),
+                4, 4, budget)
+            with self.subTest(seed=seed):
+                self.assertEqual(test_owned_oracle(source),
+                                 test_owned_oracle(padded_swapped))
+                self.assertEqual(mechanics_fingerprint(source),
+                                 mechanics_fingerprint(padded_swapped))
+                self.assertNotEqual(fingerprint(source),
+                                    fingerprint(padded_swapped))
+
     def test_random_local_label_permutations_preserve_mechanics(self):
         rng = random.Random(0xC0FFEE)
         for seed in range(40):

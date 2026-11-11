@@ -80,27 +80,42 @@ def fingerprint(s):
 
 
 def mechanics_fingerprint(s):
-    """Role-preserving, label-invariant ID for this finite constraint set.
+    """Bounded identity of reachably equivalent, symmetric parity mechanics.
 
-    World order, duplicate worlds, and consistent local observation renaming
-    cannot manufacture a new mechanic. This does NOT establish semantic
-    equivalence across different rulesets or certify independent custody.
+    Distinct case receipts remain in fingerprint(s). Here, an observation index
+    absent from every possible world cannot affect any winning policy: its bit
+    can always be zero. The silent actors also have symmetric roles. Canonical
+    identity therefore removes unreachable slots and allows actor exchange,
+    alongside world reordering, duplicate worlds and local label permutations.
+    This does not prove arbitrary cross-ruleset equivalence or private custody.
     """
     check_scenario(s)
     constraints = {(w.left_obs, w.right_obs, w.required_parity)
                    for w in s.worlds}
-    # Each actor has at most four local labels, so exhaustive canonicalization
-    # requires at most 4! * 4! = 576 finite label assignments.
-    canonical_constraints = min(
-        tuple(sorted((left_perm[left], right_perm[right], parity)
-                     for left, right, parity in constraints))
-        for left_perm in permutations(range(s.left_observations))
-        for right_perm in permutations(range(s.right_observations))
+    left_used = tuple(sorted({left for left, _, _ in constraints}))
+    right_used = tuple(sorted({right for _, right, _ in constraints}))
+    left_index = {label: i for i, label in enumerate(left_used)}
+    right_index = {label: i for i, label in enumerate(right_used)}
+    reachable = tuple((left_index[left], right_index[right], parity)
+                      for left, right, parity in constraints)
+    orientations = (
+        (len(left_used), len(right_used), reachable),
+        (len(right_used), len(left_used),
+         tuple((right, left, parity) for left, right, parity in reachable)),
+    )
+    # Max 2 * 4! * 4! = 1152 finite assignments, independent of world order.
+    active_left, active_right, canonical_constraints = min(
+        (n_left, n_right,
+         tuple(sorted((left_perm[left], right_perm[right], parity)
+                      for left, right, parity in worlds)))
+        for n_left, n_right, worlds in orientations
+        for left_perm in permutations(range(n_left))
+        for right_perm in permutations(range(n_right))
     )
     payload = {
-        "mechanics": "distributed-parity-v1",
-        "left_observations": s.left_observations,
-        "right_observations": s.right_observations,
+        "mechanics": "distributed-parity-mechanics-v3",
+        "active_left_observations": active_left,
+        "active_right_observations": active_right,
         "total_on_budget": s.total_on_budget,
         "constraints": canonical_constraints,
     }
