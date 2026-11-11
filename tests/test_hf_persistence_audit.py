@@ -128,6 +128,31 @@ class HfPersistenceAuditTests(unittest.TestCase):
         self.assertTrue(any("training-report bytes" in reason
                             for reason in result["failures"]), result)
 
+    def test_receipt_replaced_with_symlink_between_check_and_open_fails(self):
+        # The initial reload path is an inconsistent regular file. Replace
+        # that pathname with a symlink to clean bytes at the actual open.
+        # The handle must be linked back to the checked file's identity.
+        clean = self.root / "clean_reload.json"
+        clean.write_text(json.dumps(self.reload), encoding="utf-8")
+        self.reload["training_report_sha256"] = "0" * 64
+        self._write_reload()
+        original_open = Path.open
+        swaps = []
+
+        def replace_before_open(path, *args, **kwargs):
+            if path == self.reload_path and not swaps:
+                path.unlink()
+                path.symlink_to(clean)
+                swaps.append("swapped")
+            return original_open(path, *args, **kwargs)
+
+        with patch.object(Path, "open", replace_before_open):
+            result = self._audit()
+        self.assertEqual(swaps, ["swapped"])
+        self.assertEqual(result["status"], "FAIL", result)
+        self.assertTrue(any("receipt identity changed during open" in reason
+                            for reason in result["failures"]), result)
+
     def test_duplicate_key_reload_json_is_rejected(self):
         self.reload_path.write_text('{"schema":"x","schema":"y"}', encoding="utf-8")
         self.assertEqual(self._audit()["status"], "FAIL")

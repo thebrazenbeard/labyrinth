@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -21,11 +23,27 @@ SCHEMA = "labyrinth.hf-persistence-audit.v1"
 
 
 def _read_regular_bounded(path: Path) -> bytes:
-    """Read only a regular nonsymlink source; cap input even across growth."""
-    if not path.is_file() or path.is_symlink():
+    """Bind bounded receipt bytes to checked regular-file identity.
+
+    Compare pathname and opened-handle identities before reading, and recheck
+    the pathname after the read. This rejects observed replacement races; it
+    is not an atomic snapshot against in-place writes or adversarial ABA swaps.
+    """
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode):
         raise ValueError("receipt must be a regular nonsymlink file")
     with path.open("rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(opened.st_mode)
+                or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)):
+            raise ValueError("receipt identity changed during open")
         raw = stream.read(_MAX_JSON_BYTES + 1)
+        after_read = os.fstat(stream.fileno())
+    after_path = path.lstat()
+    if (not stat.S_ISREG(after_path.st_mode)
+            or (opened.st_dev, opened.st_ino) != (after_read.st_dev, after_read.st_ino)
+            or (opened.st_dev, opened.st_ino) != (after_path.st_dev, after_path.st_ino)):
+        raise ValueError("receipt identity changed during read")
     if len(raw) > _MAX_JSON_BYTES:
         raise ValueError("receipt exceeds 8 MiB input limit")
     return raw
