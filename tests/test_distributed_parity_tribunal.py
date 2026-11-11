@@ -114,6 +114,20 @@ class DistributedParityTribunalTests(unittest.TestCase):
                    return_value=None):
             self.assertEqual(search_policy(s)["verdict"], "UNKNOWN")
 
+    def test_two_correlated_lies_cannot_certify_specific_wrong_policy(self):
+        s = families()["coordinated_parity"]
+        # Existential solvers may correctly say SOME solution exists; that
+        # does not verify THIS proposal, if both direct replay paths lie.
+        with (patch("labyrinth.distributed_parity_tribunal.verify_policy",
+                    return_value={"verdict": "VERIFIED_WIN",
+                                  "rules_fingerprint": fingerprint(s)}),
+              patch("labyrinth.distributed_parity_tribunal.independent_witness_check",
+                    return_value=True)):
+            self.assertEqual(search_policy(s)["verdict"], "UNKNOWN")
+            self.assertEqual(adjudicate_unexpected(s, ((0, 0), (0, 0)),
+                                                   "VERIFIED_FAILURE")["verdict"],
+                             "UNKNOWN")
+
     def test_new_communication_rules_are_not_existing_wins(self):
         s = families()["and_paradox"]
         r = novel_rule_challenge(s, {"new_channel": "1-bit herald",
@@ -176,6 +190,17 @@ class DistributedParityTribunalTests(unittest.TestCase):
                 self.assertEqual(independent_dfs_exists(s), expected)
                 self.assertEqual(search_policy(s)["verdict"] == "VERIFIED_WIN",
                                  expected)
+                candidate_rng = random.Random(seed ^ 0xFACE81)
+                candidate_bits = tuple(candidate_rng.randrange(2)
+                                       for _ in range(left + right))
+                candidate = (candidate_bits[:left], candidate_bits[left:])
+                candidate_expected = (
+                    sum(candidate_bits) <= budget and
+                    all((candidate_bits[w.left_obs] ^
+                         candidate_bits[left + w.right_obs]) == w.required_parity
+                        for w in worlds))
+                self.assertEqual(independent_gf2_exists(s, fixed_policy=candidate),
+                                 candidate_expected)
                 lperm, rperm = list(range(left)), list(range(right))
                 rng.shuffle(lperm)
                 rng.shuffle(rperm)

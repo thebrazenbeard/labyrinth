@@ -122,7 +122,7 @@ def independent_witness_check(s, policy):
                for w in s.worlds)
 
 
-def independent_gf2_exists(s, *, state_cap=100000):
+def independent_gf2_exists(s, *, state_cap=100000, fixed_policy=None):
     """Independent row elimination over GF(2), then bounded free-bit search.
 
     Cardinality budget is not linear, so free assignments must be enumerated.
@@ -134,11 +134,25 @@ def independent_gf2_exists(s, *, state_cap=100000):
     if state_cap == 0:
         return None
     n = s.left_observations + s.right_observations
-    coefficients = (1 << n) - 1
+    constraints = [((1 << w.left_obs) |
+                    (1 << (s.left_observations + w.right_obs)),
+                    w.required_parity) for w in s.worlds]
+    if fixed_policy is not None:
+        if (type(fixed_policy) is not tuple or len(fixed_policy) != 2 or
+                type(fixed_policy[0]) is not tuple or
+                type(fixed_policy[1]) is not tuple or
+                len(fixed_policy[0]) != s.left_observations or
+                len(fixed_policy[1]) != s.right_observations):
+            return False
+        fixed_bits = fixed_policy[0] + fixed_policy[1]
+        if any(type(bit) is not int or bit not in (0, 1)
+               for bit in fixed_bits):
+            return False
+        # Pin every variable algebraically, so existence now checks the
+        # SPECIFIC claimed witness rather than some unrelated valid policy.
+        constraints.extend((1 << i, bit) for i, bit in enumerate(fixed_bits))
     rows = {}
-    for world in s.worlds:
-        coeff = (1 << world.left_obs) | (1 << (s.left_observations + world.right_obs))
-        rhs = world.required_parity
+    for coeff, rhs in constraints:
         while coeff:
             pivot = (coeff & -coeff).bit_length() - 1
             if pivot not in rows:
@@ -230,12 +244,15 @@ def search_policy(s, *, node_limit=100000, independent_cap=100000):
         if verify_policy(s, proposal)["verdict"] == WIN:
             exact = independent_witness_check(s, proposal)
             algebra = independent_gf2_exists(s, state_cap=independent_cap)
+            pinned = independent_gf2_exists(s, state_cap=independent_cap,
+                                            fixed_policy=proposal)
             depth = independent_dfs_exists(s, state_cap=independent_cap)
-            if exact and algebra is True and depth is True:
+            if exact and pinned is True and algebra is True and depth is True:
                 return {"verdict": WIN, "rules_fingerprint": rules,
                         "policy": proposal, "policies_examined": examined,
                         "independent_witness": True,
-                        "independent_gf2": True, "independent_dfs": True}
+                        "independent_gf2": True, "independent_gf2_pinned": True,
+                        "independent_dfs": True}
             return {"verdict": UNKNOWN, "rules_fingerprint": rules,
                     "reason": "source and independent verifier disagree"}
     algebra = independent_gf2_exists(s, state_cap=independent_cap)
@@ -257,9 +274,10 @@ def adjudicate_unexpected(s, proposal, prior_verdict=UNKNOWN):
     rules = fingerprint(s)
     actual = verify_policy(s, proposal)
     independent = independent_witness_check(s, proposal)
+    pinned = independent_gf2_exists(s, fixed_policy=proposal)
     trusted = (type(actual) is dict and actual.get("rules_fingerprint") == rules
                and actual.get("verdict") in (WIN, FAILURE))
-    if not trusted or (actual["verdict"] == WIN) != independent:
+    if not trusted or (actual["verdict"] == WIN) != independent or pinned != independent:
         return {"verdict": UNKNOWN, "rules_fingerprint": rules,
                 "independently_replayed": False,
                 "reason": "replay disagreement; preserve challenge"}

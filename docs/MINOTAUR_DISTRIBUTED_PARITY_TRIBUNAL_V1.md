@@ -50,7 +50,8 @@ is possible.
 - **Independent witness replay:** separately checks exact types, cardinality,
   and each world without calling the source replay.
 - **Independent existence checker A:** Gaussian elimination over GF(2), plus
-  free-variable enumeration for the non-linear budget.
+  free-variable enumeration for the non-linear budget; it also supports
+  **pinned proposed-policy equations** to verify a particular witness.
 - **Independent existence checker B:** independently coded constraint-pruning
   DFS that enforces budget before accepting a complete assignment.
 - **Test-owned oracle:** another exhaustive bit-vector enumeration, wholly in
@@ -97,6 +98,15 @@ known channel labels). The classifier now normalizes Unicode NFKC, rejects
 control/format codepoints and punctuation-only pseudo-capabilities, and
 compares canonical known-channel terms. This is **INTERNAL_REVIEW**, not a
 physically isolated evaluator or model transfer result.
+
+A second hostile mutant patched **both** the source witness replay and direct
+independent witness checker to falsely accept an invalid policy. Before the
+correction, the system claimed WIN because its independent existence solvers
+had found that *some* policy existed. This was a genuine semantic gap: an
+existence theorem is not a certificate for the submitted solution. The red
+test now requires GF(2) to pin every bit of the *specific proposed policy*,
+including its cardinality budget. The two-correlated-lie attack now returns
+`UNKNOWN`, and seeded metamorphic checks exercise this pinned witness test.
 
 ## Honest controls and learning ceiling
 
