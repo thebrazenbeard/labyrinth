@@ -16,6 +16,16 @@ or timed task scheduling. Changing the framing does not create new mechanics.
 Allowing communication, shared observation, pre-shared randomness, adaptive
 responses, or more actions changes the game and needs a new declared ruleset.
 
+The exact `fingerprint(s)` is an **ordered case/provenance ID**. It intentionally
+changes if the declaration changes order, even if the constraints are
+semantically identical. The separate `mechanics_fingerprint(s)` canonicalizes
+the world triples as a sorted set and is invariant to world order and
+redundant duplicate constraints. `public_view` exposes both as
+`case_fingerprint` and `mechanics_fingerprint`; the former is used for exact
+public memorizer controls. Neither hash by itself establishes independent
+reasoning mechanics, since observation-label permutations and deeper
+graph-isomorphisms may preserve the problem while changing both hashes.
+
 ## Reproducible scope
 
 Source: `labyrinth/distributed_parity_tribunal.py`
@@ -107,6 +117,22 @@ positive, explicitly proposed new channel remains an unverified
 `NOVEL_RULESET_CHALLENGE`. This lexical recognizer is **not** a formal semantic
 equivalence oracle: unanticipated phrasings remain a known limitation, and
 novelty is merely a proposal for outside review, never an automatic victory.
+
+The Skeptic then falsified an overbroad no-op patch that rejected any phrase
+starting with `no`, `without`, or `unchanged`, including meaningful additions:
+`no wires, but a 1-bit optical beacon`; `without radio, add a shared semaphore`;
+and `unchanged isolation except a new 1-bit herald`. Three RED assertions were
+preserved and turned GREEN by removing that prefix rule. Only exact canonical
+known no-op phrases are recognized. This matters more than false novelty:
+**an unexpected valid rule proposal must remain admissible for independent
+review despite its rhetorical wording**.
+
+Skeptic also demonstrated an identity-contamination trap: reversing the four
+declared worlds in `coordinated_parity` changed the original ordered case hash
+despite leaving the complete constraint set and verdict unchanged. A new
+RED/GREEN test now requires a separate order/duplicate-insensitive normalized
+constraint ID while preserving the raw ordered provenance digest. An evaluator
+must not count a reshuffle as a new independent reasoning challenge.
 
 A second hostile mutant patched **both** the source witness replay and direct
 independent witness checker to falsely accept an invalid policy. Before the

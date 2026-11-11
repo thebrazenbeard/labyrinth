@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from labyrinth.distributed_parity_tribunal import (
     World, Scenario, adjudicate_unexpected, catalogue_control, check_scenario,
-    families, fingerprint, fixed_script_control, independent_dfs_exists,
+    families, fingerprint, mechanics_fingerprint, fixed_script_control, independent_dfs_exists,
     independent_gf2_exists, independent_witness_check, novel_rule_challenge,
     public_view, search_policy, verify_policy,
 )
@@ -134,6 +134,15 @@ class DistributedParityTribunalTests(unittest.TestCase):
                                       "reason": "send right observation to left"})
         self.assertEqual(r["verdict"], "NOVEL_RULESET_CHALLENGE")
         self.assertEqual(r["independent_verification"], "NOT_PERFORMED")
+        for genuinely_new in (
+                "no wires, but a 1-bit optical beacon",
+                "without radio, add a shared semaphore",
+                "unchanged isolation except a new 1-bit herald"):
+            with self.subTest(genuinely_new=genuinely_new):
+                changed = novel_rule_challenge(
+                    s, {"new_channel": genuinely_new,
+                        "reason": "Separate physical signal added to isolated actors"})
+                self.assertEqual(changed["verdict"], "NOVEL_RULESET_CHALLENGE")
         for known in ("none", "private observation", "simultaneous output"):
             self.assertEqual(novel_rule_challenge(s, {"new_channel": known,
                                                      "reason": "existing"})["verdict"],
@@ -164,7 +173,25 @@ class DistributedParityTribunalTests(unittest.TestCase):
         views = [public_view(s, variant=i) for i in range(8)]
         self.assertEqual(len({v["prompt"] for v in views}), 8)
         self.assertEqual({v["mechanics_fingerprint"] for v in views},
-                         {fingerprint(s)})
+                         {mechanics_fingerprint(s)})
+
+    def test_world_order_is_provenance_not_distinct_mechanics(self):
+        original = families()["coordinated_parity"]
+        reversed_worlds = replace(original,
+                                  worlds=tuple(reversed(original.worlds)))
+        repeated = replace(original, worlds=original.worlds + original.worlds[:1])
+        changed = replace(original, worlds=original.worlds[:-1])
+        self.assertNotEqual(fingerprint(original), fingerprint(reversed_worlds))
+        self.assertEqual(mechanics_fingerprint(original),
+                         mechanics_fingerprint(reversed_worlds))
+        self.assertEqual(mechanics_fingerprint(original),
+                         mechanics_fingerprint(repeated))
+        self.assertNotEqual(mechanics_fingerprint(original),
+                            mechanics_fingerprint(changed))
+        self.assertEqual(public_view(original)["mechanics_fingerprint"],
+                         public_view(reversed_worlds)["mechanics_fingerprint"])
+        self.assertNotEqual(public_view(original)["case_fingerprint"],
+                            public_view(reversed_worlds)["case_fingerprint"])
 
     def test_exact_schema_rejects_python_bool_and_oversized_world(self):
         s = families()["coordinated_parity"]

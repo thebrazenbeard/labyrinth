@@ -64,6 +64,7 @@ def check_scenario(s):
 
 
 def fingerprint(s):
+    """Order-sensitive exact case/provenance ID, NOT a mechanics equivalence ID."""
     check_scenario(s)
     payload = {
         "mechanics": "distributed-parity-v1",
@@ -75,6 +76,25 @@ def fingerprint(s):
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def mechanics_fingerprint(s):
+    """Constraint-set ID invariant to world order and redundant duplicates.
+
+    It is not a full semantic-isomorphism equivalence class: e.g. renaming
+    observation indices may preserve solvability without preserving this ID.
+    """
+    check_scenario(s)
+    payload = {
+        "mechanics": "distributed-parity-v1",
+        "left_observations": s.left_observations,
+        "right_observations": s.right_observations,
+        "total_on_budget": s.total_on_budget,
+        "constraints": sorted({(w.left_obs, w.right_obs, w.required_parity)
+                               for w in s.worlds}),
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _policy_shape(s, policy):
@@ -311,10 +331,10 @@ def novel_rule_challenge(s, proposal):
         "simultaneous output", "simultaneous outputs",
         "without communication", "existing channel", "same rules",
     }
-    denial_prefix = channel.split(" ", 1)[0] in {
-        "no", "none", "without", "existing", "unchanged", "current",
-    }
-    if not channel or channel in known_noops or denial_prefix or not reason:
+    # Do not reject on the FIRST word: "without radio, add an optical beacon"
+    # is a real proposal for changing the permitted signals. A closed lexical
+    # no-op set cannot settle unconstrained semantic equivalence.
+    if not channel or channel in known_noops or not reason:
         return {"verdict": UNKNOWN, "rules_fingerprint": rules}
     return {"verdict": NOVEL, "rules_fingerprint": rules,
             "independent_verification": "NOT_PERFORMED",
@@ -347,7 +367,8 @@ def public_view(s, *, variant=0):
     framing = _VIEWS[variant % len(_VIEWS)]
     scenarios = ", ".join(f"({w.left_obs},{w.right_obs})->{w.required_parity}"
                            for w in s.worlds)
-    return {"mechanics_fingerprint": fingerprint(s),
+    return {"mechanics_fingerprint": mechanics_fingerprint(s),
+            "case_fingerprint": fingerprint(s),
             "prompt": (f"{framing}: isolated actors observe their own local index, "
                        "cannot communicate, and simultaneously assert one bit. "
                        "Commit to one deterministic lookup per actor that makes "
