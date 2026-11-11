@@ -45,6 +45,14 @@ def _sha(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _require_unicode_scalars(value: str) -> None:
+    """Reject lone surrogates before text enters a UTF-8 receipt boundary."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("invalid Unicode scalar text") from exc
+
+
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     value: dict[str, Any] = {}
     for key, element in pairs:
@@ -61,25 +69,43 @@ def _no_nan(_value: str) -> Any:
 def _public(value: Mapping[str, Any]) -> str:
     if not isinstance(value, Mapping):
         raise ValueError("public view must be a mapping")
+    active_containers: set[int] = set()
+    visited_nodes = 0
+
     def inspect(node: Any, path: tuple[object, ...] = ()) -> None:
-        if isinstance(node, Mapping):
-            for key, child in node.items():
-                # Oracle Chamber's explicit public answer transcript uses
-                # answers[index].answer for a returned 0/1 bit. A hidden
-                # answer anywhere else remains barred from the model prompt.
-                public_query_bit = (key == "answer" and len(path) == 2
-                                    and path[0] == "answers"
-                                    and type(path[1]) is int and type(child) is int
-                                    and child in (0, 1))
-                if (type(key) is not str or
-                        (key in _PRIVATE_FIELDS and not public_query_bit)):
-                    raise ValueError("evaluator-only or malformed public field")
-                inspect(child, (*path, key))
-        elif isinstance(node, (list, tuple)):
-            for index, child in enumerate(node):
-                inspect(child, (*path, index))
+        nonlocal visited_nodes
+        visited_nodes += 1
+        if len(path) > 32 or visited_nodes > 20_000:
+            raise ValueError("public view nesting or node budget exceeded")
+        is_mapping = isinstance(node, Mapping)
+        is_sequence = isinstance(node, (list, tuple))
+        if not is_mapping and not is_sequence:
+            return
+        identity = id(node)
+        if identity in active_containers:
+            raise ValueError("public view cycle")
+        active_containers.add(identity)
+        try:
+            if is_mapping:
+                for key, child in node.items():
+                    # Oracle Chamber's public answer transcript has one
+                    # explicitly allowed bit at answers[index].answer.
+                    public_query_bit = (key == "answer" and len(path) == 2
+                                        and path[0] == "answers"
+                                        and type(path[1]) is int and type(child) is int
+                                        and child in (0, 1))
+                    if (type(key) is not str or
+                            (key in _PRIVATE_FIELDS and not public_query_bit)):
+                        raise ValueError("evaluator-only or malformed public field")
+                    inspect(child, (*path, key))
+            else:
+                for index, child in enumerate(node):
+                    inspect(child, (*path, index))
+        finally:
+            active_containers.remove(identity)
     inspect(value)
     raw = _json(dict(value))
+    _require_unicode_scalars(raw)
     if len(raw) > MAX_PUBLIC_CHARACTERS:
         raise ValueError("public view exceeds 16000-character limit")
     return raw
@@ -89,6 +115,9 @@ def _parse(raw: str) -> tuple[str, Any]:
     if type(raw) is not str or len(raw) > MAX_RESPONSE_CHARACTERS:
         raise ValueError("oversized or non-text adapter response")
     item = json.loads(raw, object_pairs_hook=_unique_pairs, parse_constant=_no_nan)
+    # Escaped JSON \uD800 is ASCII on the wire but decodes to a lone surrogate;
+    # any nested string may later reach a hash or public receipt serializer.
+    _require_unicode_scalars(_json(item))
     if not isinstance(item, dict) or type(item.get("kind")) is not str:
         raise ValueError("adapter response must specify a kind")
     if item["kind"] == "ACTION" and set(item) == {"kind", "action"}:
@@ -290,6 +319,7 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
     model_id = adapter.model_id
     if type(model_id) is not str or not 1 <= len(model_id) <= 256:
         raise ValueError("unattested model ID must be bounded text")
+    _require_unicode_scalars(model_id)
     # The caller's authorization flag cannot attest an arbitrary adapter's
     # locality, inference weights, provider, or independence from cloud APIs.
     provenance = "DETERMINISTIC_CONTROL" if fixed else "MODEL_ADAPTER_UNATTESTED"
@@ -314,7 +344,15 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
         try:
             decision, content = _parse(response)
         except (ValueError, TypeError, json.JSONDecodeError, RecursionError):
-            turns.append(TurnReceipt(request, str(response)[:MAX_RESPONSE_CHARACTERS],
+            # Never call __str__ on a malformed adapter object: its conversion
+            # can execute arbitrary code, throw, or allocate unbounded text.
+            # The adapter boundary admits only an exact string as evidence.
+            safe_response = response[:MAX_RESPONSE_CHARACTERS] if type(response) is str else ""
+            try:
+                _require_unicode_scalars(safe_response)
+            except ValueError:
+                safe_response = ""
+            turns.append(TurnReceipt(request, safe_response,
                                      None, "MODEL_OUTPUT_INVALID"))
             final = "MODEL_OUTPUT_INVALID"
             break
