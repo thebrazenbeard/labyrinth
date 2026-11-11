@@ -8,7 +8,7 @@ import sys
 import tempfile
 import unittest
 
-from test_hf_report_audit import pilot_fixture
+from tests.test_hf_report_audit import pilot_fixture
 from labyrinth.hf_pilot import EVAL_SCHEMA
 
 
