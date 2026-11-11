@@ -10,6 +10,7 @@ from labyrinth.structural_transfer_screen import (
     assess, canonical_report, precommit,
 )
 from labyrinth.minotaur_public_exam import run_public_exam
+from labyrinth.exact_cover_tribunal import Scenario, fingerprint
 
 
 KEY = b"test-only-evaluator-key-not-a-secret" + b"+" * 20
@@ -126,6 +127,37 @@ class StructuralTransferScreenTests(unittest.TestCase):
             precommit(tuple(records), lineage(), evaluator_sha256=digest("evaluator"),
                       dataset_sha256=digest("dataset"), source_public=False)
 
+    def test_relabelled_isomorphic_cover_graph_is_only_declared_distinct(self):
+        # These are the SAME exact-cover incidence mechanics under a vertex
+        # bijection and reordered crew slots. A provenance fingerprint of raw
+        # names/order is not a semantic identity or a blinded split proof.
+        first = Scenario(("A", "B", "C", "D", "E", "F"),
+                         (("A", "B", "C"), ("D", "E", "F")), 2)
+        relabel = Scenario(("Q", "R", "S", "U", "V", "W"),
+                           (("U", "V", "W"), ("Q", "R", "S")), 2)
+        self.assertNotEqual(fingerprint(first), fingerprint(relabel))
+        rename = dict(zip(first.sites, relabel.sites))
+        self.assertEqual({frozenset(rename[site] for site in crew)
+                          for crew in first.crews},
+                         {frozenset(crew) for crew in relabel.crews})
+        records = list(cases())
+        heldout_index = next(i for i, c in enumerate(records) if c.split == "heldout")
+        transfer_index = next(i for i, c in enumerate(records) if c.split == "transfer")
+        records[heldout_index] = replace(records[heldout_index],
+                                         mechanic_sha256=fingerprint(first))
+        records[transfer_index] = replace(records[transfer_index],
+                                          mechanic_sha256=fingerprint(relabel))
+        manifest = precommit(tuple(records), lineage(),
+                             evaluator_sha256=digest("evaluator"),
+                             dataset_sha256=digest("dataset"), source_public=False)
+        report, signature = signed_result(manifest)
+        # The screen cannot deduce graph isomorphism from opaque SHA strings;
+        # its most favorable verdict remains PENDING physical custody.
+        result = assess(manifest, report, signature_hex=signature, independent_key=KEY)
+        self.assertEqual(result.disposition, "PENDING_INDEPENDENT_CUSTODY")
+        self.assertFalse(result.neural_learning_verified)
+        self.assertFalse(result.private_exam_qualified)
+
     def test_zero_update_checkpoint_cannot_pass_training_transfer_screen(self):
         manifest = precommit(cases(), lineage(updated=False),
                              evaluator_sha256=digest("evaluator"),
@@ -143,6 +175,27 @@ class StructuralTransferScreenTests(unittest.TestCase):
         result = assess(manifest, report, signature_hex=signature, independent_key=KEY)
         self.assertEqual(result.disposition, "BLOCKED")
         self.assertIn("reload", " ".join(result.reasons))
+
+    def test_identical_checkpoint_cannot_claim_gain_over_control(self):
+        # A source-signed report may *say* the candidate improves over a
+        # control even when both identify exactly the same checkpoint bytes.
+        # That claim is self-contradictory evidence, regardless of HMAC.
+        for control in ("base", "zero_update", "corrupted_label"):
+            with self.subTest(control=control):
+                stated_lineage = lineage()
+                same_bytes = getattr(stated_lineage, control + "_sha256")
+                contradictory = replace(
+                    stated_lineage, candidate_after_sha256=same_bytes,
+                    candidate_reload_sha256=same_bytes)
+                manifest = precommit(cases(), contradictory,
+                                     evaluator_sha256=digest("evaluator"),
+                                     dataset_sha256=digest("dataset"),
+                                     source_public=False)
+                report, signature = signed_result(manifest)
+                result = assess(manifest, report, signature_hex=signature,
+                                independent_key=KEY)
+                self.assertEqual(result.disposition, "BLOCKED")
+                self.assertIn("identical", " ".join(result.reasons))
 
     def test_source_public_receipt_never_qualifies_private_transfer(self):
         manifest = self.manifest(source_public=True)
