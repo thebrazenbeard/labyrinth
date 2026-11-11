@@ -109,6 +109,12 @@ def _parser() -> argparse.ArgumentParser:
     hf_audit = subcommands.add_parser("audit-hf-report", help="Offline internal consistency audit of a saved HF LoRA pilot")
     hf_audit.add_argument("--input", metavar="JSON", required=True, help="Saved HF pilot report")
     hf_audit.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
+    persistence = subcommands.add_parser(
+        "audit-hf-persistence", help="Check paired LoRA train/reload receipts against local checkpoint bytes")
+    persistence.add_argument("--run-dir", required=True, help="Saved LoRA training run directory")
+    persistence.add_argument("--reload-report", required=True, metavar="JSON")
+    persistence.add_argument("--base-model-dir", required=True, help="Independently supplied base checkpoint")
+    persistence.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
     rg = subcommands.add_parser("benchmark-rg", help="Optional Reasoning Gym development-only scoring; not sealed evaluation")
     rg.add_argument("--dataset", required=True, help="Registered reasoning-gym task identifier")
     rg.add_argument("--size", type=_positive, default=16, help="Number of development cases (max 128)")
@@ -177,6 +183,10 @@ def main(argv: list[str] | None = None) -> int:
                                   artifact=load_json(args.artifact, strict=True) if args.artifact else None)
         elif args.command == "audit-hf-report":
             report = audit_hf_report(load_json(args.input, strict=True))
+        elif args.command == "audit-hf-persistence":
+            from .hf_persistence_audit import audit_hf_persistence
+
+            report = audit_hf_persistence(args.run_dir, args.reload_report, args.base_model_dir)
         elif args.command == "train-toy":
             report = run_toy_experiment(
                 seed=args.seed, train_count=args.train_count, eval_count=args.eval_count,
@@ -232,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))
         if args.command == "minotaur-exam":
             return 0 if report["summary"]["independent_checks_agree"] else 2
-        return 0 if args.command not in ("audit-report", "audit-hf-report") or report["status"] == "PASS" else 2
+        return 0 if args.command not in ("audit-report", "audit-hf-report", "audit-hf-persistence") or report["status"] == "PASS" else 2
     except (ValueError, TypeError, OSError, json.JSONDecodeError, AdapterError) as exc:
         print(f"labyrinth: {exc}", file=sys.stderr)
         return 2

@@ -142,6 +142,10 @@ python -m labyrinth train-hf --model-path LOCAL_HF_MODEL_DIR --output-dir NEW_EM
 python -m labyrinth eval-hf --run-dir NEW_EMPTY_PARENT/RUN_001 --report NEW_EMPTY_PARENT/reload.json
 # Offline check of a saved HF pilot report's internally reproducible fields:
 python -m labyrinth audit-hf-report --input NEW_EMPTY_PARENT/RUN_001/pilot_report.json
+# File-backed paired receipt gate: requires the separately written reload report,
+# the complete run directory and a separately supplied copy of the exact base.
+python -m labyrinth audit-hf-persistence --run-dir NEW_EMPTY_PARENT/RUN_001 \
+  --reload-report NEW_EMPTY_PARENT/reload.json --base-model-dir LOCAL_HF_MODEL_DIR
 ```
 
 This path never downloads weights, installs packages, runs arbitrary model text, or replaces the base checkpoint. It rejects existing output directories and checkpoints exceeding its strict 1 GiB no-quantization limit; therefore the existing ~6.15 GB 3B-class local checkpoint on Lappy is **not eligible** for this initial pilot. Its default two steps consume only two of eight default generated training examples. The public finite mazes are a mechanism smoke test, **not** a qualified learning effect. New runs from the v3 pilot use a **zero-learning-rate, same-exposure placebo**
@@ -161,6 +165,18 @@ separates numeric correctness from the trivial constant format token but does
 not make public finite arithmetic templates an independent reasoning exam.
 
 `audit-hf-report` is dependency-free and re-generates the declared train/eval case IDs, held-out prompt commitment, control metadata, training visit order, and reported evaluation metrics. It verifies file/tensor **digest receipt syntax**, but does not open or authenticate the checkpoint files. For responses whose entire text is recoverable from the stored 128-character preview, it independently rechecks the response digest and answer score. Longer responses whose hashes differ from their preview yield `INCOMPLETE`, never an unqualified `PASS`. Inconsistent records yield `FAIL`; the command exits nonzero for both. Source fingerprints must match the auditor checkout, so older reports should be audited at their source revision. All receipts and model-origin claims are self-reported: even `PASS` is **not proof** that training actually occurred or improved reasoning. The original run's full generated text was not always retained; future run schemas should save auditable full text in a separately controlled evidence artifact.
+
+`audit-hf-persistence` additionally requires both the original training report and the
+separately saved reload report. It verifies the reload's commitment to the **exact
+training-report bytes**, compares complete candidate/reload trial records and
+reported LoRA tensor digests, checks distinct reported process IDs, reruns the
+four-arm receipt audit, and independently hashes available base model/tokenizer
+and saved adapter files. It requires an explicit local base-model directory and
+does not import Torch or initiate training. `PASS` means **file-backed receipt
+consistency only**; both reports and checkpoint files can be forged, PIDs are
+not trusted process attestation, and this check does not prove structural
+transfer, reasoning or a genuine neural update. `INCOMPLETE` (e.g. a historical
+source mismatch or unverifiable truncated response) and `FAIL` both exit 2.
 
 **Executed Lappy CPU smoke (exact source commit `6f7b2924d7f6178623c9d014dece3762890bcf82`, 2026-10-26):** locally generated random tiny GPT-2 model, two PEFT LoRA optimizer updates, changed trainable tensor SHA-256, saved adapter, independent Python process reload and verified equality of the trained/reloaded tensor-value SHA-256. Both processes exited successfully. Held-out scores were **baseline 0/2, trained 0/2, untrained-adapter 0/2, corrupted supervision 0/2**. This is direct evidence of a working neural adapter training/persistence *mechanism*, not improved reasoning, pretrained adaptation or GPU training. See the [exact evidence record](docs/RESEARCH_LOG_2026-10-26.md) and [hostile review](docs/HF_PILOT_HOSTILE_REVIEW_2026-10-26.md). Independent structural/paraphrase holdouts are still needed before higher claims.
 
