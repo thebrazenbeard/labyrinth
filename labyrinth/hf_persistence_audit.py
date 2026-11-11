@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -15,17 +17,47 @@ from .hf_pilot import (
     EVAL_SCHEMA, _adapter_manifest, _checkpoint_manifest, _validate_sharded_index,
 )
 from .hf_report_audit import audit_hf_report
-from .runner import _MAX_JSON_BYTES, _reject_nonfinite_json, _unique_json_pairs, load_json
+from .runner import _MAX_JSON_BYTES, _reject_nonfinite_json, _unique_json_pairs
 
 SCHEMA = "labyrinth.hf-persistence-audit.v1"
 
 
+def _receipt_version(st) -> tuple[int, int]:
+    """Cross-API change witness; not an atomic filesystem snapshot."""
+    # Windows lstat/fstat may disagree on st_ctime_ns for the same file.
+    return (st.st_size, st.st_mtime_ns)
+
+
 def _read_regular_bounded(path: Path) -> bytes:
-    """Read only a regular nonsymlink source; cap input even across growth."""
-    if not path.is_file() or path.is_symlink():
+    """Bind bounded receipt bytes to checked regular-file identity.
+
+    Compare checked pathname and opened-handle identities, sizes and change
+    witnesses. This detects observed path swaps and some concurrent in-place
+    writes; it cannot exclude restored metadata or adversarial ABA swaps.
+    A fully atomic, independently protected custody snapshot is not claimed.
+    """
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode):
         raise ValueError("receipt must be a regular nonsymlink file")
     with path.open("rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(opened.st_mode)
+                or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)):
+            raise ValueError("receipt identity changed during open")
+        if _receipt_version(before) != _receipt_version(opened):
+            raise ValueError("receipt changed during open")
         raw = stream.read(_MAX_JSON_BYTES + 1)
+        after_read = os.fstat(stream.fileno())
+    after_path = path.lstat()
+    if (not stat.S_ISREG(after_path.st_mode)
+            or (opened.st_dev, opened.st_ino) != (after_read.st_dev, after_read.st_ino)
+            or (opened.st_dev, opened.st_ino) != (after_path.st_dev, after_path.st_ino)):
+        raise ValueError("receipt identity changed during read")
+    if (_receipt_version(opened) != _receipt_version(after_read)
+            or _receipt_version(before) != _receipt_version(after_path)
+            or opened.st_ctime_ns != after_read.st_ctime_ns
+            or before.st_ctime_ns != after_path.st_ctime_ns):
+        raise ValueError("receipt changed during read")
     if len(raw) > _MAX_JSON_BYTES:
         raise ValueError("receipt exceeds 8 MiB input limit")
     return raw
@@ -77,8 +109,12 @@ def audit_hf_persistence(run_dir: str | Path, reload_report: str | Path,
         training = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_json_pairs,
                               parse_constant=_reject_nonfinite_json)
         reload_path = Path(reload_report)
-        _read_regular_bounded(reload_path)
-        reload = load_json(reload_path, strict=True)
+        reload_bytes = _read_regular_bounded(reload_path)
+        # Parse only the exact bytes that passed bounded nonsymlink validation.
+        # Reopening the path here can follow a swapped symlink or different file.
+        reload = json.loads(reload_bytes.decode("utf-8"),
+                            object_pairs_hook=_unique_json_pairs,
+                            parse_constant=_reject_nonfinite_json)
     except (OSError, ValueError, TypeError, UnicodeError, RecursionError,
             json.JSONDecodeError) as exc:
         fail(f"invalid input receipt or directory: {exc}")
