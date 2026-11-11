@@ -29,6 +29,11 @@ HELDOUT and TRANSFER from those runs is rejected for split overlap.
    candidate checkpoint before adaptation (for example, an adapter can have
    an initialized state); the screen does not reconstruct adapter/base lineage.
    That relationship requires an independent model-loading and update receipt.
+   A candidate-after checkpoint **identical** to the declared base,
+   zero-update, or corrupted-label control is rejected: signed claims of a
+   performance gain cannot establish a treatment effect between identical
+   checkpoint bytes. This still does not verify that reported hashes match
+   real host files or runtime model state.
 3. A complete evaluator report covering the exact roster. It binds to the
    manifest digest and is authenticated with a versioned-domain HMAC key.
    The key must be genuinely kept outside the trainee for authentication to
@@ -50,6 +55,14 @@ optimizer steps, heldout secrecy, or observed correctness. No code inside the
 trainee's process can authenticate those physical claims. The screen does not
 estimate a population-level transfer p-value; downstream independent
 qualification must supply appropriate statistical evidence.
+
+The negative-control tests also show that two **isomorphic exact-cover graphs**
+with renamed sites and reordered crews receive different raw provenance
+fingerprints. Those digests may identify serialized source records, but they
+cannot by themselves establish distinct *mechanics*. A fabricated report
+using these distinct strings can still reach only `PENDING_INDEPENDENT_CUSTODY`;
+an external evaluator must independently canonicalize or attest to graph
+isomorphism classes before claiming structural transfer.
 
 The focused tests use a plainly test-only HMAC key and synthetic good results
 for checking the contract. They do not call a neural model or make parameter

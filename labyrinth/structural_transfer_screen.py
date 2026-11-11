@@ -254,6 +254,13 @@ def assess(manifest: StructuralManifest, report: TransferReport,
         return _blocked("no declared candidate parameter update", counts)
     if lineage.candidate_after_sha256 != lineage.candidate_reload_sha256:
         return _blocked("candidate checkpoint reload hash mismatch", counts)
+    for control_name, control_sha in (
+        ("base", lineage.base_sha256),
+        ("zero-update", lineage.zero_update_sha256),
+        ("corrupted-label", lineage.corrupted_label_sha256),
+    ):
+        if lineage.candidate_after_sha256 == control_sha:
+            return _blocked(f"candidate checkpoint identical to {control_name} control", counts)
     if frozen_plan.source_public:
         return _blocked("source-public examination cannot qualify blinded transfer", counts)
 
