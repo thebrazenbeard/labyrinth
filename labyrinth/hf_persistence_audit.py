@@ -22,12 +22,19 @@ from .runner import _MAX_JSON_BYTES, _reject_nonfinite_json, _unique_json_pairs
 SCHEMA = "labyrinth.hf-persistence-audit.v1"
 
 
+def _receipt_version(st) -> tuple[int, int]:
+    """Cross-API change witness; not an atomic filesystem snapshot."""
+    # Windows lstat/fstat may disagree on st_ctime_ns for the same file.
+    return (st.st_size, st.st_mtime_ns)
+
+
 def _read_regular_bounded(path: Path) -> bytes:
     """Bind bounded receipt bytes to checked regular-file identity.
 
-    Compare pathname and opened-handle identities before reading, and recheck
-    the pathname after the read. This rejects observed replacement races; it
-    is not an atomic snapshot against in-place writes or adversarial ABA swaps.
+    Compare checked pathname and opened-handle identities, sizes and change
+    witnesses. This detects observed path swaps and some concurrent in-place
+    writes; it cannot exclude restored metadata or adversarial ABA swaps.
+    A fully atomic, independently protected custody snapshot is not claimed.
     """
     before = path.lstat()
     if not stat.S_ISREG(before.st_mode):
@@ -37,6 +44,8 @@ def _read_regular_bounded(path: Path) -> bytes:
         if (not stat.S_ISREG(opened.st_mode)
                 or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)):
             raise ValueError("receipt identity changed during open")
+        if _receipt_version(before) != _receipt_version(opened):
+            raise ValueError("receipt changed during open")
         raw = stream.read(_MAX_JSON_BYTES + 1)
         after_read = os.fstat(stream.fileno())
     after_path = path.lstat()
@@ -44,6 +53,11 @@ def _read_regular_bounded(path: Path) -> bytes:
             or (opened.st_dev, opened.st_ino) != (after_read.st_dev, after_read.st_ino)
             or (opened.st_dev, opened.st_ino) != (after_path.st_dev, after_path.st_ino)):
         raise ValueError("receipt identity changed during read")
+    if (_receipt_version(opened) != _receipt_version(after_read)
+            or _receipt_version(before) != _receipt_version(after_path)
+            or opened.st_ctime_ns != after_read.st_ctime_ns
+            or before.st_ctime_ns != after_path.st_ctime_ns):
+        raise ValueError("receipt changed during read")
     if len(raw) > _MAX_JSON_BYTES:
         raise ValueError("receipt exceeds 8 MiB input limit")
     return raw

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -151,6 +152,58 @@ class HfPersistenceAuditTests(unittest.TestCase):
         self.assertEqual(swaps, ["swapped"])
         self.assertEqual(result["status"], "FAIL", result)
         self.assertTrue(any("receipt identity changed during open" in reason
+                            for reason in result["failures"]), result)
+
+    def test_inplace_reload_overwrite_during_read_cannot_pass(self):
+        # Source file stays the same inode throughout. A competing writer
+        # changes an initially invalid reload receipt to valid bytes while
+        # this auditor is reading it. Identity-only checks miss the mutation.
+        clean = self.reload_path.read_bytes()
+        self.reload["training_report_sha256"] = "0" * 64
+        self._write_reload()
+        self.assertEqual(len(self.reload_path.read_bytes()), len(clean))
+        original_open = Path.open
+        mutations = []
+
+        class MutatingReader:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def __enter__(self):
+                self.stream.__enter__()
+                return self
+
+            def __exit__(self, *args):
+                return self.stream.__exit__(*args)
+
+            def fileno(self):
+                return self.stream.fileno()
+
+            def read(self, *args):
+                with original_open(self_path, "r+b") as writer:
+                    writer.seek(0)
+                    writer.write(clean)
+                    writer.flush()
+                    os.fsync(writer.fileno())
+                os.utime(self_path, ns=(initial_stat.st_atime_ns,
+                                       initial_stat.st_mtime_ns + 2_000_000_000))
+                mutations.append("overwrote-in-place")
+                return self.stream.read(*args)
+
+        self_path = self.reload_path
+        initial_stat = self_path.stat()
+
+        def replace_reader(path, *args, **kwargs):
+            stream = original_open(path, *args, **kwargs)
+            if path == self_path and args and args[0] == "rb":
+                return MutatingReader(stream)
+            return stream
+
+        with patch.object(Path, "open", replace_reader):
+            result = self._audit()
+        self.assertEqual(mutations, ["overwrote-in-place"])
+        self.assertEqual(result["status"], "FAIL", result)
+        self.assertTrue(any("receipt changed during read" in reason
                             for reason in result["failures"]), result)
 
     def test_duplicate_key_reload_json_is_rejected(self):
