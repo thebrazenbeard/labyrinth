@@ -86,6 +86,18 @@ least one asserted-one entry and is formally UNSAT under the zero budget.
 This also demonstrates why a green
 source enumerator alone is insufficient evidence of a valid independent oracle.
 
+An independent native Skeptic agent (`/root/wave23_skeptic`) ran 2,500
+additional scenarios with RNG seeds 1000..3499, independently brute-checking
+all local policies against GF(2), DFS and source classifications: 2500/2500
+agreed for the finite declared mechanics. Skeptic also found a source-public
+novelty classifier false positive: zero-width-only Unicode input and cosmetic
+punctuation on a known capability were labeled novel. New red tests preserved
+nine counterexamples (`U+200B`, `U+200D`, `U+2060`, `U+FEFF`, and disguises of
+known channel labels). The classifier now normalizes Unicode NFKC, rejects
+control/format codepoints and punctuation-only pseudo-capabilities, and
+compares canonical known-channel terms. This is **INTERNAL_REVIEW**, not a
+physically isolated evaluator or model transfer result.
+
 ## Honest controls and learning ceiling
 
 The one fixed-script policy wins 0/4 public fixtures; the deterministic

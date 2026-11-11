@@ -11,6 +11,7 @@ trains a neural model or supports a claim of learned structural transfer.
 from dataclasses import dataclass
 import hashlib
 import json
+import unicodedata
 
 
 WIN = "VERIFIED_WIN"
@@ -270,12 +271,22 @@ def adjudicate_unexpected(s, proposal, prior_verdict=UNKNOWN):
 def novel_rule_challenge(s, proposal):
     """A proposed communication/measurement rule needs an entirely new exam."""
     rules = fingerprint(s)
-    if (type(proposal) is not dict or type(proposal.get("new_channel")) is not str
-            or not proposal["new_channel"].strip() or
-            proposal["new_channel"].strip().lower() in
-            {"none", "private observation", "simultaneous output"} or
-            type(proposal.get("reason")) is not str or
-            not proposal["reason"].strip()):
+    if type(proposal) is not dict:
+        return {"verdict": UNKNOWN, "rules_fingerprint": rules}
+
+    def normalized_terms(value):
+        if type(value) is not str or any(unicodedata.category(c)[0] == "C"
+                                          for c in value):
+            return ""
+        normalized = unicodedata.normalize("NFKC", value).casefold()
+        return " ".join("".join(c if c.isalnum() else " "
+                                for c in normalized).split())
+
+    channel = normalized_terms(proposal.get("new_channel"))
+    reason = normalized_terms(proposal.get("reason"))
+    if (not channel or channel in
+            {"none", "private observation", "simultaneous output"}
+            or not reason):
         return {"verdict": UNKNOWN, "rules_fingerprint": rules}
     return {"verdict": NOVEL, "rules_fingerprint": rules,
             "independent_verification": "NOT_PERFORMED",

@@ -124,6 +124,14 @@ class DistributedParityTribunalTests(unittest.TestCase):
             self.assertEqual(novel_rule_challenge(s, {"new_channel": known,
                                                      "reason": "existing"})["verdict"],
                              "UNKNOWN")
+        for disguise in ("\u200b", "\u200d", "\u2060", "\ufeff",
+                         "private observation!", "simultaneous output.",
+                         " \ufeff ", "...", "None!!!"):
+            with self.subTest(disguise=disguise):
+                self.assertEqual(novel_rule_challenge(s,
+                                 {"new_channel": disguise,
+                                  "reason": "not a material new capability"})["verdict"],
+                                 "UNKNOWN")
 
     def test_public_catalogue_script_and_paraphrases_do_not_learn(self):
         public = families()
