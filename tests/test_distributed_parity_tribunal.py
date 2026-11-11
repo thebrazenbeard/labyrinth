@@ -140,7 +140,9 @@ class DistributedParityTribunalTests(unittest.TestCase):
                              "UNKNOWN")
         for disguise in ("\u200b", "\u200d", "\u2060", "\ufeff",
                          "private observation!", "simultaneous output.",
-                         " \ufeff ", "...", "None!!!"):
+                         " \ufeff ", "...", "None!!!", "no channel",
+                         "no new channel", "simultaneous outputs",
+                         "private observations"):
             with self.subTest(disguise=disguise):
                 self.assertEqual(novel_rule_challenge(s,
                                  {"new_channel": disguise,

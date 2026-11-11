@@ -99,6 +99,15 @@ control/format codepoints and punctuation-only pseudo-capabilities, and
 compares canonical known-channel terms. This is **INTERNAL_REVIEW**, not a
 physically isolated evaluator or model transfer result.
 
+A separate Destroyer reattack found four more no-op semantic descriptions
+(`no channel`, `no new channel`, `simultaneous outputs`, `private observations`)
+classified as novel. The regression first failed all four. A bounded
+canonical no-op/absence recognizer now returns `UNKNOWN` for these while a
+positive, explicitly proposed new channel remains an unverified
+`NOVEL_RULESET_CHALLENGE`. This lexical recognizer is **not** a formal semantic
+equivalence oracle: unanticipated phrasings remain a known limitation, and
+novelty is merely a proposal for outside review, never an automatic victory.
+
 A second hostile mutant patched **both** the source witness replay and direct
 independent witness checker to falsely accept an invalid policy. Before the
 correction, the system claimed WIN because its independent existence solvers

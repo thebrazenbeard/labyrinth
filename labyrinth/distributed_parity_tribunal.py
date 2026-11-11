@@ -302,9 +302,19 @@ def novel_rule_challenge(s, proposal):
 
     channel = normalized_terms(proposal.get("new_channel"))
     reason = normalized_terms(proposal.get("reason"))
-    if (not channel or channel in
-            {"none", "private observation", "simultaneous output"}
-            or not reason):
+    # Only recognize a proposed rule DELTA. Lexical novelty is not enough:
+    # plural/punctuated established capabilities or explicit absence of a
+    # channel are no-op descriptions, not novel physical communication.
+    known_noops = {
+        "none", "no channel", "no new channel", "no communication",
+        "private observation", "private observations",
+        "simultaneous output", "simultaneous outputs",
+        "without communication", "existing channel", "same rules",
+    }
+    denial_prefix = channel.split(" ", 1)[0] in {
+        "no", "none", "without", "existing", "unchanged", "current",
+    }
+    if not channel or channel in known_noops or denial_prefix or not reason:
         return {"verdict": UNKNOWN, "rules_fingerprint": rules}
     return {"verdict": NOVEL, "rules_fingerprint": rules,
             "independent_verification": "NOT_PERFORMED",
