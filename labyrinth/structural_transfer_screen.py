@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 import hmac
 import json
+from math import comb
 import re
 
 
@@ -30,6 +31,7 @@ _CONTROLS = ("base", "zero", "corrupted", "memorizer")
 _EVAL_SPLITS = ("heldout", "transfer")
 _MIN_FAMILIES = 8
 _MAX_CASES = 512
+_SIGN_TEST_ALPHA_INVERSE = 20  # Exact, one-sided alpha = 0.05.
 
 
 @dataclass(frozen=True)
@@ -198,6 +200,24 @@ def _blocked(reason: str, counts: tuple[int, int] = (0, 0)) -> ScreenDecision:
     return ScreenDecision("BLOCKED", (reason,), counts)
 
 
+def _paired_family_gain_significant(candidate: tuple[bool, ...],
+                                    control: tuple[bool, ...]) -> bool:
+    """One-sided exact paired sign test, family = unit of observation.
+
+    Ties do not supply independent information. Under the matched null,
+    discordant signs are equiprobable; use integer arithmetic for p <= 0.05.
+    Structural-family identity and independence remain *unverified claims*.
+    """
+    wins = sum(c and not b for c, b in zip(candidate, control))
+    losses = sum(b and not c for c, b in zip(candidate, control))
+    discordant = wins + losses
+    if discordant == 0:
+        return False
+    tail_numerator = sum(comb(discordant, count)
+                         for count in range(wins, discordant + 1))
+    return _SIGN_TEST_ALPHA_INVERSE * tail_numerator <= 1 << discordant
+
+
 def assess(manifest: StructuralManifest, report: TransferReport,
            *, signature_hex: str, independent_key: bytes) -> ScreenDecision:
     """Only screen declared evidence; never graduate or certify neural learning.
@@ -267,15 +287,23 @@ def assess(manifest: StructuralManifest, report: TransferReport,
     for split in _EVAL_SPLITS:
         family_rows = tuple(by_split[split].values())
         size = len(family_rows)
-        successes = sum(all(row.candidate_correct and row.candidate_valid for row in rows)
-                        for rows in family_rows)
+        candidate_passes = tuple(
+            all(row.candidate_correct and row.candidate_valid for row in rows)
+            for rows in family_rows)
+        successes = sum(candidate_passes)
         if successes < size * .75:
             return _blocked(f"candidate failed independent mechanics on {split}", counts)
         for control in _CONTROLS:
-            control_successes = sum(all(getattr(row, control + "_correct") for row in rows)
-                                    for rows in family_rows)
+            control_passes = tuple(
+                all(getattr(row, control + "_correct") for row in rows)
+                for rows in family_rows)
+            control_successes = sum(control_passes)
             if (successes - control_successes) / size < .10:
                 return _blocked(f"no measured gain against {control} on {split}", counts)
+            if not _paired_family_gain_significant(candidate_passes, control_passes):
+                return _blocked(
+                    f"insufficient paired-family evidence against {control} on {split} "
+                    "(one-sided exact sign test p > 0.05)", counts)
 
     return ScreenDecision(
         "PENDING_INDEPENDENT_CUSTODY",
