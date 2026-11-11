@@ -1,7 +1,8 @@
 """Executable *public* Minotaur challenge/zero-update control receipt.
 
 The legacy v1 runner exercises two finite-rule mechanisms. Opt-in v2 exercises
-three, including a combinatorial exact-cover tribunal. Neither can measure
+three, including a combinatorial exact-cover tribunal. Opt-in v3 adds a fourth,
+time-dependent repair-scheduling mechanism. None can measure
 neural learning, hidden evaluator custody, or out-of-distribution transfer.
 No model is called and every fixture is readable in source. The independent
 checks are bounded to the declared finite rules, not real-world possibility.
@@ -292,8 +293,83 @@ def _exact_cover_case(scenario: cover.Scenario, *, variant: int) -> dict:
     }
 
 
+def _temporal_repair_case(scenario: object, *, variant: int) -> dict:
+    """Check each emitted schedule, not just existence of *some* win.
+
+    This import is intentionally optional: legacy v1/v2 must not depend on a
+    fourth-family implementation, a trained model, or external dependencies.
+    """
+    from . import temporal_repair_tribunal as temporal
+
+    raw = temporal.search_schedule(scenario)
+    solved = raw if type(raw) is dict else {}
+    raw_status = solved.get("verdict")
+    status = raw_status if type(raw_status) is str else "INVALID_SOLVER_VERDICT"
+    raw_schedule = solved.get("schedule")
+    schedule = (raw_schedule if type(raw_schedule) is tuple
+                and 1 <= len(raw_schedule) <= scenario.action_budget
+                and all(type(action) is int and -1 <= action < len(scenario.jobs)
+                        for action in raw_schedule) else None)
+    rules_tag = temporal.fingerprint(scenario)
+    direct = (temporal.verify_schedule(scenario, schedule)
+              if schedule is not None else None)
+    direct_verdict = (direct.get("verdict") if type(direct) is dict else None)
+    replay_verdict = (direct_verdict if type(direct_verdict) is str
+                      else "NOT_RUN")
+    replay_tag = (direct.get("rules_fingerprint")
+                  if type(direct) is dict else None)
+    direct_tag_agrees = (type(replay_tag) is str and replay_tag == rules_tag)
+    raw_specific = (temporal.independent_witness_check(scenario, schedule)
+                    if schedule is not None else None)
+    specific_witness_valid = (raw_specific if type(raw_specific) is bool else None)
+    raw_exists = temporal.independent_reachability(scenario)
+    exists = raw_exists if type(raw_exists) is bool else None
+    raw_dfs = (temporal.independent_depth_enumeration(scenario)
+               if status == "PROVEN_UNSAT_UNDER_DECLARED_RULES" else None)
+    dfs_exists = raw_dfs if type(raw_dfs) is bool else None
+    exhaustive = (solved.get("exhaustive")
+                  if type(solved.get("exhaustive")) is bool else None)
+    solver_tag = solved.get("rules_fingerprint")
+    source_tag_agrees = type(solver_tag) is str and solver_tag == rules_tag
+    if status == "VERIFIED_WIN":
+        agrees = (source_tag_agrees and direct_tag_agrees
+                  and replay_verdict == "VERIFIED_WIN"
+                  and specific_witness_valid is True and exists is True)
+    elif status == "PROVEN_UNSAT_UNDER_DECLARED_RULES":
+        agrees = (source_tag_agrees and schedule is None and exhaustive is True
+                  and exists is False and dfs_exists is False)
+    else:
+        agrees = False
+    if agrees:
+        verdict = status
+    elif status == "NO_KNOWN_WIN" and exhaustive is False:
+        verdict = "NO_KNOWN_WIN"
+    else:
+        verdict = "UNKNOWN"
+    public = temporal.public_view(scenario, variant=variant % 8)
+    return {
+        "verdict": verdict,
+        "solver_verdict": status,
+        "independent_oracle_agrees": agrees,
+        "independent_existence_has_win": exists,
+        "independent_dfs_has_win_on_unsat_claim": dfs_exists,
+        "independent_specific_witness_valid": specific_witness_valid,
+        "independent_replay_verdict": replay_verdict,
+        "rules_fingerprint": rules_tag,
+        "public_prompt": public["prompt"],
+        "declared_jobs": public["jobs"],
+        "machine_capacity": scenario.capacity,
+        "time_horizon": scenario.horizon,
+        "action_budget": scenario.action_budget,
+        "searched_states": _bounded_count(solved.get("searched_states")),
+        "exhaustive_search": exhaustive,
+        "symbolic_schedule": list(schedule) if agrees and schedule is not None else None,
+    }
+
+
 def run_public_exam(*, seed: int = 2026, variant: int = 0,
-                    include_exact_cover: bool = False) -> dict:
+                    include_exact_cover: bool = False,
+                    include_temporal_repair: bool = False) -> dict:
     """Produce a source-public receipt; v1 stays byte-for-byte stable by default.
 
     The seed and variant alter wording/perspective only. They do not create
@@ -305,6 +381,10 @@ def run_public_exam(*, seed: int = 2026, variant: int = 0,
         raise ValueError("variant must be between 0 and 31")
     if type(include_exact_cover) is not bool:
         raise ValueError("include_exact_cover must be an exact bool")
+    if type(include_temporal_repair) is not bool:
+        raise ValueError("include_temporal_repair must be an exact bool")
+    if include_temporal_repair and not include_exact_cover:
+        raise ValueError("--temporal-repair requires --exact-cover")
 
     constant_cases = {
         kind: _constant_case(seed, variant, kind)
@@ -317,7 +397,15 @@ def run_public_exam(*, seed: int = 2026, variant: int = 0,
     cover_cases = ({name: _exact_cover_case(scenario, variant=variant)
                     for name, scenario in cover.families().items()}
                    if include_exact_cover else {})
-    all_cases = [*constant_cases.values(), *veiled_cases.values(), *cover_cases.values()]
+    temporal_cases = {}
+    if include_temporal_repair:
+        from . import temporal_repair_tribunal as temporal
+        temporal_cases = {
+            name: _temporal_repair_case(scenario, variant=variant)
+            for name, scenario in temporal.families().items()
+        }
+    all_cases = [*constant_cases.values(), *veiled_cases.values(),
+                 *cover_cases.values(), *temporal_cases.values()]
     counts = Counter(c["verdict"] for c in all_cases)
     families = {
         "constant_exam": {
@@ -336,11 +424,20 @@ def run_public_exam(*, seed: int = 2026, variant: int = 0,
             "cases": cover_cases,
             "fixed_script_control": cover.fixed_script_control(),
         }
+    if include_temporal_repair:
+        families["temporal_repair"] = {
+            "challenge_mechanics": "temporal_deadline_energy_repair_scheduling",
+            "cases": temporal_cases,
+            "fixed_script_control": temporal.fixed_script_control(),
+        }
     parameters = {"seed": seed, "variant": variant}
     if include_exact_cover:
         parameters["include_exact_cover"] = True
+    if include_temporal_repair:
+        parameters["include_temporal_repair"] = True
     return {
-        "protocol": ("minotaur-source-public-v2" if include_exact_cover
+        "protocol": ("minotaur-source-public-v3" if include_temporal_repair
+                     else "minotaur-source-public-v2" if include_exact_cover
                      else "minotaur-source-public-v1"),
         "parameters": parameters,
         "claim_scope": {
@@ -360,6 +457,7 @@ def run_public_exam(*, seed: int = 2026, variant: int = 0,
             "independent_checks_agree": all(
                 case["independent_check_agrees"] for case in constant_cases.values()
             ) and all(case["independent_oracle_agrees"] for case in veiled_cases.values()
-            ) and all(case["independent_oracle_agrees"] for case in cover_cases.values()),
+            ) and all(case["independent_oracle_agrees"] for case in cover_cases.values()
+            ) and all(case["independent_oracle_agrees"] for case in temporal_cases.values()),
         },
     }

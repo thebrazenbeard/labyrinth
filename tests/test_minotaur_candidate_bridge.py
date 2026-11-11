@@ -172,6 +172,82 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertEqual(len(receipt.turns), 1)
         self.assertTrue(audit_receipt(receipt, public, factory))
 
+    def test_nonstring_adapter_response_cannot_run_programmable_string_conversion(self):
+        """Malformed adapter output must not invoke attacker-owned __str__."""
+        public, factory, _ = context()
+        calls = []
+
+        class PoisonedText:
+            def __str__(self):
+                calls.append("str-invoked")
+                raise RuntimeError("attacker controlled string conversion")
+
+        class PoisonedAdapter:
+            model_id = "hostile:unattested-nonstring"
+
+            def generate(self, prompt, *, seed=None):
+                calls.append("generated")
+                return PoisonedText()
+
+        receipt = run_candidate(public, factory, PoisonedAdapter(),
+                                authorize_local_adapter=True)
+        self.assertEqual(receipt.final_verdict, "MODEL_OUTPUT_INVALID")
+        self.assertEqual(receipt.turns[0].response_text, "")
+        self.assertEqual(calls, ["generated"])
+        self.assertTrue(audit_receipt(receipt, public, factory))
+
+    def test_surrogate_json_action_is_invalid_and_receipt_still_replays(self):
+        public, factory, _ = context()
+        # Literal JSON escape is ASCII, but json.loads materializes a lone
+        # surrogate that cannot be encoded as UTF-8 for a signed receipt.
+        response = r'{"kind":"ACTION","action":"\ud800"}'
+        receipt = run_candidate(public, factory, ReplayAdapter({}, default=response))
+        self.assertEqual(receipt.final_verdict, "MODEL_OUTPUT_INVALID")
+        self.assertEqual(len(receipt.turns), 1)
+        self.assertIsNone(receipt.turns[0].public_feedback_json)
+        self.assertTrue(audit_receipt(receipt, public, factory))
+
+    def test_invalid_unicode_model_identity_rejected_before_examiner_use(self):
+        public, factory, _ = context()
+        called = []
+
+        def counted_factory():
+            called.append("session")
+            return factory()
+
+        with self.assertRaisesRegex(ValueError, "Unicode"):
+            run_candidate(public, counted_factory,
+                          FixedActionAdapter((), model_id="invalid:\ud800"))
+        self.assertEqual(called, [])
+
+    def test_invalid_unicode_public_string_rejected_before_examiner_use(self):
+        public, factory, _ = context()
+        public["note"] = "illformed:\ud800"
+        called = []
+
+        def counted_factory():
+            called.append("session")
+            return factory()
+
+        with self.assertRaisesRegex(ValueError, "Unicode"):
+            run_candidate(public, counted_factory, FixedActionAdapter(()))
+        self.assertEqual(called, [])
+
+    def test_cyclic_or_overdeep_host_public_view_fails_boundedly(self):
+        public, factory, _ = context()
+        public["cycle"] = public
+        with self.assertRaisesRegex(ValueError, "cycle"):
+            run_candidate(public, factory, FixedActionAdapter(()))
+
+        public, factory, _ = context()
+        cursor = public
+        for index in range(40):
+            child = {}
+            cursor[f"layer-{index}"] = child
+            cursor = child
+        with self.assertRaisesRegex(ValueError, "nesting"):
+            run_candidate(public, factory, FixedActionAdapter(()))
+
     def test_explicit_abstention_is_not_escape_success(self):
         public, factory, _ = context(17, sealed=True)
         adapter = ReplayAdapter({}, default=json.dumps(

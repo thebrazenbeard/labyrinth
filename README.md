@@ -28,6 +28,8 @@ source-development challenges, not privately held-out graduation tests:
 ```bash
 python -m labyrinth.minotaur_cross_exam
 python -m labyrinth minotaur-exam --seed 17 --variant 2
+python -m labyrinth minotaur-exam --seed 17 --variant 2 --exact-cover
+python -m labyrinth minotaur-exam --seed 17 --variant 2 --exact-cover --temporal-repair
 python -m labyrinth minotaur-exam --seed 17 --report minotaur-public-receipt.json
 python -m unittest tests.test_minotaur_cross_exam tests.test_epistemic_shift_exam -q
 python -m unittest discover -s tests -q
@@ -44,16 +46,33 @@ weight updates **nor** transfer by a model. The evaluator still shares a
 Python process with any in-process candidate; this is not private custody.
 
 `minotaur-exam` is a separate, offline, JSON-receipted **public symbolic
-control**, currently exercising two distinct declared-rule mechanics: two
+control**. Its default v1 interface exercises two distinct declared-rule mechanics: two
 Constant chamber cases (an independently replayed legal escape and an
 independently checked finite-state UNSAT closure), plus all six Veiled Fork
 contingent-policy cases (independent Boolean existence oracle and replay for
-positive policies). The command returns a nonzero exit code if its independent
-checks disagree, and its `--report` destination is write-once. Its seed and
-wording variant **do not generate independent structural holdouts**. Both
-algorithms still rely on the source-declared scenario and rules; neither an
-external model, secret evaluator, neural update, nor genuine model transfer is
-tested. A certified UNSAT result is restricted to those declared finite rules.
+positive policies). Opt in to `--exact-cover` for v2: the unchanged eight default
+cases plus four constrained crew-allocation cases, totaling **12 public cases
+across three mechanically distinct families**. An independent specific-witness
+checker and separately coded existence checks can veto a claimed win; claimed
+finite impossibility also faces a third bounded reachability check. A novel
+proposed allocation can overturn an earlier wrong impossibility verdict when
+verified under the declared rules. These public cases still fall far short of
+the distinct held-out and transfer mechanics required for neural graduation;
+see `docs/MINOTAUR_PUBLIC_EXAM_V2.md` for the precise evidence ceiling.
+Opting into `--temporal-repair` *together with* `--exact-cover` adds a fourth
+mechanic with renewable-energy, precedence-constrained, single-machine repair
+jobs and deadlines: **16 source-public cases across four mechanics** (v3).
+Its finite UNSAT claims require separate bounded reachability checks, while
+winning schedules undergo independent exact-witness replay. This additional
+public family still cannot meet the eight-distinct-heldout-and-transfer
+structural-mechanics qualification gate, let alone prove a neural update.
+
+Both modes return a nonzero exit code if independent checks disagree, and
+`--report` remains write-once. Seed and wording variants **do not generate
+independent structural holdouts**. All algorithms still rely on source-declared
+rules; neither an external model, secret evaluator, neural update, nor genuine
+model transfer is tested. Any certified UNSAT verdict is restricted to the
+declared finite rules.
 
 See the five exam protocols in `docs/CONSTANT_EXAM_PROTOCOL.md`,
 `docs/MINOTAUR_DIVERSE_EXAM_PROTOCOL.md`,
