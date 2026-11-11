@@ -1,6 +1,7 @@
 """Public-only candidate/model bridge tests against a real finite examiner."""
 
 from dataclasses import replace
+from collections.abc import Mapping
 import json
 from pathlib import Path
 import tempfile
@@ -15,6 +16,7 @@ from labyrinth.minotaur_candidate_bridge import (
     run_candidate,
     run_matched_pair,
     save_receipt_new,
+    _public,
 )
 
 
@@ -148,6 +150,96 @@ class CandidateBridgeTests(unittest.TestCase):
         public["answer"] = 7
         with self.assertRaisesRegex(ValueError, "evaluator-only"):
             run_candidate(public, factory, spy, authorize_local_adapter=True)
+
+    def test_public_snapshot_cannot_serialize_different_mapping_than_it_inspected(self):
+        """Public validation and JSON bytes must use the identical primitive snapshot."""
+        class DeceptiveMapping(Mapping):
+            def __iter__(self):
+                return iter(("observation",))
+
+            def __len__(self):
+                return 1
+
+            def __getitem__(self, key):
+                return "SECRET" if key == "private" else "LOOK"
+
+            def items(self):
+                return [("observation", "LOOK")]
+
+            def keys(self):
+                return ["private"]
+
+        class DeceptiveDict(dict):
+            def items(self):
+                return [("observation", "LOOK")]
+
+        self.assertEqual(json.loads(_public(DeceptiveMapping())),
+                         {"observation": "LOOK"})
+        self.assertEqual(json.loads(_public({"nested": DeceptiveMapping()})),
+                         {"nested": {"observation": "LOOK"}})
+        self.assertEqual(json.loads(_public(DeceptiveDict(private="SECRET"))),
+                         {"observation": "LOOK"})
+
+    def test_examiner_feedback_logic_uses_same_snapshot_as_receipt(self):
+        """A host Mapping cannot claim a win via get() while recording failure."""
+        class SplitFeedback(Mapping):
+            data = {"status": "UNSOLVED", "finished": True,
+                    "escape_verified": False, "observation": "Still in maze"}
+
+            def __iter__(self):
+                return iter(self.data)
+
+            def __len__(self):
+                return len(self.data)
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def get(self, key, default=None):
+                if key == "status":
+                    return "VERIFIED_WIN"
+                if key == "escape_verified":
+                    return True
+                return self.data.get(key, default)
+
+        class Host:
+            def start(self):
+                return {"maximum_actions": 1, "initial_observation": "Still in maze"}
+
+            def act(self, action):
+                return SplitFeedback()
+
+        public = Host().start()
+        receipt = run_candidate(public, Host, FixedActionAdapter(("WAIT",)))
+        self.assertEqual(receipt.final_verdict, "UNSOLVED")
+        self.assertFalse(receipt.verified_escape)
+        self.assertTrue(audit_receipt(receipt, public, Host))
+        self.assertEqual(json.loads(receipt.turns[0].public_feedback_json)["status"],
+                         receipt.final_verdict)
+
+    def test_post_action_view_cannot_inject_unrecorded_win(self):
+        """Verdict and escape witness must come from one recorded observation."""
+        class SplitViewHost:
+            def __init__(self):
+                self.acted = False
+
+            def view(self):
+                if self.acted:
+                    return {"status": "VERIFIED_WIN", "finished": True,
+                            "escape_verified": False, "observation": "different"}
+                return {"status": "UNKNOWN", "finished": False,
+                        "maximum_actions": 1, "observation": "start"}
+
+            def act(self, action):
+                self.acted = True
+                return {"status": "UNSOLVED", "finished": True,
+                        "escape_verified": True, "observation": "same"}
+
+        public = SplitViewHost().view()
+        receipt = run_candidate(public, SplitViewHost, FixedActionAdapter(("WAIT",)))
+        self.assertEqual(receipt.final_verdict, "UNSOLVED")
+        self.assertFalse(receipt.verified_escape)
+        self.assertTrue(audit_receipt(receipt, public, SplitViewHost))
 
     def test_legacy_start_only_exam_is_adaptable_without_private_case(self):
         public = StartOnlyExam().start()
