@@ -1,10 +1,11 @@
 """Hostile independent tests for finite exact-cover rescue-allocation tribunal."""
 
 from dataclasses import replace
-from itertools import combinations
+from itertools import combinations, permutations
 import random
 import unittest
 
+import labyrinth.exact_cover_tribunal as cover_module
 from labyrinth.exact_cover_tribunal import (
     Scenario, adjudicate_unexpected, catalogue_control, check_scenario,
     families, fingerprint, fixed_script_control, independent_subset_oracle,
@@ -27,6 +28,117 @@ def primitive_subset_oracle(s):
 
 
 class ExactCoverTribunalTests(unittest.TestCase):
+    def test_isomorphic_cover_rename_and_crew_reorder_are_not_new_mechanics(self):
+        first = families()["cyclic_deficiency"]
+        names = dict(zip(first.sites, ("U", "V", "W", "X", "Y", "Z")))
+        changed = Scenario(
+            tuple(reversed(tuple(names[x] for x in first.sites))),
+            tuple(tuple(names[x] for x in reversed(crew))
+                  for crew in reversed(first.crews)), first.budget)
+        self.assertNotEqual(fingerprint(first), fingerprint(changed))
+        self.assertEqual(primitive_subset_oracle(first), primitive_subset_oracle(changed))
+        identity = getattr(cover_module, "mechanics_fingerprint", fingerprint)
+        self.assertEqual(identity(first), identity(changed))
+
+    def test_surplus_budget_is_not_a_new_cover_mechanic(self):
+        first = families()["repairable_by_declared_team"]
+        surplus = replace(first, budget=6)
+        self.assertEqual(primitive_subset_oracle(first), primitive_subset_oracle(surplus))
+        self.assertNotEqual(fingerprint(first), fingerprint(surplus))
+        identity = getattr(cover_module, "mechanics_fingerprint", fingerprint)
+        self.assertEqual(identity(first), identity(surplus))
+
+    def test_unqualified_large_graph_never_claims_canonical_identity(self):
+        large = families()["budget_bound"]
+        identity = getattr(cover_module, "mechanics_fingerprint", fingerprint)
+        with self.assertRaisesRegex(ValueError, "unqualified"):
+            identity(large)
+
+    def test_randomized_small_cover_isomorphisms_preserve_oracle_and_id(self):
+        rng = random.Random(0xC0FE2026)
+        names = tuple("abcdef")
+        possible = list(combinations(names, 3))
+        identity = cover_module.mechanics_fingerprint
+        for seed in range(64):
+            chosen = rng.sample(possible, rng.randint(1, 12))
+            original = Scenario(names, tuple(chosen), rng.randint(1, 6))
+            shuffled = list(names)
+            rng.shuffle(shuffled)
+            rename = dict(zip(names, ("R", "S", "T", "U", "V", "W")))
+            renamed_sites = tuple(rename[n] for n in shuffled)
+            rewritten = [tuple(rename[n] for n in reversed(crew))
+                         for crew in original.crews]
+            rng.shuffle(rewritten)
+            changed = Scenario(renamed_sites, tuple(rewritten), original.budget)
+            with self.subTest(seed=seed):
+                self.assertEqual(primitive_subset_oracle(original),
+                                 primitive_subset_oracle(changed))
+                self.assertEqual(identity(original), identity(changed))
+                self.assertNotEqual(fingerprint(original), fingerprint(changed))
+
+    def test_bounded_identity_never_mixes_solvable_and_unsolvable_samples(self):
+        rng = random.Random(0x60AC2026)
+        names = tuple("abcdef")
+        possible = list(combinations(names, 3))
+        seen = {}
+        for _ in range(256):
+            chosen = tuple(rng.sample(possible, rng.randint(1, 10)))
+            budget = rng.randint(1, 6)
+            scenario = Scenario(names, chosen, budget)
+            identity = cover_module.mechanics_fingerprint(scenario)
+            result = primitive_subset_oracle(scenario)
+            if identity in seen:
+                self.assertEqual(seen[identity], result)
+            else:
+                seen[identity] = result
+        first = families()["cyclic_deficiency"]
+        modified = Scenario(first.sites,
+                            (("a", "b", "c"), ("a", "b", "d"),
+                             ("a", "c", "e"), ("b", "c", "f")), 2)
+        self.assertNotEqual(cover_module.mechanics_fingerprint(first),
+                            cover_module.mechanics_fingerprint(modified))
+
+    def test_exact_identity_matches_independent_graph_isomorphism_oracle(self):
+        # Independent test-owned bijection search. This does not call the
+        # canonical source function while deciding isomorphism.
+        rng = random.Random(0x1C0A2026)
+        sites = tuple("abcdef")
+        crew_pool = list(combinations(sites, 3))
+
+        def oracle(a, b):
+            if (len(a.sites) != len(b.sites)
+                    or len(a.crews) != len(b.crews)
+                    or min(a.budget, len(a.sites) // 3)
+                       != min(b.budget, len(b.sites) // 3)):
+                return False
+            declared = {frozenset(crew) for crew in b.crews}
+            for names in permutations(b.sites):
+                renamed = dict(zip(a.sites, names))
+                if {frozenset(renamed[site] for site in crew)
+                    for crew in a.crews} == declared:
+                    return True
+            return False
+
+        for seed in range(96):
+            count = rng.randint(1, 10)
+            first = Scenario(sites, tuple(rng.sample(crew_pool, count)),
+                             rng.randint(1, 6))
+            if seed % 2 == 0:
+                renamed = dict(zip(sites, ("P", "Q", "R", "S", "T", "U")))
+                other_sites = tuple(reversed(tuple(renamed[s] for s in sites)))
+                other_crews = tuple(
+                    tuple(renamed[s] for s in reversed(c))
+                    for c in reversed(first.crews))
+                second = Scenario(other_sites, other_crews, first.budget)
+            else:
+                second = Scenario(sites, tuple(rng.sample(crew_pool, count)),
+                                  rng.randint(1, 6))
+            with self.subTest(seed=seed):
+                self.assertEqual(
+                    cover_module.mechanics_fingerprint(first)
+                    == cover_module.mechanics_fingerprint(second),
+                    oracle(first, second))
+
     def test_cyclic_deficiency_proven_only_under_declared_rules(self):
         s = families()["cyclic_deficiency"]
         self.assertFalse(primitive_subset_oracle(s))

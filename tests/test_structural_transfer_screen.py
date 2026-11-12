@@ -187,6 +187,31 @@ class StructuralTransferScreenTests(unittest.TestCase):
         self.assertFalse(result.neural_learning_verified)
         self.assertFalse(result.private_exam_qualified)
 
+    def test_exact_cover_relabeling_cannot_fake_heldout_transfer_independence(self):
+        # Mechanic IDs are derived from actual finite source scenarios, not
+        # manually invented hash labels; exact provenance remains distinct.
+        from labyrinth import exact_cover_tribunal as cover
+        first = cover.families()["cyclic_deficiency"]
+        names = dict(zip(first.sites, ("U", "V", "W", "X", "Y", "Z")))
+        relabeled = cover.Scenario(
+            tuple(names[x] for x in reversed(first.sites)),
+            tuple(tuple(names[x] for x in reversed(crew))
+                  for crew in reversed(first.crews)), first.budget)
+        self.assertNotEqual(cover.fingerprint(first), cover.fingerprint(relabeled))
+        identity = getattr(cover, "mechanics_fingerprint", cover.fingerprint)
+        roster = list(cases())
+        heldout = next(i for i, c in enumerate(roster) if c.split == "heldout")
+        transfer = next(i for i, c in enumerate(roster) if c.split == "transfer")
+        roster[heldout] = replace(roster[heldout],
+                                  mechanic_sha256=identity(first))
+        roster[transfer] = replace(roster[transfer],
+                                   mechanic_sha256=identity(relabeled))
+        with self.assertRaisesRegex(ValueError, "split overlap"):
+            precommit(tuple(roster), lineage(),
+                      evaluator_sha256=digest("evaluator:exact-cover"),
+                      dataset_sha256=digest("dataset:exact-cover"),
+                      source_public=False)
+
     def test_zero_update_checkpoint_cannot_pass_training_transfer_screen(self):
         manifest = precommit(cases(), lineage(updated=False),
                              evaluator_sha256=digest("evaluator"),

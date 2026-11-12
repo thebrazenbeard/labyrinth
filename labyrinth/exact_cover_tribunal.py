@@ -14,7 +14,7 @@ an exhaustive finite search demonstrates neural learning or private custody.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import combinations
+from itertools import combinations, permutations
 import hashlib
 import json
 
@@ -62,6 +62,37 @@ def fingerprint(s: Scenario) -> str:
     raw = json.dumps({"protocol": "minotaur-exact-cover-tribunal.v1",
                       "sites": s.sites, "crews": s.crews, "budget": s.budget},
                      sort_keys=True, separators=(",", ":")).encode("ascii")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def mechanics_fingerprint(s: Scenario) -> str:
+    """Exact site/crew-isomorphism ID for bounded 3- and 6-site covers.
+
+    Names, site ordering, crew ordering, and each crew's internal ordering
+    do not create a new mechanical family. A complete allocation always uses
+    exactly len(s.sites)//3 crews; extra budget cannot change feasible policies.
+    Larger graphs are not qualified here: returning a raw provenance hash
+    would falsely certify novelty. This source-only ID has no custody claim.
+    """
+    check_scenario(s)
+    count = len(s.sites)
+    if count > 6:
+        raise ValueError("unqualified exact-cover mechanics identity for >6 sites")
+    by_name = {name: i for i, name in enumerate(s.sites)}
+    edges = tuple(tuple(by_name[name] for name in crew) for crew in s.crews)
+    # Max 6! = 720 finite vertex maps. Minimize the incidence multiset exactly.
+    canonical_edges = min(
+        tuple(sorted(tuple(sorted(renaming[i] for i in crew))
+                     for crew in edges))
+        for renaming in permutations(range(count))
+    )
+    payload = {
+        "mechanics": "minotaur-exact-cover-mechanics-v1",
+        "sites": count,
+        "budget": min(s.budget, count // 3),
+        "crews": canonical_edges,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
     return hashlib.sha256(raw).hexdigest()
 
 
