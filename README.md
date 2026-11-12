@@ -105,6 +105,28 @@ rules; neither an external model, secret evaluator, neural update, nor genuine
 model transfer is tested. Any certified UNSAT verdict is restricted to the
 declared finite rules.
 
+The structural-transfer *prescreen* additionally requires source-verifiable
+mechanical identities before it can return `PENDING_INDEPENDENT_CUSTODY`.
+Use `MechanicSource(case_id, kind, scenario)` for **every** precommitted case
+via `precommit(..., mechanic_sources=...)`; supported bounded kinds are
+`minotaur-exact-cover-mechanics-v1` (3/6 sites) and
+`distributed-parity-mechanics-v4` (bounded private-observation parity).
+The prescreen recomputes each identity, rejects unqualified/mismatched/missing
+bindings, and includes exact scenario descriptions in the manifest SHA-256
+commitment. Historical manifests without bindings retain their original SHA
+for reproducibility, but even valid HMAC signatures and perfect synthetic
+scores now yield `BLOCKED` rather than favorable prescreen status. A newly
+bound source manifest receives a **different** digest; old and new receipts
+must never be silently interchanged.
+
+The source binding does **not** independently prove that a claimed nonpublic
+test was private, that result rows were truly observed, that training ran, or
+that an external evaluator controlled the HMAC key. Keep source scenarios
+inside evaluator custody rather than exposing alleged private tests to the
+candidate. Even a favorable screen remains `PENDING_INDEPENDENT_CUSTODY`,
+never verified neural learning. Unsupported larger exact-cover graphs and
+other mechanics fail closed rather than receiving invented independent IDs.
+
 See the five exam protocols in `docs/CONSTANT_EXAM_PROTOCOL.md`,
 `docs/MINOTAUR_DIVERSE_EXAM_PROTOCOL.md`,
 `docs/MINOTAUR_TIMEGATE_HOSTILE_PROTOCOL.md`,

@@ -1,8 +1,9 @@
 """Fail-closed source-level prescreen for *mechanical* transfer evidence.
 
-This is deliberately NOT the model graduation gate. All mechanic identities,
-checkpoint SHA-256 values, optimizer-step counts and evaluator labels are
-declarations that require independent physical custody to become evidence.
+This is deliberately NOT the model graduation gate. Source bindings now
+recompute supported finite mechanics identities and reject unbound aliases from
+favorable prescreen results. Checkpoint hashes, optimizer steps, evaluator
+labels, privacy and actual trial outcomes still require independent custody.
 Even a successful HMAC proves only the bytes signed by its key holder. This
 module therefore has no disposition named GRADUATED or VERIFIED_LEARNING.
 
@@ -54,6 +55,18 @@ class CheckpointLineage:
 
 
 @dataclass(frozen=True)
+class MechanicSource:
+    """Exact source scenario bound to one committed case.
+
+    Source identity is reproducible but never proof of private evaluator custody.
+    Kinds name the bounded, versioned canonicalizers actually executed here.
+    """
+    case_id: str
+    kind: str
+    scenario: object
+
+
+@dataclass(frozen=True)
 class StructuralManifest:
     cases: tuple[CaseCommitment, ...]
     lineage: CheckpointLineage
@@ -61,6 +74,7 @@ class StructuralManifest:
     dataset_sha256: str
     source_public: bool
     sha256: str
+    mechanic_sources: tuple[MechanicSource, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -145,29 +159,93 @@ def _copy_lineage(value: object) -> CheckpointLineage:
     return CheckpointLineage(*fields, value.optimizer_steps)
 
 
-def _manifest_payload(cases, lineage, evaluator_sha256, dataset_sha256, source_public):
-    return {"schema": SCHEMA, "cases": [asdict(c) for c in cases],
-            "lineage": asdict(lineage), "evaluator_sha256": evaluator_sha256,
-            "dataset_sha256": dataset_sha256, "source_public": source_public}
+def _copy_mechanic_sources(value: object, cases: tuple[CaseCommitment, ...]):
+    """Re-derive all source identities; never accept a hash as its own proof.
+
+    This checks source-declared finite mechanics, not whether the source was
+    privately collected, trained against or independently supervised.
+    """
+    if type(value) is not tuple:
+        raise ValueError("mechanic source bindings must be an exact tuple")
+    if not value:
+        return ()
+    if len(value) != len(cases):
+        raise ValueError("mechanic source bindings must cover exact case roster")
+    from . import distributed_parity_tribunal as parity
+    from . import exact_cover_tribunal as cover
+
+    frozen = []
+    for entry, commitment in zip(value, cases):
+        if (type(entry) is not MechanicSource
+                or type(entry.case_id) is not str
+                or entry.case_id != commitment.case_id
+                or type(entry.kind) is not str):
+            raise ValueError("unbound or reordered mechanics source case")
+        if entry.kind == "minotaur-exact-cover-mechanics-v1":
+            if type(entry.scenario) is not cover.Scenario:
+                raise ValueError("exact-cover source scenario type mismatch")
+            cover.check_scenario(entry.scenario)
+            scenario = cover.Scenario(
+                tuple(entry.scenario.sites),
+                tuple(tuple(crew) for crew in entry.scenario.crews),
+                entry.scenario.budget)
+            derived = cover.mechanics_fingerprint(scenario)
+        elif entry.kind == "distributed-parity-mechanics-v4":
+            if type(entry.scenario) is not parity.Scenario:
+                raise ValueError("parity source scenario type mismatch")
+            parity.check_scenario(entry.scenario)
+            scenario = parity.Scenario(
+                tuple(parity.World(w.left_obs, w.right_obs, w.required_parity)
+                      for w in entry.scenario.worlds),
+                entry.scenario.left_observations,
+                entry.scenario.right_observations,
+                entry.scenario.total_on_budget)
+            derived = parity.mechanics_fingerprint(scenario)
+        else:
+            raise ValueError("unqualified mechanics source kind")
+        if derived != commitment.mechanic_sha256:
+            raise ValueError("self-declared mechanics ID disagrees with source")
+        frozen.append(MechanicSource(entry.case_id, entry.kind, scenario))
+    return tuple(frozen)
+
+
+def _manifest_payload(cases, lineage, evaluator_sha256, dataset_sha256, source_public,
+                      mechanic_sources=()):
+    payload = {"schema": SCHEMA, "cases": [asdict(c) for c in cases],
+               "lineage": asdict(lineage), "evaluator_sha256": evaluator_sha256,
+               "dataset_sha256": dataset_sha256, "source_public": source_public}
+    if mechanic_sources:
+        # Historical v1 SHA receipts are byte-identical when sources are absent,
+        # but cannot pass the favorable assessment without these bindings.
+        payload["mechanic_source_binding"] = {
+            "schema": "labyrinth.mechanic-source-binding.v1",
+            "sources": [{"case_id": row.case_id, "kind": row.kind,
+                         "scenario": asdict(row.scenario)}
+                        for row in mechanic_sources],
+        }
+    return payload
 
 
 def precommit(cases: tuple[CaseCommitment, ...], lineage: CheckpointLineage,
               *, evaluator_sha256: str, dataset_sha256: str,
-              source_public: bool) -> StructuralManifest:
-    """Snapshot exact declared identities before revealing evaluation outcomes.
+              source_public: bool,
+              mechanic_sources: tuple[MechanicSource, ...] = ()) -> StructuralManifest:
+    """Commit exact source-derived identities before evaluation outcomes.
 
-    This is a **source digest**, not an independent timestamp or custody proof.
+    The source binding is required for a favorable prescreen, but source code
+    and a digest cannot independently prove private custody or any training.
     """
     frozen_cases = _copy_cases(cases)
     frozen_lineage = _copy_lineage(lineage)
+    frozen_sources = _copy_mechanic_sources(mechanic_sources, frozen_cases)
     if (not _valid_sha(evaluator_sha256) or not _valid_sha(dataset_sha256)
             or type(source_public) is not bool):
         raise ValueError("invalid source provenance or public-exam classification")
     digest = _digest(_manifest_payload(frozen_cases, frozen_lineage,
                                        evaluator_sha256, dataset_sha256,
-                                       source_public))
+                                       source_public, frozen_sources))
     return StructuralManifest(frozen_cases, frozen_lineage, evaluator_sha256,
-                              dataset_sha256, source_public, digest)
+                              dataset_sha256, source_public, digest, frozen_sources)
 
 
 def _copy_report(report: object) -> TransferReport:
@@ -228,15 +306,17 @@ def assess(manifest: StructuralManifest, report: TransferReport,
     try:
         if type(manifest) is not StructuralManifest:
             return _blocked("invalid manifest")
-        cases, lineage, evaluator_sha, dataset_sha, source_public, original_sha = (
+        cases, lineage, evaluator_sha, dataset_sha, source_public, original_sha, sources = (
             manifest.cases, manifest.lineage, manifest.evaluator_sha256,
-            manifest.dataset_sha256, manifest.source_public, manifest.sha256)
+            manifest.dataset_sha256, manifest.source_public, manifest.sha256,
+            manifest.mechanic_sources)
         if not _valid_sha(original_sha):
             return _blocked("invalid manifest")
         frozen_plan = precommit(cases, lineage,
                                 evaluator_sha256=evaluator_sha,
                                 dataset_sha256=dataset_sha,
-                                source_public=source_public)
+                                source_public=source_public,
+                                mechanic_sources=sources)
         if original_sha != frozen_plan.sha256:
             return _blocked("manifest digest disagrees with committed fields")
         frozen_report = _copy_report(report)
@@ -305,9 +385,14 @@ def assess(manifest: StructuralManifest, report: TransferReport,
                     f"insufficient paired-family evidence against {control} on {split} "
                     "(one-sided exact sign test p > 0.05)", counts)
 
+    if not frozen_plan.mechanic_sources:
+        return _blocked(
+            "unbound self-declared mechanics IDs cannot establish independent "
+            "families; source-derived case bindings required", counts)
+
     return ScreenDecision(
         "PENDING_INDEPENDENT_CUSTODY",
-        ("source declarations and HMAC cannot authenticate private evaluation, "
-         "parameter update execution or mechanics labels",),
+        ("source bindings and HMAC cannot authenticate private evaluation, "
+         "actual parameter update execution or independent mechanics custody",),
         counts,
     )

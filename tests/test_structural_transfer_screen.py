@@ -1,12 +1,13 @@
 """Hostile structural-transfer prescreen, never a neural graduation claim."""
 
 from dataclasses import replace
+from itertools import combinations
 from hashlib import sha256
 import hmac
 import unittest
 
 from labyrinth.structural_transfer_screen import (
-    CaseCommitment, CheckpointLineage, TransferReport, TrialOutcome,
+    CaseCommitment, CheckpointLineage, MechanicSource, TransferReport, TrialOutcome,
     assess, canonical_report, precommit,
 )
 from labyrinth.minotaur_public_exam import run_public_exam
@@ -74,6 +75,31 @@ class StructuralTransferScreenTests(unittest.TestCase):
                          evaluator_sha256=digest("evaluator:v1"),
                          dataset_sha256=digest("new-blinded-split:v1"),
                          source_public=source_public)
+
+    def source_bound_manifest(self, **options):
+        """Source-verified but synthetic: NOT privately acquired evaluation."""
+        from labyrinth import exact_cover_tribunal as cover
+        roster = cases(**options)
+        possible = tuple(combinations("abcdef", 3))
+        family_sources = {}
+        committed = []
+        bindings = []
+        for row in roster:
+            # All paraphrases for the same declared family use one scenario.
+            group = (row.split, row.case_id.rsplit("-", 1)[0])
+            if group not in family_sources:
+                count = len(family_sources) + 1
+                family_sources[group] = cover.Scenario(
+                    tuple("abcdef"), tuple(possible[:count]), 2)
+            scenario = family_sources[group]
+            committed.append(replace(row, mechanic_sha256=
+                                     cover.mechanics_fingerprint(scenario)))
+            bindings.append(MechanicSource(
+                row.case_id, "minotaur-exact-cover-mechanics-v1", scenario))
+        return precommit(
+            tuple(committed), lineage(), evaluator_sha256=digest("evaluator:v1"),
+            dataset_sha256=digest("new-blinded-split:v1"),
+            source_public=False, mechanic_sources=tuple(bindings))
 
     def test_eight_public_paraphrases_do_not_make_eight_mechanics(self):
         # A zero-update seed/variant lookup can score 8/8 while seeing just
@@ -180,10 +206,11 @@ class StructuralTransferScreenTests(unittest.TestCase):
                              evaluator_sha256=digest("evaluator"),
                              dataset_sha256=digest("dataset"), source_public=False)
         report, signature = signed_result(manifest)
-        # The screen cannot deduce graph isomorphism from opaque SHA strings;
-        # its most favorable verdict remains PENDING physical custody.
+        # A raw provenance hash is not a typed mechanics binding, even
+        # when submitted with a valid signature and favorable metrics.
         result = assess(manifest, report, signature_hex=signature, independent_key=KEY)
-        self.assertEqual(result.disposition, "PENDING_INDEPENDENT_CUSTODY")
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertIn("unbound", " ".join(result.reasons))
         self.assertFalse(result.neural_learning_verified)
         self.assertFalse(result.private_exam_qualified)
 
@@ -309,8 +336,8 @@ class StructuralTransferScreenTests(unittest.TestCase):
         self.assertIn("paired", " ".join(result.reasons))
 
     def test_seven_of_eight_paired_family_wins_remain_pending_custody(self):
-        """Strong synthetic matched evidence is never proof of neural learning."""
-        manifest = self.manifest()
+        """Strong source-bound synthetic evidence is not neural learning."""
+        manifest = self.source_bound_manifest()
         report, _ = signed_result(manifest)
         one_failure_each_split = replace(report, rows=tuple(
             replace(row, candidate_correct=False)
@@ -378,8 +405,142 @@ class StructuralTransferScreenTests(unittest.TestCase):
         self.assertEqual(result.disposition, "BLOCKED")
         self.assertIn("roster", " ".join(result.reasons))
 
-    def test_synthetic_success_is_only_pending_external_custody(self):
+    def test_legacy_manifest_digest_stays_reproducible_but_unbound(self):
+        # Literal SHA from exact pre-change PR210 fixture/source readback.
+        historical = self.manifest()
+        self.assertEqual(historical.sha256,
+                         "dc1b0fffcac4176052f74ba3379eeff018f23aea832561fd2e38a3efb0e24b01")
+        self.assertEqual(historical.mechanic_sources, ())
+        report, signature = signed_result(historical)
+        result = assess(historical, report, signature_hex=signature,
+                        independent_key=KEY)
+        self.assertEqual(result.disposition, "BLOCKED")
+
+    def test_bound_scenario_is_copied_not_mutable_original_alias(self):
+        source = self.source_bound_manifest()
+        saved = precommit(
+            source.cases, source.lineage,
+            evaluator_sha256=source.evaluator_sha256,
+            dataset_sha256=source.dataset_sha256,
+            source_public=source.source_public,
+            mechanic_sources=source.mechanic_sources)
+        before = saved.mechanic_sources[0].scenario.budget
+        object.__setattr__(source.mechanic_sources[0].scenario, "budget", 6)
+        self.assertEqual(saved.mechanic_sources[0].scenario.budget, before)
+        report, signature = signed_result(saved)
+        result = assess(saved, report, signature_hex=signature,
+                        independent_key=KEY)
+        self.assertEqual(result.disposition, "PENDING_INDEPENDENT_CUSTODY")
+
+    def test_source_bindings_reject_forged_ids_and_unqualified_sources(self):
+        from labyrinth import exact_cover_tribunal as cover
+        bound = self.source_bound_manifest()
+
+        def recommit(rows, sources):
+            return precommit(
+                rows, bound.lineage, evaluator_sha256=bound.evaluator_sha256,
+                dataset_sha256=bound.dataset_sha256,
+                source_public=bound.source_public, mechanic_sources=sources)
+
+        altered_rows = list(bound.cases)
+        altered_rows[0] = replace(altered_rows[0],
+                                  mechanic_sha256=digest("fabricated-family"))
+        with self.assertRaisesRegex(ValueError, "disagrees"):
+            recommit(tuple(altered_rows), bound.mechanic_sources)
+
+        with self.assertRaisesRegex(ValueError, "exact case roster"):
+            recommit(bound.cases, bound.mechanic_sources[:-1])
+        with self.assertRaisesRegex(ValueError, "reordered"):
+            recommit(bound.cases, tuple(reversed(bound.mechanic_sources)))
+
+        unsupported = list(bound.mechanic_sources)
+        unsupported[0] = replace(unsupported[0],
+                                 kind="unregistered-mechanics-v999")
+        with self.assertRaisesRegex(ValueError, "unqualified"):
+            recommit(bound.cases, tuple(unsupported))
+
+        nine_site = cover.families()["budget_bound"]
+        unsupported[0] = replace(unsupported[0],
+                                 kind="minotaur-exact-cover-mechanics-v1",
+                                 scenario=nine_site)
+        with self.assertRaisesRegex(ValueError, "unqualified"):
+            recommit(bound.cases, tuple(unsupported))
+
+    def test_bound_manifest_mutation_fails_signature_and_digest_readback(self):
+        bound = self.source_bound_manifest()
+        report, signature = signed_result(bound)
+        self.assertEqual(assess(bound, report, signature_hex=signature,
+                                independent_key=KEY).disposition,
+                         "PENDING_INDEPENDENT_CUSTODY")
+
+        # Even the same mechanical class at a different declared budget
+        # changes the exact source manifest and invalidates its commitment.
+        object.__setattr__(bound.mechanic_sources[0].scenario, "budget", 6)
+        result = assess(bound, report, signature_hex=signature,
+                        independent_key=KEY)
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertIn("digest", " ".join(result.reasons))
+
+    def test_bound_receipt_cannot_be_replayed_with_legacy_signature(self):
+        legacy = self.manifest()
+        bound = self.source_bound_manifest()
+        self.assertNotEqual(legacy.sha256, bound.sha256)
+        original_report, original_signature = signed_result(legacy)
+        # Repointing the signed legacy rows at a source-bound manifest does not
+        # create a valid evaluator signature or independent data custody.
+        replay = replace(original_report, manifest_sha256=bound.sha256)
+        result = assess(bound, replay, signature_hex=original_signature,
+                        independent_key=KEY)
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertIn("signature", " ".join(result.reasons))
+
+    def test_bound_source_public_examination_is_still_blocked(self):
+        bound = self.source_bound_manifest()
+        public = precommit(
+            bound.cases, bound.lineage,
+            evaluator_sha256=bound.evaluator_sha256,
+            dataset_sha256=bound.dataset_sha256,
+            source_public=True, mechanic_sources=bound.mechanic_sources)
+        report, signature = signed_result(public)
+        result = assess(public, report, signature_hex=signature,
+                        independent_key=KEY)
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertIn("source-public", " ".join(result.reasons))
+
+    def test_source_bound_parity_and_exact_cover_coexist_only_as_claimed(self):
+        from labyrinth import distributed_parity_tribunal as parity
+        bound = self.source_bound_manifest()
+        scenario = parity.families()["coordinated_parity"]
+        cases_ = list(bound.cases)
+        sources = list(bound.mechanic_sources)
+        cases_[0] = replace(cases_[0],
+                            mechanic_sha256=parity.mechanics_fingerprint(scenario))
+        sources[0] = MechanicSource(cases_[0].case_id,
+                                    "distributed-parity-mechanics-v4", scenario)
+        manifest = precommit(
+            tuple(cases_), bound.lineage,
+            evaluator_sha256=bound.evaluator_sha256,
+            dataset_sha256=bound.dataset_sha256,
+            source_public=bound.source_public, mechanic_sources=tuple(sources))
+        report, signature = signed_result(manifest)
+        result = assess(manifest, report, signature_hex=signature,
+                        independent_key=KEY)
+        self.assertEqual(result.disposition, "PENDING_INDEPENDENT_CUSTODY")
+        self.assertFalse(result.neural_learning_verified)
+        self.assertFalse(result.private_exam_qualified)
+
+    def test_signed_opaque_mechanic_ids_cannot_reach_favorable_prescreen(self):
+        # HMAC + 16 declared distinct hashes cannot establish 16 actual
+        # mechanical families, even with perfect candidate-v-control scores.
         manifest = self.manifest()
+        report, signature = signed_result(manifest)
+        result = assess(manifest, report, signature_hex=signature,
+                        independent_key=KEY)
+        self.assertEqual(result.disposition, "BLOCKED", result)
+        self.assertIn("unbound", " ".join(result.reasons))
+
+    def test_synthetic_success_is_only_pending_external_custody(self):
+        manifest = self.source_bound_manifest()
         report, signature = signed_result(manifest)
         result = assess(manifest, report, signature_hex=signature, independent_key=KEY)
         self.assertEqual(result.disposition, "PENDING_INDEPENDENT_CUSTODY")
@@ -388,7 +549,7 @@ class StructuralTransferScreenTests(unittest.TestCase):
         self.assertFalse(result.private_exam_qualified)
 
     def test_paraphrases_count_once_per_mechanic(self):
-        manifest = self.manifest(repeat_paraphrases=3)
+        manifest = self.source_bound_manifest(repeat_paraphrases=3)
         report, signature = signed_result(manifest)
         result = assess(manifest, report, signature_hex=signature, independent_key=KEY)
         self.assertEqual(result.independent_families, (8, 8))
@@ -415,7 +576,8 @@ class StructuralTransferScreenTests(unittest.TestCase):
         self.assertNotEqual(original.mechanic_sha256, manifest.cases[1].mechanic_sha256)
         report, signature = signed_result(manifest)
         result = assess(manifest, report, signature_hex=signature, independent_key=KEY)
-        self.assertEqual(result.disposition, "PENDING_INDEPENDENT_CUSTODY")
+        self.assertEqual(result.disposition, "BLOCKED")
+        self.assertIn("unbound", " ".join(result.reasons))
 
 
 if __name__ == "__main__":
