@@ -57,9 +57,20 @@ across three mechanically distinct families**. An independent specific-witness
 checker and separately coded existence checks can veto a claimed win; claimed
 finite impossibility also faces a third bounded reachability check. A novel
 proposed allocation can overturn an earlier wrong impossibility verdict when
-verified under the declared rules. These public cases still fall far short of
-the distinct held-out and transfer mechanics required for neural graduation;
-see `docs/MINOTAUR_PUBLIC_EXAM_V2.md` for the precise evidence ceiling.
+verified under the declared rules. A separate, versioned
+`minotaur-exact-cover-mechanics-v1` identity canonically recognizes site/crew
+renaming and reordering for **3- and 6-site scenarios** (at most 6! = 720
+site permutations), and caps budget at the number of crews needed to cover
+every site. The exact case/provenance `fingerprint` remains unchanged.
+For 9–18-site scenarios this bounded canonicalizer raises `ValueError`
+rather than inventing a mechanical-identity certificate; those scenarios
+still have ordinary symbolic verification. A structural-transfer prescreen
+rejects declared held-out/transfer overlap *when these source-derived bounded
+mechanics IDs are supplied*. Raw exact-case hashes, old receipts, and opaque
+self-declared mechanics labels are **not** independently validated identities.
+These public cases still fall far short of the distinct held-out and transfer
+mechanics required for neural graduation; see
+`docs/MINOTAUR_PUBLIC_EXAM_V2.md` for the precise evidence ceiling.
 Opting into `--temporal-repair` *together with* `--exact-cover` adds a fourth
 mechanic with renewable-energy, precedence-constrained, single-machine repair
 jobs and deadlines: **16 source-public cases across four mechanics** (v3).
