@@ -127,6 +127,20 @@ candidate. Even a favorable screen remains `PENDING_INDEPENDENT_CUSTODY`,
 never verified neural learning. Unsupported larger exact-cover graphs and
 other mechanics fail closed rather than receiving invented independent IDs.
 
+For a **real, bounded local inference observation** (rather than a replay
+fixture), `python -m labyrinth.live_model_probe` provides `commit`,
+`observe`, and `compare` commands against an already-running, loopback
+llama.cpp OpenAI-compatible endpoint. The tool writes an answer-key commitment
+before requesting generation, hashes an exact local GGUF file, records the
+actual model text and SHA-256, and optionally compares two independent run
+receipts for the *same* committed cases. It will never claim neural learning:
+a weight-file hash does not independently establish that the server loaded
+those bytes, two differing hashes do not prove training lineage, and the
+cases are not independently held by this code. See
+[Live Model Observation V1](docs/LIVE_MODEL_OBSERVATION_V1.md).
+No download, model launch, checkpoint modification, or override of TrainingDay
+physical-launch HOLD occurs.
+
 See the five exam protocols in `docs/CONSTANT_EXAM_PROTOCOL.md`,
 `docs/MINOTAUR_DIVERSE_EXAM_PROTOCOL.md`,
 `docs/MINOTAUR_TIMEGATE_HOSTILE_PROTOCOL.md`,
