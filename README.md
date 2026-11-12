@@ -75,7 +75,14 @@ Reported wins undergo both a direct replay and separately coded specific
 witness/GF(2) pinned-equation checks; finite UNSAT requires full policy-space
 enumeration and independent algebraic/DFS existence checks. A world-order
 permutation is an independent case *provenance* change, not a new mechanic:
-the normalized mechanics fingerprint is tracked separately. Its exact-public
+the normalized mechanics fingerprint is tracked separately. The separately
+versioned **distributed-parity mechanics identity v4** additionally removes
+unreachable observation slots and surplus budget, and recognizes local output
+polarity relabeling only when the effective asserted-one budget cannot bind
+(and no observation pair has contradictory parity declarations). The exact
+case/provenance fingerprint remains unchanged. Mechanics-identity v3 and v4
+digests are **not interchangeable** without exact source-version custody;
+neither digest authenticates an independent private evaluation. Its exact-public
 memorizer and fixed-script controls perform zero optimizer updates. All five
 mechanics are exposed in repository source, so this strengthens the symbolic
 tester but does **not** constitute blind transfer or neural model learning.

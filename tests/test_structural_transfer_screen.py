@@ -110,6 +110,35 @@ class StructuralTransferScreenTests(unittest.TestCase):
             precommit(tuple(records), lineage(), evaluator_sha256=digest("eval"),
                       dataset_sha256=digest("dataset"), source_public=True)
 
+    def test_parity_output_polarity_cannot_fake_independent_transfer_split(self):
+        # Use source-derived mechanics identifiers, not invented hash labels.
+        # A nonbinding-budget local output-bit relabeling cannot make a second
+        # independent family, even though its exact case receipt is different.
+        from labyrinth.distributed_parity_tribunal import (
+            World, Scenario, fingerprint as case_id, mechanics_fingerprint,
+        )
+        source = Scenario((World(0, 0, 0), World(0, 1, 0),
+                           World(1, 0, 0)), 2, 2, 4)
+        changed = Scenario((World(0, 0, 1), World(0, 1, 1),
+                            World(1, 0, 0)), 2, 2, 4)
+        self.assertNotEqual(case_id(source), case_id(changed))
+        records = list(cases())
+        heldout = next(i for i, row in enumerate(records)
+                       if row.split == "heldout")
+        transfer = next(i for i, row in enumerate(records)
+                        if row.split == "transfer")
+        records[heldout] = replace(
+            records[heldout],
+            mechanic_sha256=mechanics_fingerprint(source))
+        records[transfer] = replace(
+            records[transfer],
+            mechanic_sha256=mechanics_fingerprint(changed))
+        with self.assertRaisesRegex(ValueError, "split overlap"):
+            precommit(tuple(records), lineage(),
+                      evaluator_sha256=digest("evaluator:parity"),
+                      dataset_sha256=digest("dataset:parity"),
+                      source_public=False)
+
     def test_training_family_cannot_reappear_under_new_prompt_hash(self):
         records = list(cases())
         records[1] = replace(records[1], mechanic_sha256=records[0].mechanic_sha256)

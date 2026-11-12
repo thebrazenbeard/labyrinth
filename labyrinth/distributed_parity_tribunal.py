@@ -79,6 +79,45 @@ def fingerprint(s):
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _gauge_normalize(constraints, left_count, right_count):
+    """Canonical local-bit polarity when no cardinality budget can bind.
+
+    Each unique left/right observation pair must declare a single parity.
+    A conflicting pair is already impossible, but selecting one of its
+    inconsistent values as a spanning-tree edge would be noncanonical; do
+    not apply gauge reduction to those declarations.
+    """
+    by_pair = {}
+    for left, right, parity in constraints:
+        pair = (left, right)
+        if pair in by_pair and by_pair[pair] != parity:
+            return tuple(sorted(constraints))
+        by_pair[pair] = parity
+
+    graph = [[] for _ in range(left_count + right_count)]
+    for (left, right), parity in by_pair.items():
+        graph[left].append((left_count + right, parity))
+        graph[left_count + right].append((left, parity))
+    potential = {}
+    for root in range(len(graph)):
+        if root in potential:
+            continue
+        potential[root] = 0
+        frontier = [root]
+        while frontier:
+            vertex = frontier.pop()
+            for neighbor, parity in sorted(graph[vertex]):
+                if neighbor not in potential:
+                    potential[neighbor] = potential[vertex] ^ parity
+                    frontier.append(neighbor)
+
+    return tuple(sorted(
+        (left, right, parity ^ potential[left]
+         ^ potential[left_count + right])
+        for left, right, parity in constraints
+    ))
+
+
 def mechanics_fingerprint(s):
     """Bounded identity of reachably equivalent, symmetric parity mechanics.
 
@@ -103,20 +142,34 @@ def mechanics_fingerprint(s):
         (len(right_used), len(left_used),
          tuple((right, left, parity) for left, right, parity in reachable)),
     )
-    # Max 2 * 4! * 4! = 1152 finite assignments, independent of world order.
+    # Unreachable output entries can always be zero. Any budget exceeding the
+    # active count is indistinguishable from a nonbinding active-count budget.
+    active_count = len(left_used) + len(right_used)
+    effective_budget = min(s.total_on_budget, active_count)
+
+    def canonical_candidate(n_left, n_right, worlds, left_perm, right_perm):
+        relabeled = tuple((left_perm[left], right_perm[right], parity)
+                          for left, right, parity in worlds)
+        if effective_budget == active_count:
+            # Every complete active policy is affordable, so XOR constraints
+            # are invariant under local output-bit polarity changes.
+            return _gauge_normalize(relabeled, n_left, n_right)
+        return tuple(sorted(relabeled))
+
+    # Max 2 * 4! * 4! = 1152 finite label assignments, followed by bounded
+    # spanning-forest normalization only when the budget cannot bind.
     active_left, active_right, canonical_constraints = min(
         (n_left, n_right,
-         tuple(sorted((left_perm[left], right_perm[right], parity)
-                      for left, right, parity in worlds)))
+         canonical_candidate(n_left, n_right, worlds, left_perm, right_perm))
         for n_left, n_right, worlds in orientations
         for left_perm in permutations(range(n_left))
         for right_perm in permutations(range(n_right))
     )
     payload = {
-        "mechanics": "distributed-parity-mechanics-v3",
+        "mechanics": "distributed-parity-mechanics-v4",
         "active_left_observations": active_left,
         "active_right_observations": active_right,
-        "total_on_budget": s.total_on_budget,
+        "total_on_budget": effective_budget,
         "constraints": canonical_constraints,
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))

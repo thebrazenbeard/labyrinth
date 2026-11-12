@@ -1,6 +1,7 @@
 """Hostile, independent tests of simultaneous private-information parity."""
 
 from dataclasses import replace
+from itertools import product
 import random
 import unittest
 from unittest.mock import patch
@@ -225,6 +226,105 @@ class DistributedParityTribunalTests(unittest.TestCase):
         self.assertNotEqual(fingerprint(source), fingerprint(swapped))
         self.assertEqual(test_owned_oracle(source), test_owned_oracle(swapped))
         self.assertEqual(mechanics_fingerprint(source), mechanics_fingerprint(swapped))
+
+    def test_unconstrained_output_polarity_is_not_new_transfer_mechanics(self):
+        # With the asserted-one budget nonbinding, flipping local output-bit
+        # interpretations gives a bijection on feasible complete policies.
+        source = Scenario((World(0, 0, 0), World(0, 1, 0),
+                           World(1, 0, 0)), 2, 2, 4)
+        changed = Scenario(tuple(
+            World(w.left_obs, w.right_obs,
+                  w.required_parity ^ int(w.left_obs == 0))
+            for w in source.worlds), 2, 2, 4)
+        self.assertNotEqual(fingerprint(source), fingerprint(changed))
+        self.assertEqual(test_owned_oracle(source), test_owned_oracle(changed))
+        self.assertEqual(mechanics_fingerprint(source),
+                         mechanics_fingerprint(changed))
+
+    def test_surplus_budget_on_unreachable_slots_is_not_new_mechanics(self):
+        worlds = (World(0, 0, 0), World(0, 1, 1),
+                  World(1, 0, 0))
+        source = Scenario(worlds, 4, 4, 4)
+        surplus = Scenario(worlds, 4, 4, 8)
+        self.assertNotEqual(fingerprint(source), fingerprint(surplus))
+        self.assertEqual(test_owned_oracle(source), test_owned_oracle(surplus))
+        self.assertEqual(mechanics_fingerprint(source),
+                         mechanics_fingerprint(surplus))
+
+    def test_bit_polarity_is_not_a_symmetry_when_budget_binds(self):
+        # A zero-ones budget permits all-zero parity, not a single odd edge.
+        first = Scenario((World(0, 0, 0),), 2, 2, 0)
+        odd = Scenario((World(0, 0, 1),), 2, 2, 0)
+        self.assertTrue(test_owned_oracle(first))
+        self.assertFalse(test_owned_oracle(odd))
+        self.assertNotEqual(mechanics_fingerprint(first),
+                            mechanics_fingerprint(odd))
+
+    def test_random_full_budget_gauge_relabeling_preserves_identity(self):
+        rng = random.Random(0xD1572027)
+        for seed in range(48):
+            left, right = rng.randint(2, 4), rng.randint(2, 4)
+            pairs = [(a, b) for a in range(left) for b in range(right)]
+            chosen = rng.sample(pairs, rng.randint(1, min(len(pairs), 12)))
+            worlds = tuple(World(a, b, rng.randrange(2)) for a, b in chosen)
+            source = Scenario(worlds, left, right, left + right)
+            left_labels = rng.sample(range(left), left)
+            right_labels = rng.sample(range(right), right)
+            left_flip = tuple(rng.randrange(2) for _ in range(left))
+            right_flip = tuple(rng.randrange(2) for _ in range(right))
+            changed = Scenario(
+                tuple(World(left_labels[w.left_obs], right_labels[w.right_obs],
+                            w.required_parity ^ left_flip[w.left_obs]
+                            ^ right_flip[w.right_obs]) for w in reversed(worlds)),
+                left, right, left + right)
+            with self.subTest(seed=seed):
+                self.assertEqual(test_owned_oracle(source),
+                                 test_owned_oracle(changed))
+                self.assertEqual(mechanics_fingerprint(source),
+                                 mechanics_fingerprint(changed))
+                # Check the actual policy bijection as well as existence.
+                for _ in range(3):
+                    lbits = tuple(rng.randrange(2) for _ in range(left))
+                    rbits = tuple(rng.randrange(2) for _ in range(right))
+                    remap_left = [0] * left
+                    remap_right = [0] * right
+                    for index in range(left):
+                        remap_left[left_labels[index]] = lbits[index] ^ left_flip[index]
+                    for index in range(right):
+                        remap_right[right_labels[index]] = rbits[index] ^ right_flip[index]
+                    self.assertEqual(
+                        verify_policy(source, (lbits, rbits))["verdict"],
+                        verify_policy(changed,
+                                      (tuple(remap_left), tuple(remap_right)))["verdict"])
+
+    def test_small_exhaustive_mechanics_groups_never_merge_win_and_unsat(self):
+        # Adversarial check against *over*-canonicalization: every 2x2
+        # finite single-parity-per-pair scenario, every permitted budget.
+        # Different scenarios may share an ID only if independent feasibility
+        # agrees; this does not certify all possible semantic equivalences.
+        seen = {}
+        pairs = ((0, 0), (0, 1), (1, 0), (1, 1))
+        for values in product((-1, 0, 1), repeat=4):
+            worlds = tuple(World(left, right, parity)
+                           for (left, right), parity in zip(pairs, values)
+                           if parity >= 0)
+            if not worlds:
+                continue
+            for budget in range(5):
+                scenario = Scenario(worlds, 2, 2, budget)
+                key = mechanics_fingerprint(scenario)
+                exists = test_owned_oracle(scenario)
+                with self.subTest(values=values, budget=budget):
+                    if key in seen:
+                        self.assertEqual(seen[key], exists)
+                    else:
+                        seen[key] = exists
+        conflict = Scenario((World(0, 0, 0), World(0, 0, 1)), 2, 2, 4)
+        consistent = Scenario((World(0, 0, 0),), 2, 2, 4)
+        self.assertFalse(test_owned_oracle(conflict))
+        self.assertTrue(test_owned_oracle(consistent))
+        self.assertNotEqual(mechanics_fingerprint(conflict),
+                            mechanics_fingerprint(consistent))
 
     def test_random_unreachable_padding_and_actor_swap(self):
         rng = random.Random(0xD1572026)
