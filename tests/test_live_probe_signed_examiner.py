@@ -6,6 +6,8 @@ only; key custody, independence and live model outputs remain unverified.
 from __future__ import annotations
 
 import base64
+from contextlib import redirect_stdout
+from io import StringIO
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -14,7 +16,7 @@ import unittest
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from labyrinth.live_model_probe import commit_cases, compare_reports
+from labyrinth.live_model_probe import commit_cases, compare_reports, main
 from test_live_model_probe_receipt_integrity import _observation, _receipt
 
 
@@ -138,6 +140,33 @@ class ExaminerSignedPrecommitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "signature|attestation"):
             self._compare()
         self.assertFalse(self.out.exists())
+
+
+    def test_mutated_signature_bytes_rejected_after_all_fields_match(self):
+        data = json.loads(self.envelope.read_text(encoding="utf-8"))
+        raw = bytearray(base64.b64decode(data["signature_ed25519_b64"]))
+        raw[22] ^= 1
+        data["signature_ed25519_b64"] = base64.b64encode(raw).decode("ascii")
+        self.envelope.write_text(json.dumps(data), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "signature"):
+            self._compare()
+        self.assertFalse(self.out.exists())
+
+    def test_compare_cli_verifies_exact_signer_and_records_ceiling(self):
+        output = StringIO()
+        with redirect_stdout(output):
+            main(["compare", "--before", str(self.before), "--after", str(self.after),
+                  "--cases", str(self.cases), "--commitment", str(self.commit),
+                  "--expected-precommit-sha256", self.plan["receipt_sha256"],
+                  "--examiner-attestation", str(self.envelope),
+                  "--examiner-public-key", str(self.pub),
+                  "--expected-examiner-key-sha256", self.key_pin,
+                  "--examiner-exam-id", self.exam_id, "--out", str(self.out)])
+        on_disk = json.loads(self.out.read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["examiner_signature_evidence"],
+                         "ED25519_VALID_CALLER_PINNED_KEY")
+        self.assertFalse(on_disk["independent_custody_verified"])
+        self.assertIn(on_disk["receipt_sha256"], output.getvalue())
 
     def test_unpinned_signature_not_counted_as_authenticated_signer(self):
         result = compare_reports(
