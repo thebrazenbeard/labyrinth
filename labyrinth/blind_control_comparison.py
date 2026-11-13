@@ -2,6 +2,10 @@
 
 Only source-derived paired measurements; no generalization qualification.
 """
+def _mcnemar_exact_two_sided(candidate_only, control_only):
+    raise NotImplementedError("exact paired binomial test not implemented")
+
+
 def compare_with_controls(private_path, public_path, precommit_path,
                           responses_path, out_path, *, expected_precommit_sha256,
                           observation_path=None, expected_observation_sha256=None):
