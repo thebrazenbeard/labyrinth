@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.error import HTTPError
 import json
 from pathlib import Path
 import random
@@ -169,8 +170,10 @@ class LocalModelEvidenceTests(unittest.TestCase):
                 observe_public_exam(self.public, self.responses, self.observation,
                                     bad, self.model)
         self.state["redirect"] = True
-        with self.assertRaises(Exception):
+        with self.assertRaises(HTTPError) as captured:
             self.run_observe()
+        self.assertEqual(captured.exception.code, 302)
+        captured.exception.close()
         self.assertFalse(self.responses.exists())
 
     def test_both_response_and_observation_outputs_require_distinct_new_paths(self):
