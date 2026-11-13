@@ -352,7 +352,8 @@ def _read_observation(path):
     return data
 
 
-def compare_reports(before_path, after_path, out_path):
+def compare_reports(before_path, after_path, out_path, *,
+                    cases_path=None, commitment_path=None):
     if Path(out_path).exists():
         raise FileExistsError("write-once comparison exists")
     before, after = _read_observation(before_path), _read_observation(after_path)
@@ -363,6 +364,32 @@ def compare_reports(before_path, after_path, out_path):
             [t["prompt_sha256"] for t in before["trials"]] !=
             [t["prompt_sha256"] for t in after["trials"]]):
         raise ValueError("different committed case or prompt rosters cannot be compared")
+    if (cases_path is None) != (commitment_path is None):
+        raise ValueError("cases and commitment must be provided together")
+    source_bound = cases_path is not None
+    if source_bound:
+        # Only the actual evaluator-held source bytes can correct a caller's
+        # self-rehashed but false answer flags. This is not custody attestation.
+        raw, rows = _cases(cases_path)
+        plan = _read_commit(commitment_path)
+        if (plan.get("cases_file_sha256") != _sha(raw)
+                or plan.get("cases_canonical_sha256") != _sha(_canonical(rows))
+                or type(plan.get("case_count")) is not int
+                or plan["case_count"] != len(rows)
+                or before["cases_file_sha256"] != plan["cases_file_sha256"]
+                or before["commitment_sha256"] != plan["receipt_sha256"]):
+            raise ValueError("source cases differ from original precommit commitment")
+        if [row["case_id"] for row in rows] != [
+                trial["case_id"] for trial in before["trials"]]:
+            raise ValueError("source case identities differ from observed roster")
+        for observation in (before, after):
+            for case, trial in zip(rows, observation["trials"]):
+                if trial["prompt_sha256"] != _sha(case["prompt"].encode("utf-8")):
+                    raise ValueError("observation prompt disagrees with source cases")
+                parsed = ANSWER.fullmatch(trial["response"].strip())
+                expected = bool(parsed and parsed.group(1) == case["answer"])
+                if trial["correct"] is not expected:
+                    raise ValueError("claimed correct answer disagrees with source case")
     same = before["model"]["sha256"] == after["model"]["sha256"]
     payload = {
         "schema": COMPARE_SCHEMA,
@@ -373,20 +400,28 @@ def compare_reports(before_path, after_path, out_path):
         "before_model_sha256": before["model"]["sha256"],
         "after_model_sha256": after["model"]["sha256"],
         "case_count": before["case_count"],
+        # The legacy aggregate counts remain visible but are only claims until
+        # source-replayed. Do not promote unverified paired wins or losses.
+        "score_evidence": ("REPLAYED_CALLER_SUPPLIED_CASES" if source_bound
+                           else "SELF_REPORTED_ONLY"),
         "before_correct": before["correct"],
         "after_correct": after["correct"],
-        "paired_candidate_only_wins": sum(
+        "paired_candidate_only_wins": (sum(
             not a["correct"] and b["correct"]
-            for a, b in zip(before["trials"], after["trials"])),
-        "paired_candidate_only_losses": sum(
+            for a, b in zip(before["trials"], after["trials"]))
+            if source_bound else None),
+        "paired_candidate_only_losses": (sum(
             a["correct"] and not b["correct"]
-            for a, b in zip(before["trials"], after["trials"])),
+            for a, b in zip(before["trials"], after["trials"]))
+            if source_bound else None),
         "neural_learning_verified": False,
         "independent_custody_verified": False,
         "limitations": [
             "Distinct model hashes do not establish training lineage.",
             "Neither observation authenticates model serving-process weights.",
             "Evaluator and private-case independence are not attested.",
+            "Without source replay, correctness totals remain self-reported.",
+            "Caller-supplied case bytes and unkeyed commitments cannot attest independent custody.",
         ],
     }
     return _write_once(out_path, _receipt(payload))
@@ -409,6 +444,8 @@ def main(argv=None):
     compare = sub.add_parser("compare", help="compare two already observed models")
     compare.add_argument("--before", required=True)
     compare.add_argument("--after", required=True)
+    compare.add_argument("--cases", help="local evaluator-held case JSON for score replay")
+    compare.add_argument("--commitment", help="original matching case precommit JSON")
     compare.add_argument("--out", required=True)
     args = parser.parse_args(argv)
     if args.cmd == "commit":
@@ -418,7 +455,9 @@ def main(argv=None):
                                args.endpoint, args.out, max_tokens=args.max_tokens,
                                timeout=args.timeout)
     else:
-        result = compare_reports(args.before, args.after, args.out)
+        result = compare_reports(args.before, args.after, args.out,
+                                 cases_path=args.cases,
+                                 commitment_path=args.commitment)
     print(json.dumps({"status": result["status"], "receipt_sha256":
                       result["receipt_sha256"], "out": args.out},
                      sort_keys=True))
