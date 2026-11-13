@@ -4,6 +4,16 @@ Labyrinth is an offline-first **reasoning challenge, training-lifecycle, and eva
 
 It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path. A bounded CPU smoke run on Lappy demonstrated numerical adapter changes and fresh-process reload with a tiny, **randomly initialized** HF model; it did **not** demonstrate improved reasoning.
 
+## Blind structural examiner — source-only research
+
+A [fresh two-phase mechanics examiner](docs/MINOTAUR_BLIND_STRUCTURAL_EVALUATOR_V1.md)
+now supports separately held private answers, candidate-visible rule tables,
+real action-plan replay, bounded UNSAT cross-checks, original precommit pins and
+optional examiner-signed commitments. A 12-case on-host zero-update control got
+6/12 by always claiming UNSAT; a public-rule symbolic solver got 12/12 with
+six actual winning traces. Neither is a neural-learning result or independent
+examiner-custody qualification.
+
 ## Run it
 
 Requires Python 3.10+; core functionality uses the standard library.
