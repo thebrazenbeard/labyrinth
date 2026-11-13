@@ -91,8 +91,10 @@ mapping to live weight pages.
   and across-seed evidence are read back.
 
 `OBSERVED_SINGLE_MODEL_ONLY` means no before/after pair.
-`SAME_CHECKPOINT_NO_WEIGHT_UPDATE` means a paired comparison of identical
-weight hashes cannot establish parameter learning.
+`SAME_DECLARED_FILE_HASH_NOT_TRAINING_ATTESTED` means both receipts declare the same model-file SHA, but no runtime
+weight pages or adapters are independently attested; **neither the absence nor
+presence of a parameter update is proven**. `weight_update_status=UNKNOWN`
+is explicit for both equal and different declared model-file hashes.
 `PAIRED_BEHAVIOR_NOT_TRAINING_ATTESTED` means different local model-file
 hashes and paired claimed scores (replayed only when source files are supplied), **not** proof the second model was trained
 from the first. In all three cases `neural_learning_verified=false` and
