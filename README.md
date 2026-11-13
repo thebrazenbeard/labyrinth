@@ -9,7 +9,10 @@ It is a working **prototype**, not evidence of generalized reasoning improvement
 A [fresh two-phase mechanics examiner](docs/MINOTAUR_BLIND_STRUCTURAL_EVALUATOR_V1.md)
 now supports separately held private answers, candidate-visible rule tables,
 real action-plan replay, bounded UNSAT cross-checks, original precommit pins and
-optional examiner-signed commitments. A 12-case on-host zero-update control got
+optional examiner-signed commitments. An optional [local model HTTP observer](docs/MINOTAUR_LOCAL_MODEL_OBSERVATION_V1.md)
+now binds actual loopback Ollama requests and raw responses to an original
+observation digest rechecked by the scorer, without asserting authentic
+loaded weights or independent witness custody. A 12-case on-host zero-update control got
 6/12 by always claiming UNSAT; a public-rule symbolic solver got 12/12 with
 six actual winning traces. Neither is a neural-learning result or independent
 examiner-custody qualification.
