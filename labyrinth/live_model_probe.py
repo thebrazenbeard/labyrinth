@@ -359,8 +359,10 @@ def compare_reports(before_path, after_path, out_path):
     if (before["commitment_sha256"] != after["commitment_sha256"]
             or before["cases_file_sha256"] != after["cases_file_sha256"]
             or [t["case_id"] for t in before["trials"]] !=
-            [t["case_id"] for t in after["trials"]]):
-        raise ValueError("different committed case rosters cannot be compared")
+            [t["case_id"] for t in after["trials"]] or
+            [t["prompt_sha256"] for t in before["trials"]] !=
+            [t["prompt_sha256"] for t in after["trials"]]):
+        raise ValueError("different committed case or prompt rosters cannot be compared")
     same = before["model"]["sha256"] == after["model"]["sha256"]
     payload = {
         "schema": COMPARE_SCHEMA,
