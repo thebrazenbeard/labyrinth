@@ -63,10 +63,10 @@ class ObservationReceiptHostileTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
 
-    def _compare(self, after):
+    def _compare(self, after, *, before=None):
         before_path = self.root / "before.json"
         after_path = self.root / "after.json"
-        before_path.write_text(json.dumps(_receipt(_observation())), encoding="utf-8")
+        before_path.write_text(json.dumps(_receipt(_observation() if before is None else before)), encoding="utf-8")
         after_path.write_text(json.dumps(_receipt(after)), encoding="utf-8")
         return compare_reports(before_path, after_path, self.root / "paired.json")
 
@@ -109,7 +109,7 @@ class ObservationReceiptHostileTests(unittest.TestCase):
         forged["correct"] = 2
         forged["format_valid"] = 2
         with self.assertRaisesRegex(ValueError, "observation|duplicate"):
-            self._compare(forged)
+            self._compare(forged, before=forged)
 
 
 if __name__ == "__main__":
