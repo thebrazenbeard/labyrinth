@@ -6,6 +6,9 @@ deterministic RNG solely to inspect bounded behavior and witness verification.
 from __future__ import annotations
 
 from copy import deepcopy
+import base64
+from contextlib import redirect_stdout
+from io import StringIO
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -13,7 +16,9 @@ import random
 from tempfile import TemporaryDirectory
 import unittest
 
-from labyrinth.blind_structural_exam import prepare_exam, score_exam
+from labyrinth.blind_structural_exam import prepare_exam, score_exam, main
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 
 class BlindStructuralExamTests(unittest.TestCase):
@@ -153,6 +158,61 @@ class BlindStructuralExamTests(unittest.TestCase):
         result = self.score(plan)
         self.assertEqual(result["correct"], 4)
         self.assertEqual(result["verified_plans"], 0)
+
+    def test_signed_precommit_authenticates_key_not_independent_case_custody(self):
+        private, _, plan = self.prepare()
+        self.responses_for(private, use_oracle=True)
+        signer = Ed25519PrivateKey.generate()
+        public = signer.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        key_file = self.root / "signer.pub"
+        key_file.write_bytes(public)
+        key_hash = sha256(public).hexdigest()
+        payload = {
+            "schema": "labyrinth.examiner-signed-precommit-payload.v1",
+            "exam_id": private["exam_id"],
+            "precommit_sha256": plan["receipt_sha256"],
+            "examiner_key_sha256": key_hash,
+            "scope": "EXAMINER_AUTHORSHIP_OF_PRECOMMIT_ONLY",
+        }
+        signature = base64.b64encode(signer.sign(json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False).encode("utf-8"))).decode("ascii")
+        envelope = self.root / "signed.json"
+        envelope.write_text(json.dumps({
+            "schema": "labyrinth.examiner-signed-precommit.v1",
+            "payload": payload, "signature_ed25519_b64": signature,
+        }), encoding="utf-8")
+        result = score_exam(
+            self.private, self.public, self.commit, self.responses, self.out,
+            expected_precommit_sha256=plan["receipt_sha256"],
+            examiner_attestation_path=envelope, examiner_public_key_path=key_file,
+            expected_examiner_key_sha256=key_hash, examiner_exam_id=private["exam_id"])
+        self.assertEqual(result["examiner_signature_evidence"],
+                         "ED25519_VALID_CALLER_PINNED_KEY")
+        self.assertFalse(result["independent_custody_verified"])
+        self.assertEqual(result["correct"], 8)
+
+    def test_public_cli_prepares_and_scores_caller_supplied_answers(self):
+        output = StringIO()
+        with redirect_stdout(output):
+            main(["prepare", "--out-private", str(self.private),
+                  "--out-public", str(self.public),
+                  "--out-precommit", str(self.commit), "--count", "4"])
+        plan = json.loads(self.commit.read_text(encoding="utf-8"))
+        private = json.loads(self.private.read_text(encoding="utf-8"))
+        self.assertIn(plan["receipt_sha256"], output.getvalue())
+        self.responses_for(private, use_oracle=True)
+        output = StringIO()
+        with redirect_stdout(output):
+            main(["score", "--private", str(self.private),
+                  "--public", str(self.public), "--precommit", str(self.commit),
+                  "--responses", str(self.responses),
+                  "--expected-precommit-sha256", plan["receipt_sha256"],
+                  "--out", str(self.out)])
+        score = json.loads(self.out.read_text(encoding="utf-8"))
+        self.assertEqual(score["correct"], 4)
+        self.assertFalse(score["neural_learning_verified"])
+        self.assertIn(score["receipt_sha256"], output.getvalue())
 
     def test_independently_authored_mechanics_table_can_be_admitted(self):
         # An externally authored table is accepted without hardcoding its
