@@ -159,6 +159,24 @@ class BlindStructuralExamTests(unittest.TestCase):
         self.assertEqual(result["correct"], 4)
         self.assertEqual(result["verified_plans"], 0)
 
+    def test_valid_but_wrong_action_trace_gets_no_witness_credit(self):
+        n = 6
+        table = {action: [[-1] * n, [-1] * n] for action in ("A", "B", "C")}
+        table["C"][0][0] = 5
+        table["A"][0][0] = 1
+        world = {"state_count": n, "start": 0, "target": 5,
+                 "max_moves": 2, "action_tables": table}
+        private, _, plan = self.prepare(count=1, worlds=[world])
+        self.responses.write_text(json.dumps({
+            "schema": "labyrinth.blind-mechanics-responses.v1",
+            "exam_id": private["exam_id"],
+            "responses": [{"trial_id": private["trials"][0]["trial_id"],
+                           "response": "PLAN: A"}],
+        }), encoding="utf-8")
+        result = self.score(plan)
+        self.assertEqual(result["correct"], 0)
+        self.assertEqual(result["verified_plans"], 0)
+
     def test_signed_precommit_authenticates_key_not_independent_case_custody(self):
         private, _, plan = self.prepare()
         self.responses_for(private, use_oracle=True)
