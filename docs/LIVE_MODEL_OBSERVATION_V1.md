@@ -13,8 +13,12 @@ It cannot release the official TrainingDay physical-launch HOLD.
    exact file path, sends bounded prompts and saves full raw model responses,
    strict exact-answer scores, response hashes and execution times.
 3. `compare` checks two write-once observation receipts against the same
-   committed case set and reports paired changes. Different weight hashes are
-   *not* optimizer provenance and do not prove the files were served.
+   committed case set. By default, its correctness totals are **self-reported**
+   and paired win/loss counts are withheld (`null`). Pass **both** `--cases`
+   and `--commitment` to replay actual model text against the exact locally
+   precommitted answer-key bytes before reporting paired win/loss counts.
+   Different weight hashes are *not* optimizer provenance and do not prove
+   the files were served.
 
 Case file, input limits: 1–16 cases, at most 128 KiB JSON, each case has
 `case_id`, `prompt`, and a short integer `answer`. No case answers go
@@ -45,7 +49,7 @@ materialized, hashed and served** under a separately verified local endpoint:
 ```powershell
 python -m labyrinth.live_model_probe observe --cases C:/audit/private_cases.json --commitment C:/audit/commit.json --model-file C:/models/after.gguf --endpoint http://127.0.0.1:11436 --out C:/audit/after.json
 
-python -m labyrinth.live_model_probe compare --before C:/audit/before.json --after C:/audit/after.json --out C:/audit/paired.json
+python -m labyrinth.live_model_probe compare --before C:/audit/before.json --after C:/audit/after.json --cases C:/audit/private_cases.json --commitment C:/audit/commit.json --out C:/audit/paired.json
 ```
 
 Expected case-file structure (PUBLIC DEMO ONLY, not held-out):
@@ -55,6 +59,17 @@ Expected case-file structure (PUBLIC DEMO ONLY, not held-out):
   {"case_id":"demo1","prompt":"Reply only ANSWER: N. What is 5 + 8?","answer":"13"}
 ]}
 ```
+
+The comparison's `score_evidence` distinguishes
+`SELF_REPORTED_ONLY` from `REPLAYED_CALLER_SUPPLIED_CASES`.
+The latter recomputes each `correct` flag from the exact prompt and answer in
+the supplied case file, checks the original case/precommit hashes, and rejects
+substituted prompts or fabricated scores. It is **not** a trusted external
+evaluator: someone controlling both the case file and its unkeyed commitment
+can manufacture another self-consistent pair. Without `--cases` and
+`--commitment`, reported before/after accuracy totals remain unverified
+claims and `paired_candidate_only_wins`/`losses` are withheld rather than
+implicitly treated as observed improvements.
 
 All receipts are exclusive-create and cannot overwrite existing files. The
 precommitment hashes original case bytes and canonical cases. The report binds
@@ -79,6 +94,6 @@ mapping to live weight pages.
 `SAME_CHECKPOINT_NO_WEIGHT_UPDATE` means a paired comparison of identical
 weight hashes cannot establish parameter learning.
 `PAIRED_BEHAVIOR_NOT_TRAINING_ATTESTED` means different local model-file
-hashes and paired observed scores, **not** proof the second model was trained
+hashes and paired claimed scores (replayed only when source files are supplied), **not** proof the second model was trained
 from the first. In all three cases `neural_learning_verified=false` and
 `independent_custody_verified=false`.
