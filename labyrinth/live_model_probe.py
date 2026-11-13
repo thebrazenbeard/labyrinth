@@ -393,8 +393,11 @@ def compare_reports(before_path, after_path, out_path, *,
     same = before["model"]["sha256"] == after["model"]["sha256"]
     payload = {
         "schema": COMPARE_SCHEMA,
-        "status": ("SAME_CHECKPOINT_NO_WEIGHT_UPDATE" if same
+        "status": ("SAME_DECLARED_FILE_HASH_NOT_TRAINING_ATTESTED" if same
                    else "PAIRED_BEHAVIOR_NOT_TRAINING_ATTESTED"),
+        "model_file_hash_relation": ("EQUAL_DECLARED_SHA256" if same
+                                     else "DIFFERENT_DECLARED_SHA256"),
+        "weight_update_status": "UNKNOWN",
         "before_receipt_sha256": before["receipt_sha256"],
         "after_receipt_sha256": after["receipt_sha256"],
         "before_model_sha256": before["model"]["sha256"],
