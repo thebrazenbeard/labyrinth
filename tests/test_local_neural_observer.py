@@ -31,7 +31,7 @@ class LocalModelEvidenceTests(unittest.TestCase):
         self.model = "qwen3.5:0.8b"
         self.state = {"gets": 0, "posts": [], "first_digest": "b" * 64,
                       "last_digest": "b" * 64, "reply_model": self.model,
-                      "reply": "PLAN: A", "redirect": False}
+                      "reply": "PLAN: A", "redirect": False, "done": True}
         state = self.state
 
         class Handler(BaseHTTPRequestHandler):
@@ -69,7 +69,7 @@ class LocalModelEvidenceTests(unittest.TestCase):
                 state["posts"].append(req)
                 self._send({"model": state["reply_model"],
                             "response": state["reply"],
-                            "done": True, "done_reason": "stop",
+                            "done": state["done"], "done_reason": "stop",
                             "eval_count": 3})
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -140,6 +140,53 @@ class LocalModelEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "response|observation"):
             verify_local_observation(self.observation, receipt["receipt_sha256"],
                                      self.public.read_bytes(), self.responses.read_bytes())
+
+    def test_original_pinned_model_receipt_blocks_response_rewrite_at_scoring_boundary(self):
+        receipt = self.run_observe()
+        data = json.loads(self.responses.read_text(encoding="utf-8"))
+        data["responses"][0]["response"] = "UNSAT"
+        self.responses.write_text(json.dumps(data), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "observation|response"):
+            score_exam(
+                self.private, self.public, self.precommit, self.responses,
+                self.score_file, expected_precommit_sha256=self.plan["receipt_sha256"],
+                observation_path=self.observation,
+                expected_observation_sha256=receipt["receipt_sha256"])
+        self.assertFalse(self.score_file.exists())
+
+    def test_original_observation_pin_rejects_self_rehashed_replacement_model_digest(self):
+        receipt = self.run_observe()
+        forged = json.loads(self.observation.read_text(encoding="utf-8"))
+        forged["declared_model_digest"] = "c" * 64
+        forged.pop("receipt_sha256")
+        forged["receipt_sha256"] = sha256(json.dumps(
+            forged, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False).encode("utf-8")).hexdigest()
+        self.observation.write_text(json.dumps(forged), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "pin|observation"):
+            verify_local_observation(
+                self.observation, receipt["receipt_sha256"],
+                self.public.read_bytes(), self.responses.read_bytes())
+
+    def test_incomplete_http_observation_pair_fails_closed(self):
+        receipt = self.run_observe()
+        with self.assertRaisesRegex(ValueError, "observation|pin"):
+            score_exam(
+                self.private, self.public, self.precommit, self.responses,
+                self.score_file, expected_precommit_sha256=self.plan["receipt_sha256"],
+                observation_path=self.observation)
+        with self.assertRaisesRegex(ValueError, "observation|pin"):
+            score_exam(
+                self.private, self.public, self.precommit, self.responses,
+                self.score_file, expected_precommit_sha256=self.plan["receipt_sha256"],
+                expected_observation_sha256=receipt["receipt_sha256"])
+
+    def test_incomplete_local_server_generation_rejected_before_publication(self):
+        self.state["done"] = False
+        with self.assertRaisesRegex(ValueError, "model reply|model identity"):
+            self.run_observe()
+        self.assertFalse(self.responses.exists())
+        self.assertFalse(self.observation.exists())
 
     def test_model_digest_changes_mid_exam_rejected_without_outputs(self):
         self.state["last_digest"] = "c" * 64
