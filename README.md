@@ -12,7 +12,10 @@ real action-plan replay, bounded UNSAT cross-checks, original precommit pins and
 optional examiner-signed commitments. An optional [local model HTTP observer](docs/MINOTAUR_LOCAL_MODEL_OBSERVATION_V1.md)
 now binds actual loopback Ollama requests and raw responses to an original
 observation digest rechecked by the scorer, without asserting authentic
-loaded weights or independent witness custody. A 12-case on-host zero-update control got
+loaded weights or independent witness custody. A [matched-case control comparator](docs/MINOTAUR_PAIRED_TRIVIAL_CONTROLS_V1.md)
+now computes always-UNSAT and fixed-action scores and exact paired
+discordances from the same frozen exam, rather than comparing unrelated
+aggregate reports. A 12-case on-host zero-update control got
 6/12 by always claiming UNSAT; a public-rule symbolic solver got 12/12 with
 six actual winning traces. Neither is a neural-learning result or independent
 examiner-custody qualification.
