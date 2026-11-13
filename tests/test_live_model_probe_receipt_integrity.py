@@ -74,7 +74,7 @@ class ObservationReceiptHostileTests(unittest.TestCase):
         result = self._compare(_observation())
         self.assertEqual(result["before_correct"], 1)
         self.assertEqual(result["after_correct"], 1)
-        self.assertEqual(result["status"], "SAME_CHECKPOINT_NO_WEIGHT_UPDATE")
+        self.assertEqual(result["status"], "SAME_DECLARED_FILE_HASH_NOT_TRAINING_ATTESTED")
         self.assertFalse(result["neural_learning_verified"])
 
     def test_reject_rehashed_aggregate_that_disagrees_with_trial_outcomes(self):
