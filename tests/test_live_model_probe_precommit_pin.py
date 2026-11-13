@@ -6,12 +6,14 @@ when preserved by a separate custodian; caller input is not attestation.
 from __future__ import annotations
 
 from hashlib import sha256
+from contextlib import redirect_stdout
+from io import StringIO
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from labyrinth.live_model_probe import commit_cases, compare_reports
+from labyrinth.live_model_probe import commit_cases, compare_reports, main
 from test_live_model_probe_receipt_integrity import _observation, _receipt
 
 
@@ -98,6 +100,31 @@ class PrecommitCustodyHostileTests(unittest.TestCase):
         self.assertTrue(compared["precommit_pin_match"])
         self.assertEqual(compared["precommit_pin_evidence"], "CALLER_SUPPLIED_SHA256")
         self.assertEqual(compared["score_evidence"], "REPLAYED_CALLER_SUPPLIED_CASES")
+        self.assertFalse(compared["independent_custody_verified"])
+
+    def test_public_cli_checks_pinned_original_case_set(self):
+        self._two_reports()
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            main(["compare", "--before", str(self.before),
+                  "--after", str(self.after),
+                  "--cases", str(self.cases),
+                  "--commitment", str(self.precommit_path),
+                  "--expected-precommit-sha256", self.plan["receipt_sha256"],
+                  "--out", str(self.out)])
+        report = json.loads(self.out.read_text(encoding="utf-8"))
+        self.assertTrue(report["precommit_pin_match"])
+        self.assertEqual(report["precommit_pin_evidence"], "CALLER_SUPPLIED_SHA256")
+        self.assertFalse(report["independent_custody_verified"])
+        self.assertIn(report["receipt_sha256"], stdout.getvalue())
+
+    def test_no_pin_does_not_claim_matching_anchor(self):
+        self._two_reports()
+        compared = compare_reports(self.before, self.after, self.out,
+                                   cases_path=self.cases,
+                                   commitment_path=self.precommit_path)
+        self.assertIsNone(compared["precommit_pin_match"])
+        self.assertEqual(compared["precommit_pin_evidence"], "NOT_SUPPLIED")
         self.assertFalse(compared["independent_custody_verified"])
 
     def test_pin_without_source_or_invalid_digest_fails_closed(self):
