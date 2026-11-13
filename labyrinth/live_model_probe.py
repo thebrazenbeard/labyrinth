@@ -360,7 +360,11 @@ def _read_observation(path):
 
 def compare_reports(before_path, after_path, out_path, *,
                     cases_path=None, commitment_path=None,
-                    expected_commitment_sha256=None):
+                    expected_commitment_sha256=None,
+                    examiner_attestation_path=None,
+                    examiner_public_key_path=None,
+                    expected_examiner_key_sha256=None,
+                    examiner_exam_id=None):
     if Path(out_path).exists():
         raise FileExistsError("write-once comparison exists")
     before, after = _read_observation(before_path), _read_observation(after_path)
@@ -377,6 +381,13 @@ def compare_reports(before_path, after_path, out_path, *,
         if (cases_path is None or type(expected_commitment_sha256) is not str
                 or SHA.fullmatch(expected_commitment_sha256) is None):
             raise ValueError("precommit pin needs cases, commitment and SHA256 digest")
+    signature_fields = (examiner_attestation_path, examiner_public_key_path,
+                        expected_examiner_key_sha256, examiner_exam_id)
+    signature_requested = any(item is not None for item in signature_fields)
+    if signature_requested and (not all(item is not None for item in signature_fields)
+                                or cases_path is None
+                                or expected_commitment_sha256 is None):
+        raise ValueError("examiner attestation needs public key, key pin, exam ID, source cases and original precommit pin")
     source_bound = cases_path is not None
     if source_bound:
         # Only the actual evaluator-held source bytes can correct a caller's
@@ -404,6 +415,15 @@ def compare_reports(before_path, after_path, out_path, *,
                 expected = bool(parsed and parsed.group(1) == case["answer"])
                 if trial["correct"] is not expected:
                     raise ValueError("claimed correct answer disagrees with source case")
+    signed = None
+    if signature_requested:
+        # Import on demand: source-only comparisons do not need cryptography.
+        from .examiner_signature import verify_examiner_attestation
+        signed = verify_examiner_attestation(
+            examiner_attestation_path, examiner_public_key_path,
+            expected_key_sha256=expected_examiner_key_sha256,
+            expected_exam_id=examiner_exam_id,
+            expected_precommit_sha256=plan["receipt_sha256"])
     same = before["model"]["sha256"] == after["model"]["sha256"]
     payload = {
         "schema": COMPARE_SCHEMA,
@@ -412,6 +432,9 @@ def compare_reports(before_path, after_path, out_path, *,
         "model_file_hash_relation": ("EQUAL_DECLARED_SHA256" if same
                                      else "DIFFERENT_DECLARED_SHA256"),
         "weight_update_status": "UNKNOWN",
+        "examiner_signature_evidence": (signed["evidence"] if signed else "NOT_SUPPLIED"),
+        "examiner_key_sha256": (signed["examiner_key_sha256"] if signed else None),
+        "examiner_exam_id": (signed["exam_id"] if signed else None),
         "before_receipt_sha256": before["receipt_sha256"],
         "after_receipt_sha256": after["receipt_sha256"],
         "before_model_sha256": before["model"]["sha256"],
@@ -445,6 +468,7 @@ def compare_reports(before_path, after_path, out_path, *,
             "Without source replay, correctness totals remain self-reported.",
             "Caller-supplied case bytes and unkeyed commitments cannot attest independent custody.",
             "A caller-supplied commitment pin is not independently authenticated custody.",
+            "Ed25519 signature verifies claimed key possession, not key custody, precommit timing or model execution.",
         ],
     }
     return _write_once(out_path, _receipt(payload))
@@ -471,6 +495,10 @@ def main(argv=None):
     compare.add_argument("--commitment", help="original matching case precommit JSON")
     compare.add_argument("--expected-precommit-sha256",
                          help="separately retained precommit receipt digest (caller-supplied, not attested)")
+    compare.add_argument("--examiner-attestation", help="Ed25519 signed precommit envelope")
+    compare.add_argument("--examiner-public-key", help="raw 32-byte Ed25519 public key")
+    compare.add_argument("--expected-examiner-key-sha256", help="separately retained SHA256 of examiner public-key bytes")
+    compare.add_argument("--examiner-exam-id", help="expected signed examiner exam ID")
     compare.add_argument("--out", required=True)
     args = parser.parse_args(argv)
     if args.cmd == "commit":
@@ -483,7 +511,11 @@ def main(argv=None):
         result = compare_reports(args.before, args.after, args.out,
                                  cases_path=args.cases,
                                  commitment_path=args.commitment,
-                                 expected_commitment_sha256=args.expected_precommit_sha256)
+                                 expected_commitment_sha256=args.expected_precommit_sha256,
+                                 examiner_attestation_path=args.examiner_attestation,
+                                 examiner_public_key_path=args.examiner_public_key,
+                                 expected_examiner_key_sha256=args.expected_examiner_key_sha256,
+                                 examiner_exam_id=args.examiner_exam_id)
     print(json.dumps({"status": result["status"], "receipt_sha256":
                       result["receipt_sha256"], "out": args.out},
                      sort_keys=True))
