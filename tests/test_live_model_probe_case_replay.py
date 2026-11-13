@@ -7,13 +7,15 @@ model ever produced the declared responses.
 from __future__ import annotations
 
 import copy
+from contextlib import redirect_stdout
+from io import StringIO
 from hashlib import sha256
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from labyrinth.live_model_probe import commit_cases, compare_reports
+from labyrinth.live_model_probe import commit_cases, compare_reports, main
 from test_live_model_probe_receipt_integrity import _observation, _receipt
 
 
@@ -77,6 +79,19 @@ class CaseBoundComparisonTests(unittest.TestCase):
         self.assertEqual(compared["paired_candidate_only_losses"], 0)
         self.assertFalse(compared["independent_custody_verified"])
         self.assertFalse(compared["neural_learning_verified"])
+
+    def test_public_cli_replays_local_case_answers(self):
+        self.store(self.report("9", False), self.report("4", True))
+        capture = StringIO()
+        with redirect_stdout(capture):
+            main(["compare", "--before", str(self.before),
+                  "--after", str(self.after), "--cases", str(self.cases),
+                  "--commitment", str(self.precommit), "--out", str(self.output)])
+        on_disk = json.loads(self.output.read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["score_evidence"], "REPLAYED_CALLER_SUPPLIED_CASES")
+        self.assertEqual(on_disk["paired_candidate_only_wins"], 1)
+        self.assertFalse(on_disk["independent_custody_verified"])
+        self.assertIn(on_disk["receipt_sha256"], capture.getvalue())
 
     def test_missing_half_of_source_binding_fails_closed(self):
         self.store(self.report("9", False), self.report("4", True))
