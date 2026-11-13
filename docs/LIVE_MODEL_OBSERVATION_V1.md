@@ -31,6 +31,20 @@ the candidate's training context. Do not commit a claimed secret exam or its
 answers to public Git. Keep the cases and original receipt read-only after
 precommit; only a truly independent authority could supply stronger custody.
 
+A separately retained `receipt_sha256` from the original `commit` output
+can be supplied to `compare` via `--expected-precommit-sha256` **together
+with** `--cases` and `--commitment`. This rejects an attacker replacing
+the case file, recreating its precommitment, and rewriting both observations,
+*provided* the original expected SHA was preserved outside the attacker's
+control. An attacker who controls the expected value can simply pin the
+forgery. The CLI cannot independently establish who retained that value.
+`precommit_pin_evidence=CALLER_SUPPLIED_SHA256` is a literal input record,
+not an independent-custody or cryptographic-signature claim.
+
+The accepted precommit schema is exact: a `NOT_EXECUTED` status and
+`LOCAL_DEVELOPMENT_NOT_INDEPENDENT` custody class. Rehashed receipts with
+additional or more favorable custody declarations are rejected.
+
 ## Invocations on an evaluator host
 
 Use an already running `llama-server` exposing the OpenAI-compatible API on
@@ -49,7 +63,7 @@ materialized, hashed and served** under a separately verified local endpoint:
 ```powershell
 python -m labyrinth.live_model_probe observe --cases C:/audit/private_cases.json --commitment C:/audit/commit.json --model-file C:/models/after.gguf --endpoint http://127.0.0.1:11436 --out C:/audit/after.json
 
-python -m labyrinth.live_model_probe compare --before C:/audit/before.json --after C:/audit/after.json --cases C:/audit/private_cases.json --commitment C:/audit/commit.json --out C:/audit/paired.json
+python -m labyrinth.live_model_probe compare --before C:/audit/before.json --after C:/audit/after.json --cases C:/audit/private_cases.json --commitment C:/audit/commit.json --expected-precommit-sha256 ORIGINAL_SEPARATELY_RETAINED_64_HEX_SHA256 --out C:/audit/paired.json
 ```
 
 Expected case-file structure (PUBLIC DEMO ONLY, not held-out):
