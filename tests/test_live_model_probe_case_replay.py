@@ -80,6 +80,19 @@ class CaseBoundComparisonTests(unittest.TestCase):
         self.assertFalse(compared["independent_custody_verified"])
         self.assertFalse(compared["neural_learning_verified"])
 
+    def test_same_advertised_file_hash_cannot_certify_absence_of_weight_updates(self):
+        # The receipt itself explicitly disclaims served-weight attestation.
+        # Two responses can differ while the advertised GGUF filename/digest is
+        # the same (e.g., runtime variability or an unrecorded adapter).
+        self.store(self.report("9", False), self.report("4", True))
+        compared = compare_reports(self.before, self.after, self.output,
+                                   cases_path=self.cases, commitment_path=self.precommit)
+        self.assertEqual(compared["status"],
+                         "SAME_DECLARED_FILE_HASH_NOT_TRAINING_ATTESTED")
+        self.assertEqual(compared["weight_update_status"], "UNKNOWN")
+        self.assertEqual(compared["model_file_hash_relation"], "EQUAL_DECLARED_SHA256")
+        self.assertFalse(compared["neural_learning_verified"])
+
     def test_public_cli_replays_local_case_answers(self):
         self.store(self.report("9", False), self.report("4", True))
         capture = StringIO()
