@@ -123,9 +123,15 @@ def commit_cases(cases_path, out_path):
 
 def _read_commit(path):
     data = _load(_file_bytes(path, MAX_CASE_BYTES))
-    if (type(data) is not dict or data.get("schema") != COMMIT_SCHEMA
-            or type(data.get("receipt_sha256")) is not str):
-        raise ValueError("invalid precommit receipt")
+    expected_keys = {"schema", "cases_file_sha256", "cases_canonical_sha256",
+                     "case_count", "status", "custody_class", "receipt_sha256"}
+    if (type(data) is not dict or set(data) != expected_keys
+            or data.get("schema") != COMMIT_SCHEMA
+            or data.get("status") != "NOT_EXECUTED"
+            or data.get("custody_class") != "LOCAL_DEVELOPMENT_NOT_INDEPENDENT"
+            or type(data.get("receipt_sha256")) is not str
+            or SHA.fullmatch(data["receipt_sha256"]) is None):
+        raise ValueError("invalid precommit receipt or custody metadata")
     expected = {k: v for k, v in data.items() if k != "receipt_sha256"}
     if _sha(_canonical(expected)) != data["receipt_sha256"]:
         raise ValueError("precommit receipt digest mismatch")
@@ -353,7 +359,8 @@ def _read_observation(path):
 
 
 def compare_reports(before_path, after_path, out_path, *,
-                    cases_path=None, commitment_path=None):
+                    cases_path=None, commitment_path=None,
+                    expected_commitment_sha256=None):
     if Path(out_path).exists():
         raise FileExistsError("write-once comparison exists")
     before, after = _read_observation(before_path), _read_observation(after_path)
@@ -366,12 +373,19 @@ def compare_reports(before_path, after_path, out_path, *,
         raise ValueError("different committed case or prompt rosters cannot be compared")
     if (cases_path is None) != (commitment_path is None):
         raise ValueError("cases and commitment must be provided together")
+    if expected_commitment_sha256 is not None:
+        if (cases_path is None or type(expected_commitment_sha256) is not str
+                or SHA.fullmatch(expected_commitment_sha256) is None):
+            raise ValueError("precommit pin needs cases, commitment and SHA256 digest")
     source_bound = cases_path is not None
     if source_bound:
         # Only the actual evaluator-held source bytes can correct a caller's
         # self-rehashed but false answer flags. This is not custody attestation.
         raw, rows = _cases(cases_path)
         plan = _read_commit(commitment_path)
+        if (expected_commitment_sha256 is not None
+                and plan["receipt_sha256"] != expected_commitment_sha256):
+            raise ValueError("expected precommit pin differs from supplied commitment")
         if (plan.get("cases_file_sha256") != _sha(raw)
                 or plan.get("cases_canonical_sha256") != _sha(_canonical(rows))
                 or type(plan.get("case_count")) is not int
@@ -407,6 +421,11 @@ def compare_reports(before_path, after_path, out_path, *,
         # source-replayed. Do not promote unverified paired wins or losses.
         "score_evidence": ("REPLAYED_CALLER_SUPPLIED_CASES" if source_bound
                            else "SELF_REPORTED_ONLY"),
+        "precommit_pin_match": (True if expected_commitment_sha256 is not None
+                                else None),
+        "precommit_pin_evidence": ("CALLER_SUPPLIED_SHA256"
+                                   if expected_commitment_sha256 is not None
+                                   else "NOT_SUPPLIED"),
         "before_correct": before["correct"],
         "after_correct": after["correct"],
         "paired_candidate_only_wins": (sum(
@@ -425,6 +444,7 @@ def compare_reports(before_path, after_path, out_path, *,
             "Evaluator and private-case independence are not attested.",
             "Without source replay, correctness totals remain self-reported.",
             "Caller-supplied case bytes and unkeyed commitments cannot attest independent custody.",
+            "A caller-supplied commitment pin is not independently authenticated custody.",
         ],
     }
     return _write_once(out_path, _receipt(payload))
@@ -449,6 +469,8 @@ def main(argv=None):
     compare.add_argument("--after", required=True)
     compare.add_argument("--cases", help="local evaluator-held case JSON for score replay")
     compare.add_argument("--commitment", help="original matching case precommit JSON")
+    compare.add_argument("--expected-precommit-sha256",
+                         help="separately retained precommit receipt digest (caller-supplied, not attested)")
     compare.add_argument("--out", required=True)
     args = parser.parse_args(argv)
     if args.cmd == "commit":
@@ -460,7 +482,8 @@ def main(argv=None):
     else:
         result = compare_reports(args.before, args.after, args.out,
                                  cases_path=args.cases,
-                                 commitment_path=args.commitment)
+                                 commitment_path=args.commitment,
+                                 expected_commitment_sha256=args.expected_precommit_sha256)
     print(json.dumps({"status": result["status"], "receipt_sha256":
                       result["receipt_sha256"], "out": args.out},
                      sort_keys=True))
