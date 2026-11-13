@@ -288,7 +288,8 @@ def _response_correct(world: dict, text: str, witness: list[str] | None):
 def score_exam(private_path, public_path, precommit_path, responses_path, out_path, *,
                expected_precommit_sha256,
                examiner_attestation_path=None, examiner_public_key_path=None,
-               expected_examiner_key_sha256=None, examiner_exam_id=None) -> dict:
+               expected_examiner_key_sha256=None, examiner_exam_id=None,
+               observation_path=None, expected_observation_sha256=None) -> dict:
     """Score caller-supplied text, never attesting it came from a real model."""
     if Path(out_path).exists():
         raise FileExistsError("exam score output already exists")
@@ -308,7 +309,18 @@ def score_exam(private_path, public_path, precommit_path, responses_path, out_pa
             expected_precommit_sha256=plan["receipt_sha256"])
         if signed["exam_id"] != private["exam_id"]:
             raise ValueError("signed examiner exam id differs from actual private exam")
+    if (observation_path is None) != (expected_observation_sha256 is None):
+        raise ValueError("local HTTP observation needs the original receipt pin")
     raw_responses = _file_bytes(responses_path, MAX_BYTES)
+    verified_observation = None
+    if observation_path is not None:
+        from .local_neural_observer import verify_local_observation
+        raw_public = _file_bytes(public_path, MAX_BYTES)
+        if _sha(raw_public) != plan["public_sha256"]:
+            raise ValueError("public source differs from precommit during observation replay")
+        verified_observation = verify_local_observation(
+            observation_path, expected_observation_sha256,
+            raw_public, raw_responses)
     response = _load(raw_responses)
     if (type(response) is not dict
             or set(response) != {"schema", "exam_id", "responses"}
@@ -342,6 +354,14 @@ def score_exam(private_path, public_path, precommit_path, responses_path, out_pa
         "dual_oracles_agree": True, "score_evidence": "SOURCE_ONLY_LOCAL_REPLAY",
         "original_precommit_sha256": plan["receipt_sha256"],
         "responses_file_sha256": _sha(raw_responses),
+        "invocation_evidence": (verified_observation["evidence"]
+                                 if verified_observation else "NOT_SUPPLIED"),
+        "observed_model_digest": (verified_observation["declared_model_digest"]
+                                  if verified_observation else None),
+        "observed_model_tag": (verified_observation["model_tag"]
+                               if verified_observation else None),
+        "observation_receipt_sha256": (verified_observation["receipt_sha256"]
+                                       if verified_observation else None),
         "examiner_signature_evidence": (signed["evidence"] if signed else "NOT_SUPPLIED"),
         "examiner_key_sha256": (signed["examiner_key_sha256"] if signed else None),
         "neural_learning_verified": False, "independent_custody_verified": False,
@@ -351,6 +371,7 @@ def score_exam(private_path, public_path, precommit_path, responses_path, out_pa
             "The private-case file and external digest may share a controller.",
             "Source-defined generated tables do not establish hidden family novelty.",
             "Signature authentication does not prove independent examiner custody.",
+            "A locally pinned HTTP receipt cannot authenticate actual loaded model weights.",
         ],
     }
     return _write_once(out_path, _receipt(output))
@@ -371,6 +392,9 @@ def main(argv=None):
     score.add_argument("--precommit", required=True)
     score.add_argument("--responses", required=True)
     score.add_argument("--expected-precommit-sha256", required=True)
+    score.add_argument("--observation", help="write-once loopback model HTTP receipt")
+    score.add_argument("--expected-observation-sha256",
+                       help="separately retained original model HTTP receipt SHA256")
     score.add_argument("--examiner-attestation")
     score.add_argument("--examiner-public-key")
     score.add_argument("--expected-examiner-key-sha256")
@@ -389,7 +413,9 @@ def main(argv=None):
                             examiner_attestation_path=args.examiner_attestation,
                             examiner_public_key_path=args.examiner_public_key,
                             expected_examiner_key_sha256=args.expected_examiner_key_sha256,
-                            examiner_exam_id=args.examiner_exam_id)
+                            examiner_exam_id=args.examiner_exam_id,
+                            observation_path=args.observation,
+                            expected_observation_sha256=args.expected_observation_sha256)
         status = result["status"]
     print(json.dumps({"status": status, "exam_id": result["exam_id"],
                       "receipt_sha256": result["receipt_sha256"]}, sort_keys=True))
