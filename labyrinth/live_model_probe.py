@@ -291,6 +291,64 @@ def _read_observation(path):
             or type(data.get("trials")) is not list
             or len(data["trials"]) != data.get("case_count")):
         raise ValueError("observation is not a complete live probe")
+    # An unkeyed digest protects against accidental edits, not a caller who
+    # can recompute it. Still enforce all internally checkable evidence before
+    # producing a numerical comparison. Actual correctness requires the
+    # independently held case answers and is NOT attested by these flags.
+    count = data.get("case_count")
+    if type(count) is not int or not 1 <= count <= 16:
+        raise ValueError("invalid observation case count")
+    if (type(data.get("correct")) is not int or
+            type(data.get("format_valid")) is not int):
+        raise ValueError("invalid observation aggregate types")
+    if (type(data.get("commitment_sha256")) is not str or
+            SHA.fullmatch(data["commitment_sha256"]) is None or
+            type(data.get("cases_file_sha256")) is not str or
+            SHA.fullmatch(data["cases_file_sha256"]) is None):
+        raise ValueError("invalid observation case binding")
+    model = data.get("model")
+    if (type(model) is not dict or type(model.get("path")) is not str
+            or not model["path"] or type(model.get("sha256")) is not str
+            or SHA.fullmatch(model["sha256"]) is None
+            or model.get("server_advertised_path_match") is not True
+            or model.get("server_loaded_weight_bytes_independently_attested") is not False
+            or data.get("neural_learning_verified") is not False
+            or data.get("independent_custody_verified") is not False):
+        raise ValueError("invalid observation model evidence ceiling")
+    seen = set()
+    observed_correct = 0
+    observed_format = 0
+    required = {"case_id", "prompt_sha256", "response", "response_sha256",
+                "format_valid", "correct", "elapsed_ms"}
+    for trial in data["trials"]:
+        if (type(trial) is not dict or set(trial) != required
+                or type(trial["case_id"]) is not str
+                or ID.fullmatch(trial["case_id"]) is None
+                or trial["case_id"] in seen):
+            raise ValueError("invalid observation duplicate or malformed trial")
+        seen.add(trial["case_id"])
+        response = trial["response"]
+        if (type(response) is not str or len(response) > 4096
+                or type(trial["prompt_sha256"]) is not str
+                or SHA.fullmatch(trial["prompt_sha256"]) is None
+                or type(trial["response_sha256"]) is not str
+                or SHA.fullmatch(trial["response_sha256"]) is None
+                or _sha(response.encode("utf-8")) != trial["response_sha256"]):
+            raise ValueError("invalid observation response hash or payload")
+        if (type(trial["format_valid"]) is not bool or
+                type(trial["correct"]) is not bool or
+                type(trial["elapsed_ms"]) is not int or
+                trial["elapsed_ms"] < 0):
+            raise ValueError("invalid observation trial types")
+        valid_format = ANSWER.fullmatch(response.strip()) is not None
+        if (trial["format_valid"] is not valid_format or
+                (trial["correct"] and not valid_format)):
+            raise ValueError("invalid observation format or correctness flags")
+        observed_format += int(valid_format)
+        observed_correct += int(trial["correct"])
+    if (observed_correct != data["correct"] or
+            observed_format != data["format_valid"]):
+        raise ValueError("observation aggregate score disagrees with trials")
     return data
 
 
