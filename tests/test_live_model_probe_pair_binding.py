@@ -35,7 +35,7 @@ class PairedPromptBindingTests(unittest.TestCase):
             before.write_text(json.dumps(_receipt(value)), encoding="utf-8")
             after.write_text(json.dumps(_receipt(value)), encoding="utf-8")
             result = compare_reports(before, after, folder / "comparison.json")
-            self.assertEqual(result["status"], "SAME_CHECKPOINT_NO_WEIGHT_UPDATE")
+            self.assertEqual(result["status"], "SAME_DECLARED_FILE_HASH_NOT_TRAINING_ATTESTED")
             self.assertFalse(result["independent_custody_verified"])
 
 
