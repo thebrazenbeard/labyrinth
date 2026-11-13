@@ -165,7 +165,7 @@ class LiveModelProbeTests(unittest.TestCase):
         observe_cases(self.cases, self.commitment, self.model,
                       self.endpoint, after)
         compared = compare_reports(before, after, self.root / "comparison.json")
-        self.assertEqual(compared["status"], "SAME_CHECKPOINT_NO_WEIGHT_UPDATE")
+        self.assertEqual(compared["status"], "SAME_DECLARED_FILE_HASH_NOT_TRAINING_ATTESTED")
         self.assertFalse(compared["neural_learning_verified"])
 
 
