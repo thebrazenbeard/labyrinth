@@ -85,6 +85,50 @@ can manufacture another self-consistent pair. Without `--cases` and
 claims and `paired_candidate_only_wins`/`losses` are withheld rather than
 implicitly treated as observed improvements.
 
+### Optional externally signed precommit (authentication, not custody certification)
+
+The `examiner` optional dependency installs `cryptography>=41`. An independent
+examiner *could* generate an Ed25519 keypair outside the candidate's reach and
+separately preserve the raw 32-byte public key's SHA-256. A verification
+operator may then supply a strict signed JSON envelope to `compare`:
+
+```json
+{
+  "schema": "labyrinth.examiner-signed-precommit.v1",
+  "payload": {
+    "schema": "labyrinth.examiner-signed-precommit-payload.v1",
+    "exam_id": "blind-exam-W37",
+    "precommit_sha256": "<64 lower-case hex receipt_sha256 from original commit>",
+    "examiner_key_sha256": "<64 lower-case hex SHA-256 of raw Ed25519 public key>",
+    "scope": "EXAMINER_AUTHORSHIP_OF_PRECOMMIT_ONLY"
+  },
+  "signature_ed25519_b64": "<canonical base64 of 64-byte Ed25519 signature>"
+}
+```
+
+The signature covers **only canonical UTF-8 JSON of `payload`** (sorted keys,
+compact separators, no NaN, no outer envelope fields). The verifier accepts
+only those exact fields. It does not generate or store private signing keys.
+
+```powershell
+python -m pip install -e '.[examiner]'
+python -m labyrinth.live_model_probe compare --before C:/audit/before.json --after C:/audit/after.json --cases C:/audit/private_cases.json --commitment C:/audit/commit.json --expected-precommit-sha256 ORIGINAL_SEPARATELY_RETAINED_SHA256 --examiner-attestation C:/audit/signed-precommit.json --examiner-public-key C:/audit/examiner.raw.pub --expected-examiner-key-sha256 ORIGINAL_TRUSTED_PUBLIC_KEY_SHA256 --examiner-exam-id blind-exam-W37 --out C:/audit/signed-pair.json
+```
+
+The output reports `examiner_signature_evidence=ED25519_VALID_CALLER_PINNED_KEY`
+only after the signature, expected precommit, exam ID, key hash and source
+case replay all verify. An incomplete set of signature arguments fails closed.
+Signing the exact precommit with an unknown or newly substituted key is not
+accepted against the original key hash. Without arguments the evidence is
+`NOT_SUPPLIED`.
+
+**Limits:** A signer can choose to sign a false or retrospective precommit;
+this does not establish signing time, examiner's independence, hidden cases,
+model-service authenticity, withheld evaluator access, or actual learning.
+The caller can supply an arbitrary trust-anchor digest. Until its provenance
+is validated outside this code and under a separate principal,
+`independent_custody_verified=false` even on a valid signature.
+
 All receipts are exclusive-create and cannot overwrite existing files. The
 precommitment hashes original case bytes and canonical cases. The report binds
 the observed response to its exact prompt SHA, plus the local model-file SHA.
