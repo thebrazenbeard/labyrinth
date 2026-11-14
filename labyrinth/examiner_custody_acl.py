@@ -19,7 +19,7 @@ import sys
 
 from .live_model_probe import _write_once, _receipt
 
-SCHEMA = "labyrinth.examiner-local-acl-custody-negative-v1"
+SCHEMA = "labyrinth.examiner-local-acl-custody-negative-v2"
 SID = re.compile(r"S-1-\d+(?:-\d+)+\Z")
 BROAD_SIDS = {
     "S-1-1-0",       # Everyone
@@ -76,6 +76,7 @@ while ($true) {
     }
     $layers += [pscustomobject]@{
         is_target = ($current -eq $initial)
+        path = $current
         aces = @($aces)
     }
     $parent = Split-Path -Path $current -Parent
@@ -175,6 +176,7 @@ def classify_acl_snapshot(snapshot):
         "identity_sid_sha256": sha256(identity.encode("utf-8")).hexdigest()
             if identity else None,
         "acl_inspection_complete": not incomplete,
+        "acl_lineage_complete": False,
         "acl_isolation_verified": False,
         "independent_custody_verified": False,
         "candidate_principal_read_denial_verified": False,
@@ -213,6 +215,21 @@ def _collect_windows_acl(path, role):
             or len(snapshot["targets"]) != 1
             or snapshot["targets"][0].get("role") != role):
         raise RuntimeError("examiner ACL inspection lost target identity")
+    layers = snapshot["targets"][0].get("layers")
+    expected_paths = [item.absolute(), *item.absolute().parents]
+    complete = type(layers) is list and len(layers) == len(expected_paths)
+    if type(layers) is list:
+        for i, layer in enumerate(layers):
+            if type(layer) is not dict:
+                complete = False
+                continue
+            observed = layer.pop("path", None)
+            if (type(observed) is not str
+                    or i >= len(expected_paths)
+                    or os.path.normcase(os.path.normpath(observed))
+                       != os.path.normcase(os.path.normpath(str(expected_paths[i])))):
+                complete = False
+    snapshot["acl_lineage_complete"] = bool(complete)
     return snapshot
 
 
@@ -238,6 +255,13 @@ def audit_local_examiner_custody(private_cases_path, out_path, *,
         "targets": [s["targets"][0] for s in snapshots],
     }
     report = classify_acl_snapshot(merged)
+    lineage_complete = all(
+        snapshot.get("acl_lineage_complete") is True for snapshot in snapshots)
+    report["acl_lineage_complete"] = lineage_complete
+    report["acl_inspection_complete"] &= lineage_complete
+    if (not report["acl_inspection_complete"]
+            and report["status"] == "NO_BROAD_ALLOW_DETECTED_NOT_ATTESTED"):
+        report["status"] = "ACL_INSPECTION_INCOMPLETE"
     # The output itself is a local, unkeyed receipt, not a custody attestation.
     return _write_once(out, _receipt(report))
 
