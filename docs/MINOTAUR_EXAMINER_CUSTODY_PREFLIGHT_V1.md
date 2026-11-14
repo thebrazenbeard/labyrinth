@@ -1,4 +1,4 @@
-# Wave42–43 — examiner private-file ACL and local read-open negative gates (Windows)
+# Wave42–44 — examiner ACL, complete-ancestry, and local read-open negative gates (Windows)
 
 **Status: executable read-only hostile preflight, NOT independent examiner custody, verified candidate exclusion, or permission repair.**
 
@@ -13,6 +13,8 @@ The following *Allow* ACEs are treated as potential failures:
 - High-bit Windows `GENERIC_READ` (`0x80000000`), `GENERIC_WRITE` (`0x40000000`) or `GENERIC_ALL` (`0x10000000`) are conservatively treated as data read/write even when a `FileSystemRights` signed 32-bit mask lacks corresponding low-order file bits. Wave43 demonstrated the previous silent miss with four red test cases.
 - File data READ allowed to Everyone (`S-1-1-0`), Authenticated Users (`S-1-5-11`), Builtin Users (`S-1-5-32-545`), Interactive, Network, Builtin Guests or Power Users
 - File/ancestor write, append, delete, permissions-change or ownership-change allowed to any of those broad principals
+
+**Wave44 path-chain integrity:** the auditor no longer accepts an ACL list merely because the reported target permissions look restrictive. The OS process reports the canonical target path and each actual parent it inspected up through the filesystem root. The Python collector requires the exact expected number of layers, their order, and the normalized path of **every** layer. It removes the raw paths before writing the receipt. A missing layer, missing identity or forged intermediary makes `acl_lineage_complete=false` and `acl_inspection_complete=false`. With no affirmative broad-allow finding, this forces `status=ACL_INSPECTION_INCOMPLETE`; if a broad-allow finding is present, the status remains `INSECURE_BROAD_ALLOW` while inspection completeness stays false. The new output schema is `labyrinth.examiner-local-acl-custody-negative-v2`. Existing V1 reports are kept as historical artifacts; V2 does not retroactively validate their ancestor walks.
 
 The resulting exclusive-create report is an **unkeyed local receipt** with conservative findings and a self-hash. The tool does **not** change accounts, directory permissions, ownership, ACLs, model weights, running services, authentication policies, or credentials.
 
@@ -80,6 +82,27 @@ receipt_sha256                   9f4739104e5c382c48fe483672a611934b0c86691e4dc29
 The actual file handle was successfully opened and immediately closed without reading contents. The locally held report resides outside Git at `D:\\VERA\\experiments\\minotaur-wave43-local-access-20261114\\same-token-access-probe.json`. This is direct proof of read access under **that same current token**, not an attempt as a separately authenticated candidate user.
 
 A *denied* open under the same identity, or a fabricated local report, cannot establish independent examiner custody. An actual protected held-out run still requires a **different authenticated candidate principal** to attempt a denied read under a separately controlled examiner. This source will **never** set independent custody true.
+
+## Wave44 observed path-chain and strict-failure readback — 2026-11-14
+
+The previous collector could accept just the target's safe-looking `Get-Acl` result, or an unbound synthetic ancestry list of the expected length, and return `NO_BROAD_ALLOW_DETECTED_NOT_ATTESTED` without checking actual path lineage. Two adversarial **red-first** Lappy tests reproduced this false-clean result; the new collector rejects both. A subsequent negative-control test confirms that an attack which substitutes an intermediate parent while also supplying an exposed target cannot hide the finding or claim complete inspection. The Windows actual-host integration test also verifies the whole rootward chain.
+
+The new **read-only** actual file audit against the original Lappy examiner-private case file reported:
+
+```text
+schema                       labyrinth.examiner-local-acl-custody-negative-v2
+status                       INSECURE_BROAD_ALLOW
+acl_lineage_complete         true
+acl_inspection_complete      true
+findings                     BROAD_READ_PRIVATE_CASES
+                             BROAD_WRITE_PRIVATE_CASES
+                             BROAD_WRITE_ANCESTOR_OF_PRIVATE_CASES
+independent_custody_verified false
+CLI exit                     2 (expected negative)
+receipt_sha256               4bd7c9e271064dc6ceb8d966c6d7dcbd15da61e1ce0bc2758b210efcad27c201
+```
+
+The V2 observation is retained **outside Git** at `D:\\VERA\\experiments\\minotaur-wave44-lineage-probe-20261114\\private-answer-lineage.json`. It binds the correct **local** walk from answer file to the root and confirms the same insecure broad ACLs as Wave42. It does **not** authenticate a separate examiner, effective candidate token, or model parameters. A local operator remains able to falsify its self-signed observations.
 
 ## Remaining qualification gates
 
