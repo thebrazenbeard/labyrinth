@@ -93,12 +93,13 @@ class PublicMechanicsHybridTests(unittest.TestCase):
                          sha256(self.hybrid.read_bytes()).hexdigest())
         self.assertNotIn("oracle_witness", self.report.read_text(encoding="utf-8"))
         self.assertNotIn("source_class", self.report.read_text(encoding="utf-8"))
-        scored = score_exam(
-            self.private, self.public, self.precommit, self.hybrid,
-            self.score, expected_precommit_sha256=self.plan["receipt_sha256"])
-        self.assertEqual(scored["correct"], 2)
-        self.assertEqual(scored["case_count"], 2)
-        self.assertEqual(scored["invocation_evidence"], "NOT_SUPPLIED")
+        # Hybrid-selected V2 must not be accepted as a raw neural candidate
+        # by the legacy source-only scorer, regardless of factual correctness.
+        with self.assertRaisesRegex(ValueError, "candidate|schema|response"):
+            score_exam(
+                self.private, self.public, self.precommit, self.hybrid,
+                self.score, expected_precommit_sha256=self.plan["receipt_sha256"])
+        self.assertFalse(self.score.exists())
 
     def test_corrected_roster_is_not_neural_candidate_schema_and_cannot_be_scored_directly(self):
         self.make_candidate(["UNSAT", "UNSAT"])
