@@ -77,6 +77,13 @@ class CustodyAclHostileTests(unittest.TestCase):
         self.assertFalse(result["acl_isolation_verified"])
         self.assertFalse(result["independent_custody_verified"])
 
+    def test_malformed_layer_is_not_a_success_or_uncaught_exception(self):
+        case = fixture(file_aces=[entry("S-1-5-11", 0x001301BF)])
+        case["targets"][0]["layers"][0] = None
+        result = classify_acl_snapshot(case)
+        self.assertEqual(result["status"], "ACL_INSPECTION_INCOMPLETE")
+        self.assertFalse(result["independent_custody_verified"])
+
     def test_explicit_deny_ace_does_not_get_mistaken_for_allow(self):
         case = fixture(file_aces=[entry("S-1-5-11", 0x1F01FF, "Deny")])
         result = classify_acl_snapshot(case)
