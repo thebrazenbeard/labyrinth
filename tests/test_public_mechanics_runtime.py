@@ -195,6 +195,18 @@ class PublicMechanicsHybridTests(unittest.TestCase):
                 self.assertFalse(self.hybrid.exists())
                 self.assertFalse(self.report.exists())
 
+    def test_duplicate_candidate_json_key_cannot_silently_override_answer(self):
+        self.make_candidate(["PLAN: A B C", "UNSAT"])
+        raw = self.candidate.read_text(encoding="utf-8")
+        self.assertIn('"response": "PLAN: A B C"', raw)
+        raw = raw.replace('"response": "PLAN: A B C"',
+                          '"response": "UNSAT", "response": "PLAN: A B C"', 1)
+        self.candidate.write_text(raw, encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "duplicate|candidate"):
+            self.run_hybrid()
+        self.assertFalse(self.hybrid.exists())
+        self.assertFalse(self.report.exists())
+
     def test_requires_both_original_observation_and_held_pin(self):
         self.make_candidate(["UNSAT", "UNSAT"])
         with self.assertRaises(ValueError):
