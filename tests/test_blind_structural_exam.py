@@ -16,8 +16,10 @@ from pathlib import Path
 import random
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from labyrinth.blind_structural_exam import prepare_exam, score_exam, main
+from labyrinth import blind_structural_exam as examiner_module
 
 class BlindStructuralExamTests(unittest.TestCase):
     def setUp(self):
@@ -55,6 +57,59 @@ class BlindStructuralExamTests(unittest.TestCase):
     def score(self, plan):
         return score_exam(self.private, self.public, self.commit, self.responses,
                           self.out, expected_precommit_sha256=plan["receipt_sha256"])
+
+    def test_public_write_failure_never_publishes_private_answers(self):
+        original = examiner_module._write_once
+
+        def failing_write(path, obj):
+            if Path(path) == self.public:
+                raise OSError("injected public write refusal")
+            return original(path, obj)
+
+        with patch.object(examiner_module, "_write_once", side_effect=failing_write):
+            with self.assertRaisesRegex(OSError, "public write refusal"):
+                prepare_exam(self.private, self.public, self.commit,
+                             count=2, rng=random.Random(49011))
+        self.assertFalse(self.private.exists(),
+                         "private answers must not precede a successful public file")
+        self.assertFalse(self.commit.exists())
+
+    def test_precommit_write_failure_never_publishes_private_answers(self):
+        original = examiner_module._write_once
+
+        def failing_write(path, obj):
+            if Path(path) == self.commit:
+                raise OSError("injected precommit write refusal")
+            return original(path, obj)
+
+        with patch.object(examiner_module, "_write_once", side_effect=failing_write):
+            with self.assertRaisesRegex(OSError, "precommit write refusal"):
+                prepare_exam(self.private, self.public, self.commit,
+                             count=2, rng=random.Random(49012))
+        self.assertFalse(self.private.exists(),
+                         "no private answers may remain before receipt publication")
+
+    def test_private_answers_published_only_after_public_and_precommit(self):
+        original = examiner_module._write_once
+        write_order = []
+
+        def checking_write(path, obj):
+            file = Path(path)
+            if file == self.private:
+                self.assertTrue(self.public.is_file())
+                self.assertTrue(self.commit.is_file())
+            write_order.append(file)
+            return original(path, obj)
+
+        with patch.object(examiner_module, "_write_once", side_effect=checking_write):
+            prepare_exam(self.private, self.public, self.commit,
+                         count=2, rng=random.Random(49013))
+        self.assertEqual(write_order, [self.public, self.commit, self.private])
+        plan = json.loads(self.commit.read_text())
+        self.assertEqual(plan["private_sha256"],
+                         sha256(self.private.read_bytes()).hexdigest())
+        self.assertEqual(plan["public_sha256"],
+                         sha256(self.public.read_bytes()).hexdigest())
 
     def test_missing_precommit_parent_rejected_before_private_or_public_writes(self):
         missing = self.root / "missing-precommit-parent" / "precommit.json"
