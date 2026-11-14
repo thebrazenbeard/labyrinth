@@ -260,6 +260,31 @@ class LocalModelEvidenceTests(unittest.TestCase):
         self.assertFalse(self.responses.exists())
         self.assertFalse(self.observation.exists())
 
+    def test_transient_digest_flip_only_before_second_trial_is_rejected(self):
+        # The first case is stable; the second case's preflight switches
+        # to another advertised digest, then would switch back afterward.
+        self.state["tag_sequence"] = [
+            "b" * 64, "b" * 64, "b" * 64, "c" * 64, "b" * 64]
+        with self.assertRaisesRegex(ValueError, "digest|model|changed"):
+            self.run_observe()
+        self.assertFalse(self.responses.exists())
+        self.assertFalse(self.observation.exists())
+
+    def test_rehashed_v2_receipt_with_fake_per_trial_check_count_rejected(self):
+        self.run_observe()
+        forged = json.loads(self.observation.read_text(encoding="utf-8"))
+        forged["model_tag_check_count"] = 2
+        forged.pop("receipt_sha256")
+        forged_sha = sha256(json.dumps(
+            forged, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False).encode("utf-8")).hexdigest()
+        forged["receipt_sha256"] = forged_sha
+        self.observation.write_text(json.dumps(forged), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "observation|pin|evidence"):
+            verify_local_observation(
+                self.observation, forged_sha, self.public.read_bytes(),
+                self.responses.read_bytes())
+
     def test_truncated_response_cannot_get_a_successful_model_receipt(self):
         # Even a syntactically valid plan may only be a token-cap prefix.
         self.state["reply"] = "PLAN: A"
