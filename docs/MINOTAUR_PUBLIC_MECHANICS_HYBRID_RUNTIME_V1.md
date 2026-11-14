@@ -1,4 +1,14 @@
-# Wave46 — executable public-rule verified mechanics runtime
+# Wave46 — executable public-rule verified mechanics runtime (historical V1)
+
+**Compatibility notice (Wave47):** This document records the originally
+executed V1 artifacts and hashes. That version used the model-compatible
+response schema, which created a provenance-laundering risk. The **current**
+runtime emits the distinct V2 selected-answer schema and the old raw
+candidate scorer rejects it. Use the
+[Wave47 V2 provenance-bound verifier](MINOTAUR_HYBRID_PROVENANCE_BOUND_V2.md)
+to verify current hybrid outputs with their original candidate and companion
+receipt. The historical V1 receipts remain historically true; do not
+retroactively treat them as current V2 or as neural-learning evidence.
 
 This is a *functional deterministic game-mechanics runtime* that preserves
 separate provenance for a candidate's proposed answer and a public transition
@@ -22,8 +32,10 @@ For each candidate answer, the runtime:
 3. For every incorrect, malformed or unsupported candidate answer, computes a
    deterministic public-rule fallback with dual BFS and exhaustive finite
    enumeration. This does not update a neural weight.
-4. Emits the original response schema for compatibility with existing
-   source-only action scoring, plus a **separate original unkeyed receipt**
+4. **Historical Wave46 V1 behavior:** emitted the same response schema as
+   a raw candidate, making direct source-only scoring possible without the
+   companion report. **Current V2 behavior:** emits a different corrected
+   schema that the raw model scorer rejects, plus a **separate original unkeyed receipt**
    with exact counts and per-case source labels:
    CANDIDATE_PUBLICLY_VERIFIED or DETERMINISTIC_PUBLIC_FALLBACK.
 
@@ -47,7 +59,7 @@ Example:
 The runner is **offline**: no model inference, network access or training
 happens during the hybrid execution. Its outputs are exclusive-create
 artifacts. Both output parent directories must already exist. The provenance
-report is written **first**, and the model-compatible corrected response roster
+report is written **first**, and the typed V2 selected-answer roster
 is published **last**. A failed report write therefore cannot leave a corrected
 response file without the record of symbolic substitutions. Two separate
 filesystem writes are NOT a fully atomic transaction: consumers must require
@@ -57,15 +69,17 @@ precommit and scores remain unmodified.
 
 ### Important provenance boundary
 
-The selected response roster uses the existing exam candidate-response
-format for source-only mechanics replay. **Do not** report its 4/4 or 12/12
-as a neural model's score. The model's *original* candidate file and HTTP
-receipt must remain separate from the corrected hybrid output, and the
-hybrid provenance receipt must accompany any runtime result. The source-only
-scorer itself reports SOURCE_ONLY_RESPONSES_NOT_MODEL_ATTESTED and will not
-certify learning, independently served weights or custody. This is not an
-independently trusted binding: an operator controlling evidence could discard
-or forge the hybrid provenance report.
+The historical V1 selected roster used the raw exam candidate-response
+schema; the earlier V1 4/4 or 12/12 was **source-only**, not a neural model
+result. Current V2 selected responses use
+`labyrinth.public-mechanics-selected.v2` and **cannot** be submitted directly
+to the old candidate scorer. The separate verifier requires the original
+public source and candidate answer files, the typed corrected selected file,
+the companion hybrid report and its originally retained receipt SHA.
+Optionally provide the original model HTTP observation with its held pin.
+This is source-only evidence and not an independent trust binding: someone
+controlling all original files and purported pins can still fabricate
+claims. See the [V2 contract](MINOTAUR_HYBRID_PROVENANCE_BOUND_V2.md).
 
 ## Actual replay of previous neural model observations, 2026-11-14
 
