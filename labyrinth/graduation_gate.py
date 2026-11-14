@@ -349,6 +349,22 @@ def decide_graduation(
                                     or state.consumed_eval_semantic_family_ids
                                     or state.graduated))):
         return GateDecision("BLOCKED", ("inconsistent consumed evaluation state",), state)
+    # The independently frozen registry provides more than minimum counts.
+    # Every completed attempt had exactly one precommitted run and all its
+    # final cases; cached IDs, prompts and families must be that exact union.
+    # This detects swapped-but-right-sized histories, not fabricated oracle
+    # outcomes or a compromised registry custodian.
+    past_entries = [entry for entry in policy.independent_semantic_registry
+                    if entry.attempt <= completed]
+    past_eval = [entry for entry in past_entries if entry.slice_name != "train"]
+    if (state.consumed_run_ids != frozenset(e.run_id for e in past_entries)
+            or state.consumed_eval_case_ids != frozenset(e.case_id for e in past_eval)
+            or state.consumed_eval_prompt_commitments
+                != frozenset(e.prompt_commitment for e in past_eval)
+            or state.consumed_eval_semantic_family_ids
+                != frozenset(e.semantic_family_id for e in past_eval)):
+        return GateDecision("BLOCKED", ("saved evaluation history differs from frozen registry",),
+                            state)
     if state.graduated:
         return GateDecision("GRADUATED", ("previous trusted graduation retained",), state)
     if state.next_attempt > policy.max_attempts:

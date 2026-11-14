@@ -468,6 +468,37 @@ class MinotaurGraduationTests(unittest.TestCase):
         second = evaluated_receipt(attempt=2, run_id="fresh-run-002")
         self.assertEqual(decision(second, invalid).disposition, "BLOCKED")
 
+    def test_saved_graduation_history_must_match_frozen_registry_exactly(self):
+        """Right-sized fake identities do not recover independently signed history."""
+        qualified = decision(evaluated_receipt())
+        self.assertEqual(qualified.disposition, "GRADUATED")
+        for field, rogue in (
+            ("consumed_run_ids", "unregistered-eval-run"),
+            ("consumed_eval_case_ids", "unregistered-final-case"),
+            ("consumed_eval_prompt_commitments", "8" * 64),
+            ("consumed_eval_semantic_family_ids", "9" * 64),
+        ):
+            with self.subTest(field=field):
+                replaced = set(getattr(qualified.state, field))
+                self.assertTrue(replaced)
+                replaced.remove(sorted(replaced)[0])
+                self.assertNotIn(rogue, replaced)
+                replaced.add(rogue)
+                state = replace(qualified.state, **{field: frozenset(replaced)})
+                self.assertEqual(decide_graduation(
+                    POLICY, state, None, None,
+                    independent_evaluator_key=None).disposition, "BLOCKED")
+
+    def test_right_sized_poisoned_stay_history_cannot_graduate_next_attempt(self):
+        prior = decision(evaluated_receipt(candidate_correct=False))
+        self.assertEqual(prior.disposition, "STAY")
+        consumed = set(prior.state.consumed_eval_prompt_commitments)
+        consumed.remove(sorted(consumed)[0])
+        consumed.add("8" * 64)
+        poisoned = replace(prior.state, consumed_eval_prompt_commitments=frozenset(consumed))
+        second = evaluated_receipt(attempt=2, run_id="fresh-run-002")
+        self.assertEqual(decision(second, poisoned).disposition, "BLOCKED")
+
     def test_signed_duplicate_json_keys_fail_closed(self):
         raw = b'{"schema":"duplicate","schema":"'+SCHEMA.encode()+b'"}'
         sig = hmac.new(KEY, b"labyrinth.minotaur.graduation.v2\x00"+raw,
