@@ -4,6 +4,18 @@ Labyrinth is an offline-first **reasoning challenge, training-lifecycle, and eva
 
 It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path. A bounded CPU smoke run on Lappy demonstrated numerical adapter changes and fresh-process reload with a tiny, **randomly initialized** HF model; it did **not** demonstrate improved reasoning.
 
+## Source-only staged exam bundle (opt-in)
+
+The examiner can prepare a complete private/public/precommit bundle using
+`python -m labyrinth.exam_bundle prepare --out-bundle NEW_DIRECTORY --count 4`,
+then verify the original ready directory and held SHA with
+`python -m labyrinth.exam_bundle verify --bundle NEW_DIRECTORY --expected-manifest-sha256 SHA256`.
+Staging and source verification precede the final directory rename, reducing
+partial-bundle visibility during normal failures. **The directory contains
+private answers: keep it examiner-only.** This is local source-only integrity
+and does not prove independent custody, crash durability, or served model weights.
+See [staged bundle V1](docs/MINOTAUR_STAGED_EXAM_BUNDLE_V1.md).
+
 ## Source-only public mechanics runtime
 
 The isolated finite-transition examiner and hybrid runtime are available
