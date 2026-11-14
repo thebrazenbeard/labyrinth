@@ -1,4 +1,4 @@
-# Wave42 — examiner private-file ACL negative gate (Windows)
+# Wave42–43 — examiner private-file ACL and local read-open negative gates (Windows)
 
 **Status: executable read-only hostile preflight, NOT independent examiner custody, verified candidate exclusion, or permission repair.**
 
@@ -10,6 +10,7 @@ This source exists because [the blind structural examiner](MINOTAUR_BLIND_STRUCT
 
 The following *Allow* ACEs are treated as potential failures:
 
+- High-bit Windows `GENERIC_READ` (`0x80000000`), `GENERIC_WRITE` (`0x40000000`) or `GENERIC_ALL` (`0x10000000`) are conservatively treated as data read/write even when a `FileSystemRights` signed 32-bit mask lacks corresponding low-order file bits. Wave43 demonstrated the previous silent miss with four red test cases.
 - File data READ allowed to Everyone (`S-1-1-0`), Authenticated Users (`S-1-5-11`), Builtin Users (`S-1-5-32-545`), Interactive, Network, Builtin Guests or Power Users
 - File/ancestor write, append, delete, permissions-change or ownership-change allowed to any of those broad principals
 
@@ -51,6 +52,35 @@ receipt SHA-256                 c792a0763fc240b1a272ea9b268d65d640d1dc6481616abd
 
 Only Lappy was reported connected by Executor at this check. No second examiner host or separately authenticated user process was available to verify actual **denied** access. Nothing was elevated, re-permissioned, or moved; the existing private exam has **not** been upgraded to an independent holdout.
 
+## Wave43 real local process read-open probe — negative evidence only
+
+The separate `--probe-local-read` mode attempts to open the **existing original private answer file** using the actual running Windows process token, then closes the file handle **without reading any bytes**. It does not impersonate a separate account. The optional examiner SID is supplied by the caller and only checks whether the current token SID matches that declaration. That declaration is **not** an authenticated examiner identity or a trust anchor.
+
+```powershell
+# Run this from the exact Windows account which is intended to be the candidate.
+# 'S-1-...' is the examiner SID supplied externally, not a credential.
+python -m labyrinth.examiner_custody_acl --probe-local-read --private D:/EXAM_PRIVATE/private-cases.json --examiner-sid S-1-... --out D:/EXAM_AUDITS/local-read-open-receipt.json
+```
+
+The executable returns **exit 2** on `PRIVATE_READ_HANDLE_OPEN_SUCCEEDED` and **exit 3** on `PRIVATE_READ_OPEN_DENIED_LOCAL_ONLY`; neither is an admission or custody PASS. Other errors fail without a qualification artifact. The receipt contains the status, original path **hash** and running SID **hash**, the claimed-examiner-SID hash if supplied, an exact same-claimed-principal boolean, `private_file_bytes_read=0` and explicit **false** for both `candidate_principal_read_denial_verified` and `independent_custody_verified`. No private answers, credential material, raw SID or private file path are written into the receipt.
+
+On **actual Lappy**, the Wave43 run used the same account (`LAPPY\\patri`) as the existing private-case preparation and produced:
+
+```text
+status                           PRIVATE_READ_HANDLE_OPEN_SUCCEEDED
+read_open_succeeded              true
+same_declared_examiner_principal true
+private_file_bytes_read          0
+candidate_principal_read_denial_verified false
+independent_custody_verified     false
+CLI exit                         2
+receipt_sha256                   9f4739104e5c382c48fe483672a611934b0c86691e4dc29c33be1b80da43c5a8
+```
+
+The actual file handle was successfully opened and immediately closed without reading contents. The locally held report resides outside Git at `D:\\VERA\\experiments\\minotaur-wave43-local-access-20261114\\same-token-access-probe.json`. This is direct proof of read access under **that same current token**, not an attempt as a separately authenticated candidate user.
+
+A *denied* open under the same identity, or a fabricated local report, cannot establish independent examiner custody. An actual protected held-out run still requires a **different authenticated candidate principal** to attempt a denied read under a separately controlled examiner. This source will **never** set independent custody true.
+
 ## Remaining qualification gates
 
 1. Establish an examiner-controlled separate Windows principal or independently administered host with protected credentials and recoverability, subject to current authorization.
@@ -64,7 +94,9 @@ To reproduce the source and host tests:
 
 ```powershell
 python -m unittest discover -s tests -p 'test_examiner_custody_acl.py' -q
+python -m unittest discover -s tests -p 'test_examiner_private_read_probe.py' -q
 python -O -m unittest discover -s tests -p 'test_examiner_custody_acl.py' -q
+python -O -m unittest discover -s tests -p 'test_examiner_private_read_probe.py' -q
 python -m unittest discover -s tests -q
 ```
 
