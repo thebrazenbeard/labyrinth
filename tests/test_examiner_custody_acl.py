@@ -6,6 +6,8 @@ integration test reads the current OS ACL rather than trusting metadata.
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
+from subprocess import CompletedProcess
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -114,6 +116,69 @@ class CustodyAclHostileTests(unittest.TestCase):
         result = classify_acl_snapshot(case)
         self.assertEqual(result["status"], "ACL_INSPECTION_INCOMPLETE")
         self.assertFalse(result["independent_custody_verified"])
+
+    @unittest.skipUnless(os.name == "nt", "requires actual Windows pathname")
+    def test_truncated_getacl_ancestry_cannot_claim_complete_local_inspection(self):
+        # A target-file Get-Acl alone can look private while its parent is
+        # writable by Authenticated Users. The policy must NOT mark it complete.
+        with TemporaryDirectory() as root:
+            case_dir = Path(root) / "private"
+            case_dir.mkdir()
+            private = case_dir / "answer.json"
+            private.write_text("test only", encoding="utf-8")
+            out = Path(root) / "receipt.json"
+            snapshot = {
+                "platform": "windows",
+                "identity_sid": "S-1-5-21-99-1001",
+                "targets": [{
+                    "role": "private_cases",
+                    "layers": [{
+                        "is_target": True,
+                        "path": str(private),
+                        "aces": [entry("S-1-5-21-99-1001", 0x1F01FF)],
+                    }],
+                }],
+            }
+            response = CompletedProcess(
+                args=["Get-Acl"], returncode=0, stdout=json.dumps(snapshot), stderr="")
+            with patch("labyrinth.examiner_custody_acl.subprocess.run",
+                       return_value=response):
+                result = audit_local_examiner_custody(private, out)
+            self.assertEqual(result["status"], "ACL_INSPECTION_INCOMPLETE")
+            self.assertFalse(result["acl_lineage_complete"])
+            self.assertFalse(result["acl_inspection_complete"])
+            self.assertFalse(result["independent_custody_verified"])
+
+    @unittest.skipUnless(os.name == "nt", "requires actual Windows pathname")
+    def test_forged_intermediate_ancestor_cannot_claim_complete_inspection(self):
+        with TemporaryDirectory() as root:
+            case_dir = Path(root) / "private"
+            case_dir.mkdir()
+            private = case_dir / "answers.json"
+            private.write_text("test only", encoding="utf-8")
+            out = Path(root) / "receipt.json"
+            paths = [private, *private.parents]
+            fake_layers = [{
+                "path": str(p) if i != 1 else str(Path(root) / "forged-parent"),
+                "is_target": i == 0,
+                "aces": [],
+            } for i, p in enumerate(paths)]
+            snapshot = {
+                "platform": "windows",
+                "identity_sid": "S-1-5-21-99-1001",
+                "targets": [{
+                    "role": "private_cases",
+                    "layers": fake_layers,
+                }],
+            }
+            response = CompletedProcess(
+                args=["Get-Acl"], returncode=0, stdout=json.dumps(snapshot), stderr="")
+            with patch("labyrinth.examiner_custody_acl.subprocess.run",
+                       return_value=response):
+                result = audit_local_examiner_custody(private, out)
+            self.assertEqual(result["status"], "ACL_INSPECTION_INCOMPLETE")
+            self.assertFalse(result["acl_lineage_complete"])
+            self.assertFalse(result["independent_custody_verified"])
 
     def test_explicit_deny_ace_does_not_get_mistaken_for_allow(self):
         case = fixture(file_aces=[entry("S-1-5-11", 0x1F01FF, "Deny")])
