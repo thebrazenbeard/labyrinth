@@ -20,9 +20,11 @@ aggregate reports. A 12-case on-host zero-update control got
 six actual winning traces. Neither is a neural-learning result or independent
 examiner-custody qualification. A [read-only Windows examiner custody preflight](docs/MINOTAUR_EXAMINER_CUSTODY_PREFLIGHT_V1.md)
 now checks generic and low-level broad ACL rights, writable ancestors,
-and a real same-token read-only file-handle attempt. Lappy's private exam
-has inherited Authenticated Users Modify access, and the operating account
-can open the actual answer file for reading without consuming bytes.
+and a real same-token read-only file-handle attempt. It also requires an
+exact source-to-volume-root ancestry readback: a dropped or forged layer
+is reported as inspection incomplete, never as a clean ACL. Lappy's
+private exam has inherited Authenticated Users Modify access, and the
+operating account can open its answer file without consuming any bytes.
 Neither finding is separate-principal custody attestation or permission repair.
 
 ## Run it
