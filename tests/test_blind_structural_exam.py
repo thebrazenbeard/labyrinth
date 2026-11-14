@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import random
+import subprocess
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
@@ -162,6 +163,44 @@ class BlindStructuralExamTests(unittest.TestCase):
         self.assertFalse(self.public.exists())
         self.assertFalse(alternate.exists(),
                          "precommit must not be written through a dangling symlink")
+
+    def test_symlinked_private_parent_rejected_before_answer_redirection(self):
+        real_parent = self.root / "real-answer-parent"
+        real_parent.mkdir()
+        alias = self.root / "linked-answer-parent"
+        try:
+            os.symlink(real_parent, alias, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"directory symlinks unavailable: {exc}")
+        self.assertTrue(alias.is_dir())
+        self.assertTrue(alias.is_symlink())
+        redirected_private = alias / "private.json"
+        with self.assertRaisesRegex(ValueError, "symlink|link|reparse|parent"):
+            prepare_exam(redirected_private, self.public, self.commit,
+                         count=2, rng=random.Random(49014))
+        self.assertFalse((real_parent / "private.json").exists())
+        self.assertFalse(self.public.exists())
+        self.assertFalse(self.commit.exists())
+
+    def test_windows_junctioned_private_parent_rejected(self):
+        if os.name != "nt":
+            self.skipTest("NTFS junction test is Windows only")
+        real_parent = self.root / "real-junction-target"
+        real_parent.mkdir()
+        alias = self.root / "junction-alias"
+        result = subprocess.run(
+            ["cmd.exe", "/c", "mklink", "/J", str(alias), str(real_parent)],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            self.skipTest("junction creation unavailable in isolated temp directory")
+        self.assertTrue(alias.is_dir())
+        self.assertFalse(alias.is_symlink(), "junction should test non-symlink reparse paths")
+        with self.assertRaisesRegex(ValueError, "symlink|junction|reparse|parent"):
+            prepare_exam(alias / "private.json", self.public, self.commit,
+                         count=2, rng=random.Random(49015))
+        self.assertFalse((real_parent / "private.json").exists())
+        self.assertFalse(self.public.exists())
+        self.assertFalse(self.commit.exists())
 
     def test_public_prompt_omits_witness_and_private_material(self):
         private, public, plan = self.prepare()
