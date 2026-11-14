@@ -134,7 +134,6 @@ class CustodyAclHostileTests(unittest.TestCase):
                     "role": "private_cases",
                     "layers": [{
                         "is_target": True,
-                        "path": str(private),
                         "aces": [entry("S-1-5-21-99-1001", 0x1F01FF)],
                     }],
                 }],
@@ -158,8 +157,9 @@ class CustodyAclHostileTests(unittest.TestCase):
             private.write_text("test only", encoding="utf-8")
             out = Path(root) / "receipt.json"
             paths = [private, *private.parents]
+            # A same-count fake walk with no verifiable path identities
+            # is not evidence that the actual intermediate ACLs were read.
             fake_layers = [{
-                "path": str(p) if i != 1 else str(Path(root) / "forged-parent"),
                 "is_target": i == 0,
                 "aces": [],
             } for i, p in enumerate(paths)]
