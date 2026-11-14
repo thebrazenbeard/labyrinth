@@ -26,6 +26,8 @@ _MAX_DEMONSTRATIONS = 64
 # Bound CLI-supplied replay mappings and training artifacts before JSON parsing.
 # An 8 MiB input is ample for the maximum 64 bounded demonstrations/trajectories.
 _MAX_JSON_BYTES = 8 * 1024 * 1024
+# Do not rely on version-dependent JSON-decoder recursion limits.
+_MAX_JSON_NESTING = 128
 CONTROL_DESCRIPTIONS = {
     "baseline": "No examples supplied",
     "candidate": "In-context examples from disjoint training split",
@@ -372,6 +374,35 @@ def _reject_nonfinite_json(value: str) -> None:
     raise ValueError(f"nonfinite JSON token forbidden: {value}")
 
 
+def _enforce_json_nesting_limit(raw: bytes) -> None:
+    """Bound untrusted JSON structure depth before decoder allocation.
+
+    Scan lexical delimiters in raw UTF-8, ignoring brackets inside strings
+    and correctly handling escaped quotes/backslashes. The JSON decoder still
+    owns full syntax validation; this scanner only sets a depth ceiling.
+    """
+    depth = 0
+    quoted = False
+    escaped = False
+    for byte in raw:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:  # \\
+                escaped = True
+            elif byte == 0x22:  # "
+                quoted = False
+        elif byte == 0x22:
+            quoted = True
+        elif byte in (0x5B, 0x7B):  # [ or {
+            depth += 1
+            if depth > _MAX_JSON_NESTING:
+                raise ValueError(
+                    f"JSON input nesting exceeds {_MAX_JSON_NESTING} levels")
+        elif byte in (0x5D, 0x7D):  # ] or }
+            depth = max(0, depth - 1)
+
+
 def load_json(path: str | Path, *, strict: bool = False) -> Any:
     # Read at most max+1 bytes even if a local file grows between stat/open;
     # never hand unbounded input to a JSON decoder.
@@ -379,6 +410,7 @@ def load_json(path: str | Path, *, strict: bool = False) -> Any:
         raw = handle.read(_MAX_JSON_BYTES + 1)
     if len(raw) > _MAX_JSON_BYTES:
         raise ValueError(f"JSON input exceeds {_MAX_JSON_BYTES} bytes")
+    _enforce_json_nesting_limit(raw)
     try:
         return json.loads(raw.decode("utf-8"),
                           object_pairs_hook=_unique_json_pairs if strict else None,
