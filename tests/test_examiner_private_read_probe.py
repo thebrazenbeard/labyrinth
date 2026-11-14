@@ -12,6 +12,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from labyrinth import examiner_custody_acl as custody
 from labyrinth.examiner_custody_acl import probe_local_private_read_access
 
 
@@ -27,7 +28,10 @@ class CandidateLocalPrivateReadProbeTests(unittest.TestCase):
 
     def test_real_current_process_can_open_read_handle_without_consuming_bytes(self):
         with patch("os.read", side_effect=AssertionError("must never read private bytes")):
-            report = probe_local_private_read_access(self.private, self.receipt)
+            with patch.object(custody, "_open_read_handle",
+                              wraps=custody._open_read_handle) as read_handle:
+                report = probe_local_private_read_access(self.private, self.receipt)
+        read_handle.assert_called_once_with(self.private)
         self.assertEqual(report["status"], "PRIVATE_READ_HANDLE_OPEN_SUCCEEDED")
         self.assertTrue(report["read_open_succeeded"])
         self.assertFalse(report["independent_custody_verified"])
@@ -37,6 +41,10 @@ class CandidateLocalPrivateReadProbeTests(unittest.TestCase):
                          json.loads(self.receipt.read_text())["receipt_sha256"])
         self.assertEqual(self.private.read_text(),
                          "NEVER_PRINT_OR_READ_THIS_PRIVATE_ANSWER")
+        public_receipt = self.receipt.read_text(encoding="utf-8")
+        self.assertNotIn(str(self.private), public_receipt)
+        self.assertNotIn("NEVER_PRINT_OR_READ_THIS_PRIVATE_ANSWER", public_receipt)
+        self.assertFalse(report["candidate_process_identity_independently_attested"])
 
     def test_same_real_identity_as_declared_examiner_is_a_failure_not_pass(self):
         # The examiner SID is supplied by the caller and cannot authenticate
