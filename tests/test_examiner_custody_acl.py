@@ -180,6 +180,36 @@ class CustodyAclHostileTests(unittest.TestCase):
             self.assertFalse(result["acl_lineage_complete"])
             self.assertFalse(result["independent_custody_verified"])
 
+    @unittest.skipUnless(os.name == "nt", "requires actual Windows pathname")
+    def test_bound_ancestry_mismatch_keeps_broad_allow_denial_and_reports_incomplete(self):
+        with TemporaryDirectory() as root:
+            private = Path(root) / "case.json"
+            private.write_text("test only", encoding="utf-8")
+            out = Path(root) / "result.json"
+            paths = [private, *private.parents]
+            layers = [{
+                "path": str(path),
+                "is_target": i == 0,
+                "aces": [entry("S-1-5-11", 0x001301BF)] if i == 0 else [],
+            } for i, path in enumerate(paths)]
+            layers[1]["path"] = str(Path(root) / "not-the-real-parent")
+            snapshot = {
+                "platform": "windows",
+                "identity_sid": "S-1-5-21-99-1001",
+                "targets": [{"role": "private_cases", "layers": layers}],
+            }
+            response = CompletedProcess(
+                args=["Get-Acl"], returncode=0, stdout=json.dumps(snapshot), stderr="")
+            with patch("labyrinth.examiner_custody_acl.subprocess.run",
+                       return_value=response):
+                result = audit_local_examiner_custody(private, out)
+            self.assertEqual(result["status"], "INSECURE_BROAD_ALLOW")
+            self.assertIn("BROAD_READ_PRIVATE_CASES", result["findings"])
+            self.assertFalse(result["acl_lineage_complete"])
+            self.assertFalse(result["acl_inspection_complete"])
+            self.assertFalse(result["independent_custody_verified"])
+            self.assertNotIn(str(private), out.read_text(encoding="utf-8"))
+
     def test_explicit_deny_ace_does_not_get_mistaken_for_allow(self):
         case = fixture(file_aces=[entry("S-1-5-11", 0x1F01FF, "Deny")])
         result = classify_acl_snapshot(case)
@@ -199,6 +229,8 @@ class CustodyAclHostileTests(unittest.TestCase):
                              json.loads(report.read_text())["receipt_sha256"])
             self.assertFalse(actual["independent_custody_verified"])
             self.assertFalse(actual["acl_isolation_verified"])
+            self.assertTrue(actual["acl_lineage_complete"])
+            self.assertTrue(actual["acl_inspection_complete"])
             self.assertIn(actual["status"], {
                 "INSECURE_BROAD_ALLOW", "ACL_INSPECTION_INCOMPLETE",
                 "NO_BROAD_ALLOW_DETECTED_NOT_ATTESTED"})
