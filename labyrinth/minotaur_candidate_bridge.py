@@ -287,8 +287,8 @@ class SubprocessCandidateAdapter:
                     or "microsoft" in os.uname().release.lower()):
                 raise PermissionError("candidate UID drop no longer authorized")
             # Clear supplementary groups before dropping effective UID/GID.
-            launch_identity = {"user": self.unix_user_id,
-                               "group": self.unix_group_id, "extra_groups": ()}
+            launch_identity.update({"user": self.unix_user_id,
+                                    "group": self.unix_group_id, "extra_groups": ()})
         # Feed stdin from an on-disk PUBLIC request so neither side can
         # deadlock writing an input pipe while the child fills stdout.
         # A separate daemon reader caps bytes held in examiner memory.
