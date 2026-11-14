@@ -25,9 +25,12 @@ the directory and supposed original pin can fabricate local consistency.
 python -m labyrinth.exam_bundle verify --bundle D:\VERA\experiments\example-exam-ready --expected-manifest-sha256 YOUR_ORIGINAL_MANIFEST_SHA256
 ```
 
-Verification checks four exactly named files (no extras), strict canonical
-manifest schema and digest, intended ready-directory name, all three original
-file hashes and original precommit receipt, and the existing finite-mechanics
+Verification checks four exactly named regular files (no extras), including
+a static refusal of symlink/reparse members and multi-linked files whose
+bytes can be modified through hardlinks outside the ready directory. It also
+checks the strict canonical manifest schema and digest, intended ready-directory
+name, all three original file hashes and original precommit receipt, and the
+existing finite-mechanics
 exam's private witnesses against public tables. Verification **does read the
 private answer key**; it must be performed only by the examiner. It does
 not check candidate credentials or infer model performance.
@@ -75,6 +78,11 @@ With `RENAME_NOREPLACE`, the same test fails publication with EEXIST,
 preserves the destination, and cleans the failed staging directory.
 A Linux-only test also verifies that absent `renameat2` support is
 rejected, not downgraded to the unsafe rename.
+A fresh Windows regression demonstrated that all four original member types
+(public, private, precommit, manifest) were accepted as externally hardlinked
+regular files while the caller-held original manifest SHA still verified. A
+new red-first test now rejects each; removal of the hardlink-count check
+reproduces the failure. Linux and Windows bundle tests exercise the rule.
 
 This is **not** a guaranteed crash-atomic or power-loss-durable directory:
 a crash before the final rename may leave an unready staging directory;
@@ -82,7 +90,8 @@ filesystem durability and parent-directory fsync have not been qualified.
 Even if a no-replace rename is ordinarily a single namespace operation,
 its exact security, filesystem and power-loss behavior must be proved for
 the target volume and environment. An attacker racing directory mappings
-can still bypass static pathname preflight; the Linux no-replace flag
+can still bypass static pathname preflight and static member link-count
+checks; the Linux no-replace flag
 prevents replacing the destination entry, not substituting untrusted parent
 directories or leaking private files. Not every Linux filesystem supports
 the syscall flag; unsupported operations fail without publishing. See:
