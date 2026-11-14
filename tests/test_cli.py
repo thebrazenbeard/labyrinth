@@ -76,7 +76,7 @@ class RunnerTests(unittest.TestCase):
     def test_json_nesting_budget_ignores_brackets_and_escaped_quotes_in_strings(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "quoted-brackets.json"
-            payload = {"quoted": "[{" * 130 + "escaped \\"quote\\" " + "}]" * 130}
+            payload = {"quoted": "[{" * 130 + 'escaped "quote" ' + "}]" * 130}
             source.write_text(json.dumps(payload), encoding="utf-8")
             self.assertEqual(load_json(source), payload)
 
