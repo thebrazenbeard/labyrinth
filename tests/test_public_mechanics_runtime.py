@@ -225,6 +225,17 @@ class PublicMechanicsHybridTests(unittest.TestCase):
         self.assertFalse(self.hybrid.exists())
         self.assertFalse(self.report.exists())
 
+    def test_failed_provenance_receipt_cannot_publish_unlabeled_corrected_answers(self):
+        self.make_candidate(["UNSAT", "UNSAT"])
+        unreachable = self.root / "missing-parent" / "provenance.json"
+        with self.assertRaises((FileNotFoundError, OSError)):
+            run_public_mechanics(
+                self.public, self.candidate, self.hybrid, unreachable,
+                expected_public_sha256=self.original_public_sha)
+        self.assertFalse(self.hybrid.exists(),
+                         "corrected response cannot appear without provenance receipt")
+        self.assertFalse(unreachable.exists())
+
     def test_cannot_overwrite_hybrid_or_receipt(self):
         self.make_candidate(["UNSAT", "UNSAT"])
         original = self.run_hybrid()
