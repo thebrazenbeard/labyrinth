@@ -101,8 +101,11 @@ class JsonEnumModelEvidenceTests(unittest.TestCase):
             self.assertEqual(len(choice), 40)
             self.assertEqual(set(call["format"]), {
                 "type", "properties", "required", "additionalProperties"})
+            # Source-defined PUBLIC prompt mentions the word "verdict".
+            # Only the JSON constraint may not carry private verdict data.
             self.assertNotIn("oracle_witness", json.dumps(call))
-            self.assertNotIn("verdict", json.dumps(call))
+            self.assertNotIn("oracle_witness", json.dumps(call["format"]))
+            self.assertNotIn("verdict", json.dumps(call["format"]))
         self.assertEqual([r["response"] for r in output["responses"]],
                          ["UNSAT", "UNSAT"])
         self.assertEqual(witness["declared_model_digest"], "d" * 64)
