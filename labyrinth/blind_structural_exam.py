@@ -16,6 +16,7 @@ from pathlib import Path
 import random
 import re
 import secrets
+import stat
 
 from .live_model_probe import (_canonical, _file_bytes, _load, _receipt,
                                _write_once, ID, SHA)
@@ -169,6 +170,16 @@ def prepare_exam(private_path, public_path, precommit_path, *,
     # another required destination is impossible to open (e.g. missing parent).
     if not all(p.parent.is_dir() for p in locations):
         raise FileNotFoundError("all three exam output parent directories must exist")
+    # Never follow an existing symlink/junction/reparse *ancestor* when
+    # publishing private examiner answers. This is a static preflight only:
+    # a separately privileged actor can still race the directory entries.
+    reparse_bit = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    for location in locations:
+        for parent in location.parents:
+            if (parent.is_symlink() or
+                    (getattr(parent.lstat(), "st_file_attributes", 0)
+                     & reparse_bit)):
+                raise ValueError("exam output parent is a symlink or reparse point")
     if worlds is None:
         if type(count) is not int or not 2 <= count <= 16 or count % 2:
             raise ValueError("generated exam count must be an even 2..16")
