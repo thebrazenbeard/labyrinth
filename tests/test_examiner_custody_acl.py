@@ -181,6 +181,54 @@ class CustodyAclHostileTests(unittest.TestCase):
             self.assertFalse(result["independent_custody_verified"])
 
     @unittest.skipUnless(os.name == "nt", "requires actual Windows pathname")
+    def test_valid_target_path_but_missing_rootward_layers_is_still_incomplete(self):
+        with TemporaryDirectory() as root:
+            private = Path(root) / "case.json"
+            private.write_text("test only", encoding="utf-8")
+            output = Path(root) / "receipt.json"
+            snapshot = {
+                "platform": "windows",
+                "identity_sid": "S-1-5-21-99-1001",
+                "targets": [{"role": "private_cases", "layers": [{
+                    "path": str(private),
+                    "is_target": True,
+                    "aces": [],
+                }]}],
+            }
+            process = CompletedProcess(
+                args=["Get-Acl"], returncode=0, stdout=json.dumps(snapshot), stderr="")
+            with patch("labyrinth.examiner_custody_acl.subprocess.run",
+                       return_value=process):
+                report = audit_local_examiner_custody(private, output)
+            self.assertEqual(report["status"], "ACL_INSPECTION_INCOMPLETE")
+            self.assertFalse(report["acl_lineage_complete"])
+            self.assertFalse(report["acl_inspection_complete"])
+
+    @unittest.skipUnless(os.name == "nt", "requires actual Windows pathname")
+    def test_all_layers_present_but_one_parent_path_wrong_is_incomplete(self):
+        with TemporaryDirectory() as root:
+            private = Path(root) / "case.json"
+            private.write_text("test only", encoding="utf-8")
+            output = Path(root) / "receipt.json"
+            paths = [private, *private.parents]
+            layers = [{"path": str(p), "is_target": i == 0, "aces": []}
+                      for i, p in enumerate(paths)]
+            layers[1]["path"] = str(Path(root) / "fake-parent")
+            snapshot = {
+                "platform": "windows",
+                "identity_sid": "S-1-5-21-99-1001",
+                "targets": [{"role": "private_cases", "layers": layers}],
+            }
+            process = CompletedProcess(
+                args=["Get-Acl"], returncode=0, stdout=json.dumps(snapshot), stderr="")
+            with patch("labyrinth.examiner_custody_acl.subprocess.run",
+                       return_value=process):
+                report = audit_local_examiner_custody(private, output)
+            self.assertEqual(report["status"], "ACL_INSPECTION_INCOMPLETE")
+            self.assertFalse(report["acl_lineage_complete"])
+            self.assertFalse(report["independent_custody_verified"])
+
+    @unittest.skipUnless(os.name == "nt", "requires actual Windows pathname")
     def test_bound_ancestry_mismatch_keeps_broad_allow_denial_and_reports_incomplete(self):
         with TemporaryDirectory() as root:
             private = Path(root) / "case.json"
