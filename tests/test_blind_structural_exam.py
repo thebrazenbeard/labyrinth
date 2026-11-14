@@ -17,9 +17,6 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from labyrinth.blind_structural_exam import prepare_exam, score_exam, main
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
 
 class BlindStructuralExamTests(unittest.TestCase):
     def setUp(self):
@@ -178,6 +175,11 @@ class BlindStructuralExamTests(unittest.TestCase):
         self.assertEqual(result["verified_plans"], 0)
 
     def test_signed_precommit_authenticates_key_not_independent_case_custody(self):
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+            from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        except ImportError:
+            self.skipTest("optional Ed25519 cryptography dependency is not installed")
         private, _, plan = self.prepare()
         self.responses_for(private, use_oracle=True)
         signer = Ed25519PrivateKey.generate()
