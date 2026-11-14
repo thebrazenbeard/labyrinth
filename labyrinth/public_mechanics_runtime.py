@@ -17,7 +17,8 @@ from .local_neural_observer import _public_trials, verify_local_observation
 from .live_model_probe import (_canonical, _file_bytes, _load, _receipt,
                                _write_once, MAX_CASE_BYTES, SHA)
 
-REPORT_SCHEMA = "labyrinth.public-mechanics-hybrid-runtime.v1"
+REPORT_SCHEMA = "labyrinth.public-mechanics-hybrid-runtime.v2"
+SELECTED_SCHEMA = "labyrinth.public-mechanics-selected.v2"
 
 
 def _sha(raw):
@@ -138,7 +139,7 @@ def run_public_mechanics(public_path, candidate_path, responses_out, report_out,
             "public_unsat_checked": chosen == "UNSAT" and symbolic_path is None,
         })
     selected = {
-        "schema": RESPONSE_SCHEMA, "exam_id": public["exam_id"],
+        "schema": SELECTED_SCHEMA, "exam_id": public["exam_id"],
         "responses": rows,
     }
     selected_raw = _canonical(selected) + b"\n"
@@ -170,6 +171,7 @@ def run_public_mechanics(public_path, candidate_path, responses_out, report_out,
     # Provenance must be published FIRST. A failure to write its receipt
     # must never leave a silently corrected answer file that looks neural.
     # The final response file may still fail; consumers must check BOTH.
+    # A V2 selected roster is deliberately rejected by the raw-model scorer.
     _write_once(report_out, report)
     _write_once(responses_out, selected)
     return report
