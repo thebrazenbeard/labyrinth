@@ -31,7 +31,8 @@ class LocalModelEvidenceTests(unittest.TestCase):
         self.model = "qwen3.5:0.8b"
         self.state = {"gets": 0, "posts": [], "first_digest": "b" * 64,
                       "last_digest": "b" * 64, "reply_model": self.model,
-                      "reply": "PLAN: A", "redirect": False, "done": True}
+                      "reply": "PLAN: A", "redirect": False, "done": True,
+                      "done_reason": "stop", "tag_sequence": None}
         state = self.state
 
         class Handler(BaseHTTPRequestHandler):
@@ -52,8 +53,12 @@ class LocalModelEvidenceTests(unittest.TestCase):
                 if self.path != "/api/tags":
                     return self._send({"error": "bad route"}, 404)
                 state["gets"] += 1
-                digest = (state["first_digest"] if state["gets"] == 1
-                          else state["last_digest"])
+                digest = (
+                    state["tag_sequence"][min(state["gets"] - 1,
+                                              len(state["tag_sequence"]) - 1)]
+                    if state["tag_sequence"] is not None
+                    else (state["first_digest"] if state["gets"] == 1
+                          else state["last_digest"]))
                 self._send({"models": [{
                     "name": "qwen3.5:0.8b", "digest": digest, "size": 5000
                 }]})
@@ -69,7 +74,7 @@ class LocalModelEvidenceTests(unittest.TestCase):
                 state["posts"].append(req)
                 self._send({"model": state["reply_model"],
                             "response": state["reply"],
-                            "done": state["done"], "done_reason": "stop",
+                            "done": state["done"], "done_reason": state["done_reason"],
                             "eval_count": 3})
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -191,6 +196,25 @@ class LocalModelEvidenceTests(unittest.TestCase):
     def test_model_digest_changes_mid_exam_rejected_without_outputs(self):
         self.state["last_digest"] = "c" * 64
         with self.assertRaisesRegex(ValueError, "digest|model"):
+            self.run_observe()
+        self.assertFalse(self.responses.exists())
+        self.assertFalse(self.observation.exists())
+
+    def test_transient_advertised_model_swap_between_queries_rejected(self):
+        # Old code checked exactly first and last. Both are B. But during
+        # the first case the tag switches to C and later switches back.
+        self.state["tag_sequence"] = [
+            "b" * 64, "b" * 64, "c" * 64, "b" * 64, "b" * 64, "b" * 64]
+        with self.assertRaisesRegex(ValueError, "digest|model|changed"):
+            self.run_observe()
+        self.assertFalse(self.responses.exists())
+        self.assertFalse(self.observation.exists())
+
+    def test_truncated_response_cannot_get_a_successful_model_receipt(self):
+        # Even a syntactically valid plan may only be a token-cap prefix.
+        self.state["reply"] = "PLAN: A"
+        self.state["done_reason"] = "length"
+        with self.assertRaisesRegex(ValueError, "incomplete|finish|length|model reply"):
             self.run_observe()
         self.assertFalse(self.responses.exists())
         self.assertFalse(self.observation.exists())
