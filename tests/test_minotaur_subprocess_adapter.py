@@ -12,7 +12,7 @@ from labyrinth.timegate_exam import CandidateSession, candidate_view, make_case
 from labyrinth.minotaur_candidate_bridge import audit_receipt, run_candidate
 
 
-def probe(command, *, seconds=2.0):
+def probe(command, *, seconds=10.0):
     from labyrinth.minotaur_candidate_bridge import SubprocessCandidateAdapter
     return SubprocessCandidateAdapter(command, model_id="synthetic:child", timeout_seconds=seconds)
 
@@ -22,6 +22,20 @@ class ProcessCandidateBoundaryTests(unittest.TestCase):
         self.case = make_case(7, sealed=True)
         self.public = candidate_view(self.case)
         self.factory = lambda: CandidateSession(self.case)
+
+    def test_valid_delayed_child_within_production_budget_is_accepted(self):
+        """Test fixture must not impose a shorter deadline on successful output."""
+        script = ("import json,sys,time;"
+                  "json.load(sys.stdin);time.sleep(2.4);"
+                  "print(json.dumps({'kind':'ACTION','action':'wait'}))")
+        receipt = run_candidate(
+            self.public, self.factory,
+            probe((sys.executable, "-c", script)),
+            authorize_local_adapter=True,
+            require_process_separation=True, max_model_calls=1,
+        )
+        self.assertEqual(receipt.turns[0].disposition, "ACTION")
+        self.assertEqual(json.loads(receipt.turns[0].response_text)["action"], "wait")
 
     def test_process_adapter_instance_cannot_shadow_generate(self):
         adapter = probe((sys.executable, "-c", "print('invalid')"))
@@ -90,12 +104,15 @@ class ProcessCandidateBoundaryTests(unittest.TestCase):
 
     def test_oversize_output_is_cut_off_before_hanging_child_timeout(self):
         script = ("import sys,time;"
-                  "sys.stdout.write('X'*200000);sys.stdout.flush();time.sleep(5)")
+                  "sys.stdout.write('X'*200000);sys.stdout.flush();time.sleep(30)")
+        started = time.monotonic()
         receipt = run_candidate(self.public, self.factory,
-                                probe((sys.executable, "-c", script), seconds=1.0),
+                                probe((sys.executable, "-c", script), seconds=10.0),
                                 authorize_local_adapter=True, require_process_separation=True,
                                 max_model_calls=1)
+        elapsed = time.monotonic() - started
         self.assertEqual(receipt.final_verdict, "MODEL_OUTPUT_INVALID")
+        self.assertLess(elapsed, 8.0, "oversize output did not preempt the live child")
         self.assertTrue(audit_receipt(receipt, self.public, self.factory))
 
     def test_same_user_process_can_still_read_known_private_file(self):
