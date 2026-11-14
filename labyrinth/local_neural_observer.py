@@ -244,8 +244,7 @@ def verify_local_observation(observation_path, expected_observation_sha256,
                 _sha(question["prompt"].encode("utf-8")) or
                 observed["response_sha256"] !=
                 _sha(answer["response"].encode("utf-8")) or
-                observed["done_reason"] not in (
-                    ("stop",) if is_v2 else ("stop", "length")) or
+                observed["done_reason"] != "stop" or
                 type(observed["eval_count"]) is not int or
                 not 0 <= observed["eval_count"] <= 100000 or
                 type(observed["elapsed_ms"]) is not int or
