@@ -18,6 +18,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import queue
+import subprocess
+import tempfile
+import threading
+import time
 from typing import Any, Callable, Mapping
 
 from .adapters import ModelAdapter, OllamaAdapter, ReplayAdapter
@@ -226,6 +231,87 @@ class FixedActionAdapter:
         return _json({"kind": "CLAIM", "claim": {"kind": "ABSTAIN", "assessment": "UNKNOWN"}})
 
 
+class SubprocessCandidateAdapter:
+    """Optional public-JSON child protocol, NOT an OS access-control boundary.
+
+    One child is spawned per model call; prompt includes all public history.
+    The child receives a JSON object with prompt and seed on stdin and must
+    return one bridge decision JSON object on stdout. No shell or inherited
+    private environment is used. Same-user processes can still read known
+    examiner-owned file paths: independent custody is NOT established.
+    """
+
+    __slots__ = ("command", "model_id", "timeout_seconds")
+
+    def __init__(self, command: tuple[str, ...], *, model_id: str,
+                 timeout_seconds: float = 10.0):
+        if (type(command) is not tuple or not 1 <= len(command) <= 16 or
+                any(type(arg) is not str or not arg or len(arg) > 4096 for arg in command)
+                or not os.path.isabs(command[0])):
+            raise ValueError("candidate command requires a bounded tuple and absolute executable")
+        if (type(timeout_seconds) not in (float, int)
+                or not 0.1 <= timeout_seconds <= 60):
+            raise ValueError("candidate timeout must be between 0.1 and 60 seconds")
+        self.command = command
+        self.model_id = model_id
+        self.timeout_seconds = timeout_seconds
+
+    def generate(self, prompt: str, *, seed: int | None = None) -> str:
+        if type(prompt) is not str or len(prompt) > 64000:
+            raise ValueError("invalid subprocess prompt")
+        _require_unicode_scalars(prompt)
+        request = (_json({"prompt": json.loads(prompt), "seed": seed}) + "\n").encode("utf-8")
+        # Only basic Windows loader variables: neither credentials nor Python
+        # import-path overrides are copied from the examiner environment.
+        environment = {key: os.environ[key] for key in ("SystemRoot", "WINDIR")
+                       if key in os.environ}
+        # Feed stdin from an on-disk PUBLIC request so neither side can
+        # deadlock writing an input pipe while the child fills stdout.
+        # A separate daemon reader caps bytes held in examiner memory.
+        with tempfile.TemporaryDirectory(prefix="labyrinth_candidate_") as directory:
+            request_file = Path(directory) / "public_request.json"
+            request_file.write_bytes(request)
+            with request_file.open("rb") as source:
+                child = subprocess.Popen(
+                    self.command, stdin=source, stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL, cwd=directory, env=environment,
+                    shell=False)
+                result: queue.Queue[bytes | BaseException] = queue.Queue(maxsize=1)
+                cap = MAX_RESPONSE_CHARACTERS * 4
+                def read_bounded() -> None:
+                    try:
+                        result.put(child.stdout.read(cap + 1))
+                    except BaseException as exc:
+                        result.put(exc)
+                reader = threading.Thread(target=read_bounded, daemon=True)
+                reader.start()
+                deadline = time.monotonic() + self.timeout_seconds
+                try:
+                    try:
+                        raw = result.get(timeout=self.timeout_seconds)
+                    except queue.Empty as exc:
+                        raise TimeoutError("candidate output deadline exceeded") from exc
+                    if isinstance(raw, BaseException):
+                        raise RuntimeError("candidate output read failed") from raw
+                    if len(raw) > cap:
+                        return "X" * (MAX_RESPONSE_CHARACTERS + 1)
+                    child.wait(timeout=max(0.01, deadline - time.monotonic()))
+                    if child.returncode:
+                        raise RuntimeError("candidate process exited unsuccessfully")
+                    return raw.decode("utf-8", errors="strict").strip()
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                    child.wait()
+                    reader.join(timeout=0.5)
+                    child.stdout.close()
+
+
+# Pinned host-owned method: class monkeypatching must not silently turn
+# process-only mode back into an attacker-supplied in-process callback.
+_SUBPROCESS_GENERATE = SubprocessCandidateAdapter.generate
+
+
 def _request(public_start_json: str, history: list[dict[str, Any]], turn: int) -> str:
     return _json({"public_start": json.loads(public_start_json), "history": history,
                   "turn": turn, "response_instructions": _INSTRUCTION})
@@ -313,7 +399,8 @@ def _is_verified_escape(verdict: str, feedback: Mapping[str, Any]) -> bool:
 def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[], Any],
                   adapter: ModelAdapter, *, seed: int = 0,
                   authorize_local_adapter: bool = False,
-                  max_model_calls: int = 32) -> RunReceipt:
+                  max_model_calls: int = 32,
+                  require_process_separation: bool = False) -> RunReceipt:
     """Evaluate one candidate through public JSON only; private session stays host-side.
 
     Passing an arbitrary adapter explicitly requires caller authorization. The
@@ -330,6 +417,11 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
     # Subclasses may override generate() and perform arbitrary, even remote,
     # effects. Only the two exact frozen control implementations are trusted.
     fixed = type(adapter) in (FixedActionAdapter, ReplayAdapter)
+    separated = type(adapter) is SubprocessCandidateAdapter
+    if type(require_process_separation) is not bool:
+        raise ValueError("require_process_separation must be a boolean")
+    if require_process_separation and not separated:
+        raise PermissionError("process-only examination refuses in-process adapters")
     if not fixed and not authorize_local_adapter:
         raise PermissionError("non-control model adapter requires explicit local authorization")
     if isinstance(adapter, OllamaAdapter) and adapter.allow_remote:
@@ -340,7 +432,8 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
     _require_unicode_scalars(model_id)
     # The caller's authorization flag cannot attest an arbitrary adapter's
     # locality, inference weights, provider, or independence from cloud APIs.
-    provenance = "DETERMINISTIC_CONTROL" if fixed else "MODEL_ADAPTER_UNATTESTED"
+    provenance = ("DETERMINISTIC_CONTROL" if fixed else
+                  "MODEL_SUBPROCESS_UNATTESTED" if separated else "MODEL_ADAPTER_UNATTESTED")
     session = session_factory()
     initial = json.loads(_public(_session_view(session, first=True)))
     last_feedback = initial
@@ -354,7 +447,8 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
             break
         request = _request(public_json, history, index)
         try:
-            response = adapter.generate(request, seed=seed)
+            response = (_SUBPROCESS_GENERATE(adapter, request, seed=seed)
+                        if require_process_separation else adapter.generate(request, seed=seed))
         except Exception:
             turns.append(TurnReceipt(request, "", None, "MODEL_CALL_ERROR"))
             final = "MODEL_CALL_ERROR"
