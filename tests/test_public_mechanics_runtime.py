@@ -7,6 +7,9 @@ from pathlib import Path
 import random
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
+
+from labyrinth import public_mechanics_runtime as hybrid_module
 
 from labyrinth.blind_structural_exam import prepare_exam, score_exam, RESPONSE_SCHEMA
 from labyrinth.public_mechanics_runtime import run_public_mechanics
@@ -235,6 +238,23 @@ class PublicMechanicsHybridTests(unittest.TestCase):
         self.assertFalse(self.hybrid.exists(),
                          "corrected response cannot appear without provenance receipt")
         self.assertFalse(unreachable.exists())
+
+    def test_receipt_write_failure_after_preflight_never_emits_corrected_roster(self):
+        self.make_candidate(["UNSAT", "UNSAT"])
+        original_write = hybrid_module._write_once
+
+        def fail_receipt_only(path, doc):
+            if Path(path) == self.report:
+                raise OSError("injected provenance receipt write failure")
+            return original_write(path, doc)
+
+        with patch.object(hybrid_module, "_write_once",
+                          side_effect=fail_receipt_only):
+            with self.assertRaisesRegex(OSError, "injected provenance"):
+                self.run_hybrid()
+        self.assertFalse(self.hybrid.exists(),
+                         "corrected response cannot be published before receipt")
+        self.assertFalse(self.report.exists())
 
     def test_cannot_overwrite_hybrid_or_receipt(self):
         self.make_candidate(["UNSAT", "UNSAT"])
