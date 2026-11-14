@@ -189,6 +189,20 @@ class JsonEnumModelEvidenceTests(unittest.TestCase):
                 expected_observation_sha256=evidence["receipt_sha256"])
         self.assertFalse(self.score.exists())
 
+    def test_changed_model_digest_with_rehashed_receipt_cannot_repin(self):
+        original = self.run_observer()
+        forged = json.loads(self.observation.read_text())
+        forged["declared_model_digest"] = "e" * 64
+        forged.pop("receipt_sha256")
+        forged["receipt_sha256"] = sha256(json.dumps(
+            forged, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
+        self.observation.write_text(json.dumps(forged), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "pin|observation|mismatch"):
+            verify_local_observation(
+                self.observation, original["receipt_sha256"],
+                self.public.read_bytes(), self.responses.read_bytes())
+
     def test_rehashed_forged_json_report_fails_original_pin(self):
         evidence = self.run_observer()
         report = json.loads(self.observation.read_text())
