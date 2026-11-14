@@ -123,11 +123,18 @@ not PASS, until a real probe supplies affirmative evidence.
 - The actual main-based PR #229 passed source tests on Windows and hosted
   Linux. No trained Minotaur checkpoint or semantic generalization
   qualification was demonstrated by those passes.
-- The separate precommit-destination preflight fix on the current branch
-  prevents one reproducible class of partial exam creation (missing
-  output parent). It does **not** promise atomic multi-file publishing
-  or protection from crash, disk-full, permission-denied or a hostile
-  operator changing files after the precommit.
+- The destination preflight fix on the current branch prevents
+  **reproduced** partial exam creation when a public or precommit parent
+  directory does not exist. It also rejects an existing final-component
+  symlink, including a **dangling** link: Python `Path.exists()` is false
+  for a dangling symlink even when an exclusive file create would follow
+  it. On actual Lappy Windows, that defect redirected the PRIVATE answer
+  file and precommit to different, previously nonexistent local targets
+  in isolated temporary tests. The fix fails before any private bytes
+  are published; focused tests and a source mutation verify this.
+  It does **not** promise atomic multi-file publishing, parent-junction
+  security, protection from crash/disk-full, or immunity to a hostile
+  operator changing directories after preflight.
 
 **Disposition:** implement and test narrow source repairs now; hold the
 independent-identity, DACL mutation, key custody and loaded-weight
