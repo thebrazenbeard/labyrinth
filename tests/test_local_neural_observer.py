@@ -152,8 +152,7 @@ class LocalModelEvidenceTests(unittest.TestCase):
             expected_observation_sha256=legacy_sha)
         self.assertEqual(result["invocation_evidence"],
                          "LOCAL_HTTP_V1_FINAL_ONLY_NOT_ATTESTED")
-        self.assertFalse(result["served_weight_bytes_attested"]
-                         if "served_weight_bytes_attested" in result else False)
+        self.assertFalse(result["neural_learning_verified"])
         self.assertFalse(result["independent_custody_verified"])
 
     def test_legacy_v1_truncated_generation_does_not_become_completed_model_evidence(self):
