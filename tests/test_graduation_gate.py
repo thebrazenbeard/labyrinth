@@ -434,6 +434,40 @@ class MinotaurGraduationTests(unittest.TestCase):
         self.assertEqual(decide_graduation(POLICY, GateState(graduated=True), None, None,
                          independent_evaluator_key=None).disposition, "BLOCKED")
 
+    def test_bound_graduated_state_without_evaluation_evidence_is_blocked(self):
+        """A policy hash alone must not turn fabricated durable state into graduation."""
+        qualified = decision(evaluated_receipt())
+        self.assertEqual(qualified.disposition, "GRADUATED")
+        self.assertEqual(decide_graduation(
+            POLICY, qualified.state, None, None,
+            independent_evaluator_key=None).disposition, "GRADUATED")
+        for changed in (
+            {"next_attempt": 1, "consumed_run_ids": frozenset(),
+             "consumed_suite_sha256s": frozenset(),
+             "consumed_eval_case_ids": frozenset(),
+             "consumed_eval_prompt_commitments": frozenset(),
+             "consumed_eval_semantic_family_ids": frozenset()},
+            {"consumed_suite_sha256s": frozenset()},
+            {"consumed_eval_case_ids": frozenset()},
+            {"consumed_eval_prompt_commitments": frozenset()},
+            {"consumed_eval_semantic_family_ids": frozenset()},
+            {"next_attempt": 3},
+        ):
+            with self.subTest(changed=changed):
+                forged = replace(qualified.state, **changed)
+                result = decide_graduation(
+                    POLICY, forged, None, None, independent_evaluator_key=None)
+                self.assertEqual(result.disposition, "BLOCKED")
+
+    def test_bound_stay_state_cannot_skip_consumed_attempt_custody(self):
+        first = decision(evaluated_receipt(candidate_correct=False))
+        self.assertEqual(first.disposition, "STAY")
+        invalid = replace(first.state, consumed_eval_case_ids=frozenset())
+        # A second genuine-format signed attempt must not mask a corrupt
+        # durable record of cases consumed by the first attempt.
+        second = evaluated_receipt(attempt=2, run_id="fresh-run-002")
+        self.assertEqual(decision(second, invalid).disposition, "BLOCKED")
+
     def test_signed_duplicate_json_keys_fail_closed(self):
         raw = b'{"schema":"duplicate","schema":"'+SCHEMA.encode()+b'"}'
         sig = hmac.new(KEY, b"labyrinth.minotaur.graduation.v2\x00"+raw,

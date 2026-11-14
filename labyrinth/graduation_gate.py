@@ -329,6 +329,26 @@ def decide_graduation(
                  or state.consumed_eval_prompt_commitments
                  or state.consumed_eval_semantic_family_ids or state.graduated)):
         return GateDecision("BLOCKED", ("unbound trusted state cannot authorize graduation",), state)
+    # A policy fingerprint is not a qualification receipt. Persisted state
+    # must describe a coherent number of prior signed attempts and enough
+    # unique evaluation identities to account for the frozen minimum roster.
+    # These are NECESSARY bookkeeping invariants, not independent custody
+    # or proof that a signer ran the declared model/checkpoints.
+    completed = state.next_attempt - 1
+    min_eval_cases = completed * policy.min_cases_per_slice * len(policy.required_slices)
+    min_eval_families = (completed * policy.min_semantic_families_per_slice
+                         * len(policy.required_slices))
+    if (completed > policy.max_attempts
+            or len(state.consumed_run_ids) != completed
+            or len(state.consumed_suite_sha256s) != completed
+            or len(state.consumed_eval_case_ids) != len(state.consumed_eval_prompt_commitments)
+            or len(state.consumed_eval_case_ids) < min_eval_cases
+            or len(state.consumed_eval_semantic_family_ids) < min_eval_families
+            or len(state.consumed_eval_semantic_family_ids) > len(state.consumed_eval_case_ids)
+            or (completed == 0 and (state.consumed_eval_case_ids
+                                    or state.consumed_eval_semantic_family_ids
+                                    or state.graduated))):
+        return GateDecision("BLOCKED", ("inconsistent consumed evaluation state",), state)
     if state.graduated:
         return GateDecision("GRADUATED", ("previous trusted graduation retained",), state)
     if state.next_attempt > policy.max_attempts:
