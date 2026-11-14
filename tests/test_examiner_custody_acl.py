@@ -45,6 +45,37 @@ class CustodyAclHostileTests(unittest.TestCase):
         self.assertFalse(result["independent_custody_verified"])
         self.assertFalse(result["acl_isolation_verified"])
 
+    def test_generic_read_flag_on_target_is_not_ignored(self):
+        # Windows ACCESS_MASK GENERIC_READ can survive in negative signed
+        # FileSystemRights; no FILE_READ_DATA low bit is necessary.
+        for mask in (0x80000000, -2147483648):
+            with self.subTest(mask=mask):
+                report = classify_acl_snapshot(fixture(
+                    file_aces=[entry("S-1-5-11", mask)]))
+                self.assertEqual(report["status"], "INSECURE_BROAD_ALLOW")
+                self.assertIn("BROAD_READ_PRIVATE_CASES", report["findings"])
+                self.assertFalse(report["independent_custody_verified"])
+
+    def test_generic_write_on_parent_is_not_ignored(self):
+        report = classify_acl_snapshot(fixture(
+            file_aces=[entry("S-1-5-21-99-1001", 0x1F01FF)],
+            parent_aces=[entry("S-1-5-32-545", 0x40000000)]))
+        self.assertEqual(report["status"], "INSECURE_BROAD_ALLOW")
+        self.assertIn("BROAD_WRITE_ANCESTOR_OF_PRIVATE_CASES", report["findings"])
+
+    def test_generic_all_on_signer_secret_is_read_and_write_exposure(self):
+        report = classify_acl_snapshot(fixture(
+            file_aces=[entry("S-1-5-21-99-1001", 0x1F01FF)],
+            key_aces=[entry("S-1-1-0", 0x10000000)]))
+        self.assertIn("BROAD_READ_SIGNER_PRIVATE_KEY", report["findings"])
+        self.assertIn("BROAD_WRITE_SIGNER_PRIVATE_KEY", report["findings"])
+        self.assertEqual(report["status"], "INSECURE_BROAD_ALLOW")
+
+    def test_generic_execute_alone_is_not_file_read_or_write(self):
+        report = classify_acl_snapshot(fixture(
+            file_aces=[entry("S-1-5-11", 0x20000000)]))
+        self.assertEqual(report["status"], "NO_BROAD_ALLOW_DETECTED_NOT_ATTESTED")
+
     def test_broad_writable_parent_blocks_candidate_exclusion_claim(self):
         case = fixture(file_aces=[entry("S-1-5-21-99-1001", 0x001F01FF)],
                        parent_aces=[entry("S-1-5-32-545", 0x001301BF)])
