@@ -151,6 +151,33 @@ class PublicMechanicsHybridTests(unittest.TestCase):
         self.assertFalse(self.hybrid.exists())
         self.assertFalse(self.report.exists())
 
+    def test_semantically_equal_public_reformat_still_breaks_held_source_pin(self):
+        self.make_candidate(["UNSAT", "UNSAT"])
+        public = json.loads(self.public.read_text(encoding="utf-8"))
+        # Source semantics and prompt remain unchanged; only original bytes
+        # differ. This catches disabled public-SHA checks independently.
+        self.public.write_text(json.dumps(public, indent=2), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "public|source|SHA|digest"):
+            self.run_hybrid()
+        self.assertFalse(self.hybrid.exists())
+        self.assertFalse(self.report.exists())
+
+    def test_fallback_count_and_model_credit_cannot_be_swapped(self):
+        self.make_candidate(["PLAN: A B C", "PLAN: A B C"])
+        report = self.run_hybrid()
+        self.assertEqual(report["status"],
+                         "PUBLIC_RULE_HYBRID_NOT_NEURAL_LEARNING")
+        self.assertEqual(report["candidate_accepted_count"], 1)
+        self.assertEqual(report["symbolic_fallback_count"], 1)
+        self.assertEqual(sum(x["decision_source"] ==
+                             "DETERMINISTIC_PUBLIC_FALLBACK"
+                             for x in report["case_results"]), 1)
+        self.assertEqual(sum(x["decision_source"] ==
+                             "CANDIDATE_PUBLICLY_VERIFIED"
+                             for x in report["case_results"]), 1)
+        self.assertFalse(report["neural_learning_verified"])
+        self.assertNotIn("model_wins", report)
+
     def test_duplicate_reordered_or_extra_candidate_rows_fail_closed(self):
         for variant in ("reordered", "extra", "missing"):
             with self.subTest(variant=variant):
