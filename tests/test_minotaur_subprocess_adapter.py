@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -114,6 +115,27 @@ class ProcessCandidateBoundaryTests(unittest.TestCase):
         self.assertEqual(json.loads(receipt.turns[0].response_text)["action"], "leak")
         self.assertEqual(receipt.adapter_provenance, "MODEL_SUBPROCESS_UNATTESTED")
         self.assertFalse(receipt.verified_escape)
+
+    def test_posix_timeout_kills_stdout_holding_grandchild(self):
+        """A timed-out child cannot leave a same-process-group writer alive."""
+        if os.name != "posix":
+            return  # Windows has no demonstrated process-tree containment.
+        with tempfile.TemporaryDirectory(prefix="minotaur_descendant_") as directory:
+            marker = Path(directory, "survivor.txt")
+            grandchild = ("import pathlib,sys,time;time.sleep(0.75);"
+                          "pathlib.Path(sys.argv[1]).write_text('escaped')")
+            parent = ("import subprocess,sys;"
+                      "subprocess.Popen((sys.executable,'-c',sys.argv[2],sys.argv[1]));"
+                      "print('not JSON',flush=True)")
+            receipt = run_candidate(self.public, self.factory,
+                                    probe((sys.executable, "-c", parent,
+                                           str(marker), grandchild), seconds=0.3),
+                                    authorize_local_adapter=True,
+                                    require_process_separation=True, max_model_calls=1)
+            self.assertEqual(receipt.final_verdict, "MODEL_CALL_ERROR")
+            time.sleep(0.9)  # Exceeds the descendant's known marker deadline.
+            self.assertFalse(marker.exists(),
+                             "Timed-out candidate left a live grandchild behind")
 
 
 if __name__ == "__main__":

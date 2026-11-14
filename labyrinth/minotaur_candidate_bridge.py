@@ -19,6 +19,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import signal
 import subprocess
 import tempfile
 import threading
@@ -280,7 +281,7 @@ class SubprocessCandidateAdapter:
         # import-path overrides are copied from the examiner environment.
         environment = {key: os.environ[key] for key in ("SystemRoot", "WINDIR")
                        if key in os.environ}
-        launch_identity = {}
+        launch_identity = {"start_new_session": True} if os.name == "posix" else {}
         if self.unix_user_id is not None:
             if (os.name != "posix" or os.geteuid() != 0
                     or "microsoft" in os.uname().release.lower()):
@@ -323,7 +324,15 @@ class SubprocessCandidateAdapter:
                         raise RuntimeError("candidate process exited unsuccessfully")
                     return raw.decode("utf-8", errors="strict").strip()
                 finally:
-                    if child.poll() is None:
+                    # Stop cooperative descendants retaining stdout after the
+                    # original candidate exits. Session isolation is not a
+                    # sandbox: a child may still deliberately detach.
+                    if os.name == "posix":
+                        try:
+                            os.killpg(child.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    elif child.poll() is None:
                         child.kill()
                     child.wait()
                     reader.join(timeout=0.5)
