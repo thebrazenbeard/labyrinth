@@ -158,5 +158,24 @@ class ProcessCandidateBoundaryTests(unittest.TestCase):
                         "detached stdout holder blocked bounded candidate cleanup")
 
 
+    def test_windows_inherited_stdout_holder_respects_deadline(self):
+        """A surviving Windows descendant cannot extend the examiner's deadline."""
+        if os.name != "nt":
+            return
+        # Synthetic 2.5-second descendant inherits the pipe; it exits itself.
+        grandchild = "import time;time.sleep(2.5)"
+        parent = ("import subprocess,sys;"
+                  "subprocess.Popen((sys.executable,'-c',sys.argv[1]),"
+                  "stdin=subprocess.DEVNULL);"
+                  "print('not JSON',flush=True)")
+        started = time.monotonic()
+        with self.assertRaises(TimeoutError):
+            probe((sys.executable, "-c", parent, grandchild),
+                  seconds=0.25).generate('{"public":true}')
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 1.4,
+                        "Windows inherited stdout extended the candidate deadline")
+
+
 if __name__ == "__main__":
     unittest.main()
