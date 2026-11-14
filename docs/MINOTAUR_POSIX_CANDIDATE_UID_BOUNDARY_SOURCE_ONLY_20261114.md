@@ -34,9 +34,14 @@ is valid for *that file* but was not a security boundary. A later real hostile
 probe showed a child with UID/GID 65534 could successfully invoke Windows
 `cmd.exe /c whoami` and obtain `lappy\\patri`, bypassing the Linux identity.
 A new WSL-rejection test was RED (PermissionError not raised), then GREEN when
-the constructor and launch path refused WSL UID mode. The POSIX physical test
-now runs only on native Linux root; on WSL it is intentionally skipped. This
-exact native-Linux production path has not yet been physically exercised.
+the constructor and launch path refused WSL UID mode. The POSIX physical
+file-denial branch now runs only on native Linux root; on WSL, Windows, and
+nonroot Linux the tests actively assert correct refusal without skips. The
+first hosted neural-CPU run #43636307867 failed because its strict no-skip
+test runner rejected two WSL/native-root-specific skips (135 tests, 2 skipped,
+zero assertions failed). The tests were corrected to exercise the available
+host contract instead. The actual native-Linux privileged production path
+has not yet been physically exercised.
 
 > **HOSTILE LIMIT:** This verifies DAC for one specific private POSIX file.
 > A process can still access other same-world-readable paths and local/network

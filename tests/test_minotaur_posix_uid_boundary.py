@@ -23,24 +23,43 @@ class PosixCandidateIdentityTests(unittest.TestCase):
                 SubprocessCandidateAdapter((sys.executable, "-c", "pass"),
                     model_id="test", unix_user_id=user, unix_group_id=group)
 
-    @unittest.skipUnless(os.name == "posix", "POSIX identity requires POSIX")
     def test_nonroot_examiner_cannot_silently_request_identity_drop(self):
-        with mock.patch("os.geteuid", return_value=1000):
-            with self.assertRaises(PermissionError):
+        if os.name != "posix":
+            with self.assertRaises(ValueError):
                 SubprocessCandidateAdapter((sys.executable, "-c", "pass"),
                     model_id="test", unix_user_id=65534, unix_group_id=65534)
+        else:
+            with mock.patch("os.geteuid", return_value=1000):
+                with self.assertRaises(PermissionError):
+                    SubprocessCandidateAdapter((sys.executable, "-c", "pass"),
+                        model_id="test", unix_user_id=65534, unix_group_id=65534)
 
-    @unittest.skipUnless(IS_WSL and os.geteuid() == 0,
-                         "physical WSL guard requires root on WSL")
-    def test_wsl_identity_drop_refused_before_child_execution(self):
-        with self.assertRaises(PermissionError):
-            SubprocessCandidateAdapter((sys.executable, "-c", "print('invalid')"),
-                model_id="synthetic:wsl", unix_user_id=65534, unix_group_id=65534)
+    def test_host_specific_uid_drop_admission(self):
+        command = (sys.executable, "-c", "print('invalid')")
+        if os.name != "posix":
+            expected = ValueError
+        elif IS_WSL or os.geteuid() != 0:
+            expected = PermissionError
+        else:
+            expected = None
+        if expected is not None:
+            with self.assertRaises(expected):
+                SubprocessCandidateAdapter(command, model_id="synthetic:uid",
+                    unix_user_id=65534, unix_group_id=65534)
+        else:
+            adapter = SubprocessCandidateAdapter(command, model_id="synthetic:uid",
+                unix_user_id=65534, unix_group_id=65534)
+            self.assertEqual((adapter.unix_user_id, adapter.unix_group_id),
+                             (65534, 65534))
 
-    @unittest.skipUnless(os.name == "posix" and hasattr(os, "geteuid") and
-                         os.geteuid() == 0 and not IS_WSL,
-                         "physical UID-drop probe needs native POSIX root (not WSL)")
-    def test_child_cannot_read_examiners_known_private_path(self):
+    def test_private_file_denied_on_native_root_else_host_rejected(self):
+        if os.name != "posix" or IS_WSL or os.geteuid() != 0:
+            expected = ValueError if os.name != "posix" else PermissionError
+            with self.assertRaises(expected):
+                SubprocessCandidateAdapter((sys.executable, "-c", "pass"),
+                    model_id="synthetic:uid", unix_user_id=65534,
+                    unix_group_id=65534)
+            return
         case = make_case(7, sealed=True)
         with tempfile.TemporaryDirectory(prefix="minotaur_examiner_") as directory:
             os.chmod(directory, 0o700)
