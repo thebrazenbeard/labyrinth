@@ -68,8 +68,16 @@ def _verify_bundle_bytes(bundle, *, expected_manifest_sha256, ready_name):
     if getattr(root.lstat(), "st_file_attributes", 0) & REPARSE:
         raise ValueError("ready exam bundle is a redirected reparse directory")
     _safe_ancestors(root)
-    if {p.name for p in root.iterdir()} != FILES:
+    members = tuple(root.iterdir())
+    if {p.name for p in members} != FILES:
         raise ValueError("ready exam bundle must contain exactly four files")
+    for member in members:
+        source = member.lstat()
+        if (not stat.S_ISREG(source.st_mode)
+                or (getattr(source, "st_file_attributes", 0) & REPARSE)):
+            raise ValueError("exam bundle members must be regular nonredirected files")
+        if source.st_nlink != 1:
+            raise ValueError("exam bundle member hardlink count must equal one")
     manifest_bytes = _file_bytes(root / "manifest.json", MAX_BYTES)
     if _sha(manifest_bytes) != expected_manifest_sha256:
         raise ValueError("original exam manifest differs from caller-held SHA pin")

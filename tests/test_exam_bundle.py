@@ -209,6 +209,21 @@ class StagedExamBundleTests(unittest.TestCase):
             exam_bundle.verify_exam_bundle(
                 self.bundle, expected_manifest_sha256=prepared["manifest_sha256"])
 
+    def test_hardlinked_bundle_file_rejected_despite_valid_manifest(self):
+        # Same bytes and original manifest SHA do not establish exclusive custody.
+        for name in ("public.json", "private.json", "precommit.json", "manifest.json"):
+            with self.subTest(name=name):
+                ready = self.root / ("ready-" + name.replace(".", "-"))
+                receipt = exam_bundle.prepare_exam_bundle(
+                    ready, count=2, rng=random.Random(50011))
+                linked = ready / name
+                outside = self.root / ("external-" + name)
+                os.link(linked, outside)
+                self.assertGreater(linked.stat().st_nlink, 1)
+                with self.assertRaisesRegex(ValueError, "hardlink|link count|multiple links"):
+                    exam_bundle.verify_exam_bundle(
+                        ready, expected_manifest_sha256=receipt["manifest_sha256"])
+
     def test_wrong_held_manifest_pin_rejected(self):
         self.create()
         with self.assertRaisesRegex(ValueError, "manifest|pin|SHA"):
