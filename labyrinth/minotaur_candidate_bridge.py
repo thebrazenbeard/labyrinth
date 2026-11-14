@@ -18,12 +18,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import queue
 import select
 import signal
 import subprocess
 import tempfile
-import threading
 import time
 from typing import Any, Callable, Mapping
 
@@ -258,6 +256,47 @@ def _read_stdout_posix(pipe: Any, *, cap: int, deadline: float) -> bytes:
     return b"".join(fragments)
 
 
+def _read_stdout_windows(pipe: Any, *, cap: int, deadline: float) -> bytes:
+    """Poll an anonymous Windows pipe without an EOF-blocked reader thread.
+
+    A surviving child can inherit stdout; PeekNamedPipe reports readable bytes
+    without waiting for that child to exit. This bounds examiner waiting, not
+    process-tree containment or child access to same-user host resources.
+    """
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+
+    peek = ctypes.WinDLL("kernel32", use_last_error=True).PeekNamedPipe
+    peek.argtypes = (wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+                     ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD),
+                     ctypes.POINTER(wintypes.DWORD))
+    peek.restype = wintypes.BOOL
+    descriptor = pipe.fileno()
+    handle = msvcrt.get_osfhandle(descriptor)
+    fragments: list[bytes] = []
+    remaining_bytes = cap + 1
+    available = wintypes.DWORD()
+    while remaining_bytes:
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0:
+            raise TimeoutError("candidate output deadline exceeded")
+        if not peek(handle, None, 0, None, ctypes.byref(available), None):
+            error = ctypes.get_last_error()
+            if error in (109, 232):  # ERROR_BROKEN_PIPE or ERROR_NO_DATA
+                break
+            raise OSError(error, "candidate output pipe peek failed")
+        if available.value:
+            data = os.read(descriptor, min(remaining_bytes, available.value))
+            if not data:
+                break
+            fragments.append(data)
+            remaining_bytes -= len(data)
+        else:
+            time.sleep(min(0.01, remaining_seconds))
+    return b"".join(fragments)
+
+
 class SubprocessCandidateAdapter:
     """Optional public-JSON child protocol, NOT an OS access-control boundary.
 
@@ -317,40 +356,27 @@ class SubprocessCandidateAdapter:
                                     "group": self.unix_group_id, "extra_groups": ()})
         # Feed stdin from an on-disk PUBLIC request so neither side can
         # deadlock writing an input pipe while the child fills stdout.
-        # POSIX uses deadline-aware pipe polling; Windows retains its bounded
-        # daemon reader. Neither path establishes a sandbox or model identity.
+        # POSIX and Windows use deadline-aware pipe polling. Neither path
+        # establishes a sandbox, OS process containment or model identity.
         with tempfile.TemporaryDirectory(prefix="labyrinth_candidate_") as directory:
             request_file = Path(directory) / "public_request.json"
             request_file.write_bytes(request)
             with request_file.open("rb") as source:
                 child = subprocess.Popen(
                     self.command, stdin=source, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, cwd=directory, env=environment,
-                    shell=False, **launch_identity)
+                    # Windows descendants can keep an inherited CWD open after
+                    # their parent exits. Never make the disposable request
+                    # directory the child's current working directory.
+                    stderr=subprocess.DEVNULL,
+                    cwd=(tempfile.gettempdir() if os.name == "nt" else directory),
+                    env=environment, shell=False, **launch_identity)
                 cap = MAX_RESPONSE_CHARACTERS * 4
                 deadline = time.monotonic() + self.timeout_seconds
-                reader: threading.Thread | None = None
-                if os.name != "posix":
-                    # Windows pipe waits still use the legacy daemon reader;
-                    # independent Windows tree containment is NOT established.
-                    result: queue.Queue[bytes | BaseException] = queue.Queue(maxsize=1)
-                    def read_bounded() -> None:
-                        try:
-                            result.put(child.stdout.read(cap + 1))
-                        except BaseException as exc:
-                            result.put(exc)
-                    reader = threading.Thread(target=read_bounded, daemon=True)
-                    reader.start()
                 try:
                     if os.name == "posix":
                         raw = _read_stdout_posix(child.stdout, cap=cap, deadline=deadline)
                     else:
-                        try:
-                            raw = result.get(timeout=self.timeout_seconds)
-                        except queue.Empty as exc:
-                            raise TimeoutError("candidate output deadline exceeded") from exc
-                        if isinstance(raw, BaseException):
-                            raise RuntimeError("candidate output read failed") from raw
+                        raw = _read_stdout_windows(child.stdout, cap=cap, deadline=deadline)
                     if len(raw) > cap:
                         return "X" * (MAX_RESPONSE_CHARACTERS + 1)
                     child.wait(timeout=max(0.01, deadline - time.monotonic()))
@@ -369,8 +395,6 @@ class SubprocessCandidateAdapter:
                     elif child.poll() is None:
                         child.kill()
                     child.wait()
-                    if reader is not None:
-                        reader.join(timeout=0.5)
                     child.stdout.close()
 
 
