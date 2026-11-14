@@ -127,6 +127,35 @@ class LocalModelEvidenceTests(unittest.TestCase):
                                      self.public.read_bytes(), self.responses.read_bytes())
         self.assertFalse(self.score_file.exists())
 
+    def test_legacy_v1_receipt_stays_replayable_with_weaker_evidence_label(self):
+        current = self.run_observe()
+        legacy = json.loads(self.observation.read_text(encoding="utf-8"))
+        legacy["schema"] = "labyrinth.blind-model-local-http.v1"
+        legacy.pop("model_tag_check_policy")
+        legacy.pop("model_tag_check_count")
+        legacy.pop("receipt_sha256")
+        legacy_sha = sha256(json.dumps(
+            legacy, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False).encode("utf-8")).hexdigest()
+        legacy["receipt_sha256"] = legacy_sha
+        self.observation.write_text(json.dumps(legacy), encoding="utf-8")
+        verified = verify_local_observation(
+            self.observation, legacy_sha, self.public.read_bytes(),
+            self.responses.read_bytes())
+        self.assertEqual(verified["evidence"],
+                         "LOCAL_HTTP_V1_FINAL_ONLY_NOT_ATTESTED")
+        self.assertNotEqual(legacy_sha, current["receipt_sha256"])
+        result = score_exam(
+            self.private, self.public, self.precommit, self.responses,
+            self.score_file, expected_precommit_sha256=self.plan["receipt_sha256"],
+            observation_path=self.observation,
+            expected_observation_sha256=legacy_sha)
+        self.assertEqual(result["invocation_evidence"],
+                         "LOCAL_HTTP_V1_FINAL_ONLY_NOT_ATTESTED")
+        self.assertFalse(result["served_weight_bytes_attested"]
+                         if "served_weight_bytes_attested" in result else False)
+        self.assertFalse(result["independent_custody_verified"])
+
     def test_score_can_check_original_http_observation_digest_without_promoting_custody(self):
         receipt = self.run_observe()
         result = score_exam(
