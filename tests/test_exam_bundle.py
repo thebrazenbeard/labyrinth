@@ -224,6 +224,43 @@ class StagedExamBundleTests(unittest.TestCase):
                     exam_bundle.verify_exam_bundle(
                         ready, expected_manifest_sha256=receipt["manifest_sha256"])
 
+    def test_hardlink_created_during_manifest_read_invalidates_bundle(self):
+        prepared = self.create()
+        external = self.root / "raced-external-manifest.json"
+        original = exam_bundle._file_bytes
+
+        def link_during_read(path, maximum):
+            if Path(path) == self.bundle / "manifest.json" and not external.exists():
+                os.link(path, external)
+            return original(path, maximum)
+
+        with patch.object(exam_bundle, "_file_bytes", side_effect=link_during_read):
+            with self.assertRaisesRegex(ValueError, "hardlink|link count"):
+                exam_bundle.verify_exam_bundle(
+                    self.bundle, expected_manifest_sha256=prepared["manifest_sha256"])
+        self.assertEqual((self.bundle / "manifest.json").stat().st_nlink, 2)
+
+    def test_symlink_swap_during_manifest_read_invalidates_bundle(self):
+        if os.name != "posix":
+            self.skipTest("repro uses POSIX symlink replacement")
+        prepared = self.create()
+        source = self.bundle / "manifest.json"
+        external = self.root / "raced-external-copy.json"
+        original = exam_bundle._file_bytes
+
+        def redirect_during_read(path, maximum):
+            if Path(path) == source and not external.exists():
+                external.write_bytes(original(path, maximum))
+                source.unlink()
+                source.symlink_to(external)
+            return original(path, maximum)
+
+        with patch.object(exam_bundle, "_file_bytes", side_effect=redirect_during_read):
+            with self.assertRaisesRegex(ValueError, "redirect|symlink|regular"):
+                exam_bundle.verify_exam_bundle(
+                    self.bundle, expected_manifest_sha256=prepared["manifest_sha256"])
+        self.assertTrue(source.is_symlink())
+
     def test_wrong_held_manifest_pin_rejected(self):
         self.create()
         with self.assertRaisesRegex(ValueError, "manifest|pin|SHA"):

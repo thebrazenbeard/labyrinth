@@ -57,6 +57,17 @@ def _original_bytes(directory: Path):
     return raw_private, raw_public, raw_precommit, original
 
 
+def _check_bundle_members(members) -> None:
+    """Check a static filesystem snapshot; this is not race-free custody."""
+    for member in members:
+        source = member.lstat()
+        if (not stat.S_ISREG(source.st_mode)
+                or (getattr(source, "st_file_attributes", 0) & REPARSE)):
+            raise ValueError("exam bundle members must be regular nonredirected files")
+        if source.st_nlink != 1:
+            raise ValueError("exam bundle member hardlink count must equal one")
+
+
 def _verify_bundle_bytes(bundle, *, expected_manifest_sha256, ready_name):
     """Validate exact staged/ready contents against their intended final name."""
     if (type(expected_manifest_sha256) is not str
@@ -71,13 +82,7 @@ def _verify_bundle_bytes(bundle, *, expected_manifest_sha256, ready_name):
     members = tuple(root.iterdir())
     if {p.name for p in members} != FILES:
         raise ValueError("ready exam bundle must contain exactly four files")
-    for member in members:
-        source = member.lstat()
-        if (not stat.S_ISREG(source.st_mode)
-                or (getattr(source, "st_file_attributes", 0) & REPARSE)):
-            raise ValueError("exam bundle members must be regular nonredirected files")
-        if source.st_nlink != 1:
-            raise ValueError("exam bundle member hardlink count must equal one")
+    _check_bundle_members(members)
     manifest_bytes = _file_bytes(root / "manifest.json", MAX_BYTES)
     if _sha(manifest_bytes) != expected_manifest_sha256:
         raise ValueError("original exam manifest differs from caller-held SHA pin")
@@ -102,6 +107,9 @@ def _verify_bundle_bytes(bundle, *, expected_manifest_sha256, ready_name):
             or manifest_bytes != _canonical(manifest) + b"\n"):
         raise ValueError("invalid original exam bundle manifest")
     raw_private, raw_public, raw_precommit, plan = _original_bytes(root)
+    # Reject file alias changes that appear during validation. This narrows
+    # the check/read window; without OS-held handles/ACLs it is NOT race-free.
+    _check_bundle_members(members)
     if (manifest["private_sha256"] != _sha(raw_private)
             or manifest["public_sha256"] != _sha(raw_public)
             or manifest["precommit_sha256"] != _sha(raw_precommit)

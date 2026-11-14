@@ -83,6 +83,15 @@ A fresh Windows regression demonstrated that all four original member types
 regular files while the caller-held original manifest SHA still verified. A
 new red-first test now rejects each; removal of the hardlink-count check
 reproduces the failure. Linux and Windows bundle tests exercise the rule.
+A second Windows regression injects an external hardlink precisely during
+the manifest read, after the initial static link-count check. At the parent
+head this passed verification (RED failure of the new assertion); a
+post-read stat check rejects it (GREEN). A separate POSIX symlink-swap test
+already passed at the parent head due to existing downstream validation
+and remains a defense-in-depth regression. These checks do not close an
+adversarial rename/unlink race: an alias can be introduced or removed outside
+the two brief check windows, and a same-user candidate still has access if
+the filesystem permits it.
 
 This is **not** a guaranteed crash-atomic or power-loss-durable directory:
 a crash before the final rename may leave an unready staging directory;
