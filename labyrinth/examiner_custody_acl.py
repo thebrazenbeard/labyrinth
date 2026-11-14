@@ -240,6 +240,11 @@ def audit_local_examiner_custody(private_cases_path, out_path, *,
     return _write_once(out, _receipt(report))
 
 
+def probe_local_private_read_access(private_cases_path, out_path, *, examiner_sid=None):
+    """Attempt a real handle-only read-open with current Windows process token."""
+    raise NotImplementedError("current-process private-file handle probe is not implemented")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--private", required=True)
