@@ -54,14 +54,16 @@ def _original_bytes(directory: Path):
     return raw_private, raw_public, raw_precommit, original
 
 
-def verify_exam_bundle(bundle, *, expected_manifest_sha256):
-    """Validate exactly one complete ready directory with caller-held SHA."""
+def _verify_bundle_bytes(bundle, *, expected_manifest_sha256, ready_name):
+    """Validate exact staged/ready contents against their intended final name."""
     if (type(expected_manifest_sha256) is not str
             or SHA.fullmatch(expected_manifest_sha256) is None):
         raise ValueError("expected original exam manifest SHA pin is invalid")
     root = Path(bundle)
     if root.is_symlink() or not root.is_dir():
         raise ValueError("ready exam bundle directory is missing or redirected")
+    if getattr(root.lstat(), "st_file_attributes", 0) & REPARSE:
+        raise ValueError("ready exam bundle is a redirected reparse directory")
     _safe_ancestors(root)
     if {p.name for p in root.iterdir()} != FILES:
         raise ValueError("ready exam bundle must contain exactly four files")
@@ -70,12 +72,14 @@ def verify_exam_bundle(bundle, *, expected_manifest_sha256):
         raise ValueError("original exam manifest differs from caller-held SHA pin")
     manifest = _load(manifest_bytes)
     required = {"schema", "exam_id", "case_count", "status",
-                "private_sha256", "public_sha256", "precommit_sha256",
+                "ready_directory_name", "private_sha256", "public_sha256",
+                "precommit_sha256",
                 "precommit_receipt_sha256", "independent_custody_verified",
                 "neural_learning_verified"}
     if (type(manifest) is not dict or set(manifest) != required
             or manifest.get("schema") != SCHEMA
             or manifest.get("status") != "SOURCE_ONLY_READY_NOT_INDEPENDENT"
+            or manifest.get("ready_directory_name") != ready_name
             or manifest.get("independent_custody_verified") is not False
             or manifest.get("neural_learning_verified") is not False
             or type(manifest.get("case_count")) is not int
@@ -100,6 +104,13 @@ def verify_exam_bundle(bundle, *, expected_manifest_sha256):
         "neural_learning_verified": False,
         "verification_class": "LOCAL_SOURCE_ONLY_NOT_INDEPENDENT",
     }
+
+
+def verify_exam_bundle(bundle, *, expected_manifest_sha256):
+    """Reject unpublished staging names and verify a caller-pinned ready bundle."""
+    return _verify_bundle_bytes(
+        bundle, expected_manifest_sha256=expected_manifest_sha256,
+        ready_name=Path(bundle).name)
 
 
 def prepare_exam_bundle(destination, *, count=8, rng=None, worlds=None):
@@ -127,6 +138,7 @@ def prepare_exam_bundle(destination, *, count=8, rng=None, worlds=None):
             "schema": SCHEMA, "exam_id": plan["exam_id"],
             "case_count": plan["case_count"],
             "status": "SOURCE_ONLY_READY_NOT_INDEPENDENT",
+            "ready_directory_name": ready.name,
             "private_sha256": _sha(raw_private),
             "public_sha256": _sha(raw_public),
             "precommit_sha256": _sha(raw_precommit),
@@ -136,7 +148,9 @@ def prepare_exam_bundle(destination, *, count=8, rng=None, worlds=None):
         }
         _write_once(stage / "manifest.json", manifest)
         manifest_pin = _sha(_canonical(manifest) + b"\n")
-        verify_exam_bundle(stage, expected_manifest_sha256=manifest_pin)
+        _verify_bundle_bytes(
+            stage, expected_manifest_sha256=manifest_pin,
+            ready_name=ready.name)
         if ready.exists() or ready.is_symlink():
             raise FileExistsError("ready bundle was created during staging")
         os.rename(stage, ready)
