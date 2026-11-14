@@ -28,6 +28,11 @@ BROAD_SIDS = {
     "S-1-5-32-546",  # Builtin Guests
     "S-1-5-32-547",  # Power Users
 }
+# Generic ACCESS_MASK flags may survive as high bits in FileSystemRights,
+# including negative signed masks returned by Windows.
+GENERIC_READ = 0x80000000
+GENERIC_WRITE = 0x40000000
+GENERIC_ALL = 0x10000000
 READ_DATA = 0x00000001
 WRITE_DANGEROUS = (
     0x00000002  # WriteData/CreateFiles
@@ -149,9 +154,9 @@ def classify_acl_snapshot(snapshot):
                     continue
                 mask = ace["mask"] & 0xFFFFFFFF
                 suffix = role.upper()
-                if i == 0 and mask & READ_DATA:
+                if i == 0 and mask & (READ_DATA | GENERIC_READ | GENERIC_ALL):
                     findings.add("BROAD_READ_" + suffix)
-                if mask & WRITE_DANGEROUS:
+                if mask & (WRITE_DANGEROUS | GENERIC_WRITE | GENERIC_ALL):
                     findings.add(("BROAD_WRITE_" + suffix if i == 0
                                   else "BROAD_WRITE_ANCESTOR_OF_" + suffix))
     if "private_cases" not in seen_roles:
