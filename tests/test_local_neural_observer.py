@@ -92,7 +92,10 @@ class LocalModelEvidenceTests(unittest.TestCase):
         observed = self.run_observe()
         public = json.loads(self.public.read_text(encoding="utf-8"))
         answers = json.loads(self.responses.read_text(encoding="utf-8"))
-        self.assertEqual(self.state["gets"], 2)
+        self.assertEqual(self.state["gets"], 5)
+        self.assertEqual(observed["model_tag_check_count"], 5)
+        self.assertEqual(observed["model_tag_check_policy"],
+                         "INITIAL_AND_PER_TRIAL_BEFORE_AFTER")
         self.assertEqual(len(self.state["posts"]), 2)
         self.assertEqual([call["prompt"] for call in self.state["posts"]],
                          [row["prompt"] for row in public["trials"]])
