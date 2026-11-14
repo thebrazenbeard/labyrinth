@@ -123,7 +123,8 @@ def classify_acl_snapshot(snapshot):
         role = target["role"]
         seen_roles.add(role)
         layers = target["layers"]
-        if not layers[0].get("is_target", False):
+        if (type(layers[0]) is not dict
+                or layers[0].get("is_target") is not True):
             incomplete = True
         for i, layer in enumerate(layers):
             if (type(layer) is not dict or set(layer) != {"is_target", "aces"}
