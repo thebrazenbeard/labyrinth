@@ -18,7 +18,8 @@ from .blind_structural_exam import PUBLIC_SCHEMA, RESPONSE_SCHEMA, _public_trial
 from .live_model_probe import (_NoRedirect, _canonical, _file_bytes, _http_json,
                                _load, _receipt, _write_once, ID, SHA, MAX_CASE_BYTES)
 
-OBSERVATION_SCHEMA = "labyrinth.blind-model-local-http.v1"
+OBSERVATION_SCHEMA = "labyrinth.blind-model-local-http.v2"
+LEGACY_OBSERVATION_SCHEMA = "labyrinth.blind-model-local-http.v1"
 MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
 
 
@@ -191,14 +192,17 @@ def verify_local_observation(observation_path, expected_observation_sha256,
             or len(responses["responses"]) != len(bundle["trials"])):
         raise ValueError("invalid candidate response file")
     doc = _load(_file_bytes(observation_path, MAX_CASE_BYTES))
-    expected = {"schema", "status", "exam_id", "trial_count",
-                "public_file_sha256", "responses_file_sha256", "model_tag",
-                "declared_model_digest", "model_tag_check_policy",
-                "model_tag_check_count", "loopback_endpoint", "trials",
-                "served_weight_bytes_attested", "independent_custody_verified",
-                "neural_learning_verified", "limitations", "receipt_sha256"}
-    if (type(doc) is not dict or set(doc) != expected
-            or doc["schema"] != OBSERVATION_SCHEMA
+    common_fields = {"schema", "status", "exam_id", "trial_count",
+                     "public_file_sha256", "responses_file_sha256", "model_tag",
+                     "declared_model_digest", "loopback_endpoint", "trials",
+                     "served_weight_bytes_attested", "independent_custody_verified",
+                     "neural_learning_verified", "limitations", "receipt_sha256"}
+    is_v2 = type(doc) is dict and doc.get("schema") == OBSERVATION_SCHEMA
+    is_v1 = type(doc) is dict and doc.get("schema") == LEGACY_OBSERVATION_SCHEMA
+    expected = common_fields | ({"model_tag_check_policy",
+                                 "model_tag_check_count"} if is_v2 else set())
+    if (type(doc) is not dict or not (is_v1 or is_v2)
+            or set(doc) != expected
             or doc["status"] != "LOCAL_LOOPBACK_HTTP_ONLY"
             or type(doc["receipt_sha256"]) is not str
             or doc["receipt_sha256"] != expected_observation_sha256
@@ -213,9 +217,10 @@ def verify_local_observation(observation_path, expected_observation_sha256,
             or MODEL.fullmatch(doc["model_tag"]) is None
             or type(doc["declared_model_digest"]) is not str
             or SHA.fullmatch(doc["declared_model_digest"]) is None
-            or doc["model_tag_check_policy"] != "INITIAL_AND_PER_TRIAL_BEFORE_AFTER"
-            or type(doc["model_tag_check_count"]) is not int
-            or doc["model_tag_check_count"] != 1 + 2 * len(bundle["trials"])
+            or (is_v2 and (
+                doc["model_tag_check_policy"] != "INITIAL_AND_PER_TRIAL_BEFORE_AFTER"
+                or type(doc["model_tag_check_count"]) is not int
+                or doc["model_tag_check_count"] != 1 + 2 * len(bundle["trials"])))
             or doc["served_weight_bytes_attested"] is not False
             or doc["independent_custody_verified"] is not False
             or doc["neural_learning_verified"] is not False
@@ -239,13 +244,18 @@ def verify_local_observation(observation_path, expected_observation_sha256,
                 _sha(question["prompt"].encode("utf-8")) or
                 observed["response_sha256"] !=
                 _sha(answer["response"].encode("utf-8")) or
-                observed["done_reason"] != "stop" or
+                observed["done_reason"] not in (
+                    ("stop",) if is_v2 else ("stop", "length")) or
                 type(observed["eval_count"]) is not int or
                 not 0 <= observed["eval_count"] <= 100000 or
                 type(observed["elapsed_ms"]) is not int or
                 not 0 <= observed["elapsed_ms"] <= 120000):
             raise ValueError("response bytes disagree with original local observation")
-    return {"evidence": "LOCAL_HTTP_SELF_REPORTED_NOT_ATTESTED",
+    # Historical V1 evidence is deliberately weaker. Older reports remain
+    # auditable but never gain checks that were not executed at collection.
+    evidence = ("LOCAL_HTTP_SELF_REPORTED_NOT_ATTESTED" if is_v2
+                else "LOCAL_HTTP_V1_FINAL_ONLY_NOT_ATTESTED")
+    return {"evidence": evidence,
             "declared_model_digest": doc["declared_model_digest"],
             "model_tag": doc["model_tag"],
             "served_weight_bytes_attested": False,
