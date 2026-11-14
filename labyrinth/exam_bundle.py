@@ -71,6 +71,10 @@ def _verify_bundle_bytes(bundle, *, expected_manifest_sha256, ready_name):
     if _sha(manifest_bytes) != expected_manifest_sha256:
         raise ValueError("original exam manifest differs from caller-held SHA pin")
     manifest = _load(manifest_bytes)
+    if (type(manifest) is dict
+            and "ready_directory_name" in manifest
+            and manifest["ready_directory_name"] != ready_name):
+        raise ValueError("ready bundle publication name differs from manifest")
     required = {"schema", "exam_id", "case_count", "status",
                 "ready_directory_name", "private_sha256", "public_sha256",
                 "precommit_sha256",
