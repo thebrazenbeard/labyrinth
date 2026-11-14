@@ -156,6 +156,24 @@ class LocalModelEvidenceTests(unittest.TestCase):
                          if "served_weight_bytes_attested" in result else False)
         self.assertFalse(result["independent_custody_verified"])
 
+    def test_legacy_v1_truncated_generation_does_not_become_completed_model_evidence(self):
+        self.run_observe()
+        v1 = json.loads(self.observation.read_text(encoding="utf-8"))
+        v1["schema"] = "labyrinth.blind-model-local-http.v1"
+        v1.pop("model_tag_check_policy")
+        v1.pop("model_tag_check_count")
+        v1["trials"][0]["done_reason"] = "length"
+        v1.pop("receipt_sha256")
+        v1_sha = sha256(json.dumps(
+            v1, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False).encode("utf-8")).hexdigest()
+        v1["receipt_sha256"] = v1_sha
+        self.observation.write_text(json.dumps(v1), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "response|incomplete|observation"):
+            verify_local_observation(
+                self.observation, v1_sha, self.public.read_bytes(),
+                self.responses.read_bytes())
+
     def test_score_can_check_original_http_observation_digest_without_promoting_custody(self):
         receipt = self.run_observe()
         result = score_exam(
