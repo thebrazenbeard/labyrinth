@@ -18,7 +18,11 @@ discordances from the same frozen exam, rather than comparing unrelated
 aggregate reports. A 12-case on-host zero-update control got
 6/12 by always claiming UNSAT; a public-rule symbolic solver got 12/12 with
 six actual winning traces. Neither is a neural-learning result or independent
-examiner-custody qualification.
+examiner-custody qualification. A [read-only Windows examiner ACL preflight](docs/MINOTAUR_EXAMINER_CUSTODY_PREFLIGHT_V1.md)
+now detects inherited broad access to the actual private answer file and
+its ancestors; Lappy's current private exam fails with inherited
+Authenticated Users Modify access. This negative finding is not a
+separate-principal custody attestation or permission repair.
 
 ## Run it
 
