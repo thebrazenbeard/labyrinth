@@ -209,17 +209,26 @@ def prepare_exam(private_path, public_path, precommit_path, *,
                "trials": trials}
     public = {"schema": PUBLIC_SCHEMA, "exam_id": exam_id,
               "trials": [_public_trial(case) for case in trials]}
-    _write_once(private_path, private)
-    _write_once(public_path, public)
-    raw_private = _file_bytes(private_path, MAX_BYTES)
-    raw_public = _file_bytes(public_path, MAX_BYTES)
-    plan = {
+    # Commit to the exact bytes we INTEND to publish before exposing the
+    # private answers. A public/receipt write failure must not orphan secrets.
+    raw_private = _canonical(private) + b"\n"
+    raw_public = _canonical(public) + b"\n"
+    plan = _receipt({
         "schema": COMMIT_SCHEMA, "exam_id": exam_id, "case_count": n,
         "private_sha256": _sha(raw_private), "public_sha256": _sha(raw_public),
         "status": "NOT_EXECUTED",
         "custody_class": "CALLER_CONTROLLED_UNATTESTED",
-        "independent_custody_verified": False}
-    return _write_once(precommit_path, _receipt(plan))
+        "independent_custody_verified": False})
+    _write_once(public_path, public)
+    if _file_bytes(public_path, MAX_BYTES) != raw_public:
+        raise ValueError("published public exam differs from source commitment")
+    _write_once(precommit_path, plan)
+    if _file_bytes(precommit_path, MAX_BYTES) != _canonical(plan) + b"\n":
+        raise ValueError("published precommit differs from intended receipt")
+    _write_once(private_path, private)
+    if _file_bytes(private_path, MAX_BYTES) != raw_private:
+        raise ValueError("published private exam differs from source commitment")
+    return plan
 
 
 def _read_bundle(private_path, public_path, precommit_path,
