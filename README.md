@@ -4,6 +4,24 @@ Labyrinth is an offline-first **reasoning challenge, training-lifecycle, and eva
 
 It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path. A bounded CPU smoke run on Lappy demonstrated numerical adapter changes and fresh-process reload with a tiny, **randomly initialized** HF model; it did **not** demonstrate improved reasoning.
 
+## Source-only public mechanics runtime
+
+The isolated finite-transition examiner and hybrid runtime are available
+without installing the full experimental Minotaur PR stack. Use
+`python -m labyrinth.blind_structural_exam prepare --help` for separate
+public questions, private examiner cases, and an original source precommit.
+The hybrid runner is `python -m labyrinth.public_mechanics_runtime --help`;
+it checks each candidate plan against the public transition rules and
+**labels every deterministic correction**. Corrected output uses the
+distinct `labyrinth.public-mechanics-selected.v2` schema, deliberately
+rejected by the ordinary raw-model scorer. Validate both the corrected
+answer and original provenance with
+`python -m labyrinth.hybrid_artifact_verifier --help`.
+Optional localhost Ollama evidence is self-reported and does not attest
+loaded model weights, independent examiner custody, training progress or
+generalization. This is a standalone public-rule computation path, not
+a claim of learned neural reasoning.
+
 ## Run it
 
 Requires Python 3.10+; core functionality uses the standard library.
