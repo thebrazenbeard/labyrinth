@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -51,6 +52,31 @@ class PosixCandidateIdentityTests(unittest.TestCase):
                 unix_user_id=65534, unix_group_id=65534)
             self.assertEqual((adapter.unix_user_id, adapter.unix_group_id),
                              (65534, 65534))
+
+    def test_uid_drop_launch_composes_with_posix_session_isolation(self):
+        """A privileged POSIX launch must preserve BOTH UID/GID and a new session."""
+        command = (sys.executable, "-c", "print('not executed')")
+        if os.name != "posix":
+            with self.assertRaises(ValueError):
+                SubprocessCandidateAdapter(command, model_id="synthetic:uid",
+                    unix_user_id=65534, unix_group_id=65534)
+            return
+        # Only intercept launch arguments: never give WSL an actual UID-drop
+        # child, whose Win32 interop defeats the claimed Linux identity wall.
+        with (mock.patch("labyrinth.minotaur_candidate_bridge.os.geteuid", return_value=0),
+              mock.patch("labyrinth.minotaur_candidate_bridge.os.uname",
+                         return_value=SimpleNamespace(release="6.8.0-native-test")),
+              mock.patch("labyrinth.minotaur_candidate_bridge.subprocess.Popen",
+                         side_effect=RuntimeError("launch intercepted")) as popen):
+            adapter = SubprocessCandidateAdapter(command, model_id="synthetic:uid",
+                unix_user_id=65534, unix_group_id=65534)
+            with self.assertRaisesRegex(RuntimeError, "launch intercepted"):
+                adapter.generate('{"public":true}')
+        launch = popen.call_args.kwargs
+        self.assertIs(launch["start_new_session"], True)
+        self.assertEqual(launch["user"], 65534)
+        self.assertEqual(launch["group"], 65534)
+        self.assertEqual(launch["extra_groups"], ())
 
     def test_private_file_denied_on_native_root_else_host_rejected(self):
         if os.name != "posix" or IS_WSL or os.geteuid() != 0:
