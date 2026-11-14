@@ -192,6 +192,14 @@ def verify_local_observation(observation_path, expected_observation_sha256,
             or len(responses["responses"]) != len(bundle["trials"])):
         raise ValueError("invalid candidate response file")
     doc = _load(_file_bytes(observation_path, MAX_CASE_BYTES))
+    if (type(doc) is dict and
+            doc.get("schema") == "labyrinth.blind-json-enum-local-http.v1"):
+        # This is a DISTINCT actual JSON-reply protocol. It may only be
+        # verified by the strict raw-response replay implementation.
+        from .json_enum_observer import verify_json_enum_observation
+        return verify_json_enum_observation(
+            observation_path, expected_observation_sha256,
+            public_raw, responses_raw)
     common_fields = {"schema", "status", "exam_id", "trial_count",
                      "public_file_sha256", "responses_file_sha256", "model_tag",
                      "declared_model_digest", "loopback_endpoint", "trials",
