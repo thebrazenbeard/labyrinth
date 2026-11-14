@@ -14,10 +14,13 @@ import json
 import os
 from pathlib import Path
 import random
+import subprocess
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from labyrinth.blind_structural_exam import prepare_exam, score_exam, main
+from labyrinth import blind_structural_exam as examiner_module
 
 class BlindStructuralExamTests(unittest.TestCase):
     def setUp(self):
@@ -55,6 +58,59 @@ class BlindStructuralExamTests(unittest.TestCase):
     def score(self, plan):
         return score_exam(self.private, self.public, self.commit, self.responses,
                           self.out, expected_precommit_sha256=plan["receipt_sha256"])
+
+    def test_public_write_failure_never_publishes_private_answers(self):
+        original = examiner_module._write_once
+
+        def failing_write(path, obj):
+            if Path(path) == self.public:
+                raise OSError("injected public write refusal")
+            return original(path, obj)
+
+        with patch.object(examiner_module, "_write_once", side_effect=failing_write):
+            with self.assertRaisesRegex(OSError, "public write refusal"):
+                prepare_exam(self.private, self.public, self.commit,
+                             count=2, rng=random.Random(49011))
+        self.assertFalse(self.private.exists(),
+                         "private answers must not precede a successful public file")
+        self.assertFalse(self.commit.exists())
+
+    def test_precommit_write_failure_never_publishes_private_answers(self):
+        original = examiner_module._write_once
+
+        def failing_write(path, obj):
+            if Path(path) == self.commit:
+                raise OSError("injected precommit write refusal")
+            return original(path, obj)
+
+        with patch.object(examiner_module, "_write_once", side_effect=failing_write):
+            with self.assertRaisesRegex(OSError, "precommit write refusal"):
+                prepare_exam(self.private, self.public, self.commit,
+                             count=2, rng=random.Random(49012))
+        self.assertFalse(self.private.exists(),
+                         "no private answers may remain before receipt publication")
+
+    def test_private_answers_published_only_after_public_and_precommit(self):
+        original = examiner_module._write_once
+        write_order = []
+
+        def checking_write(path, obj):
+            file = Path(path)
+            if file == self.private:
+                self.assertTrue(self.public.is_file())
+                self.assertTrue(self.commit.is_file())
+            write_order.append(file)
+            return original(path, obj)
+
+        with patch.object(examiner_module, "_write_once", side_effect=checking_write):
+            prepare_exam(self.private, self.public, self.commit,
+                         count=2, rng=random.Random(49013))
+        self.assertEqual(write_order, [self.public, self.commit, self.private])
+        plan = json.loads(self.commit.read_text())
+        self.assertEqual(plan["private_sha256"],
+                         sha256(self.private.read_bytes()).hexdigest())
+        self.assertEqual(plan["public_sha256"],
+                         sha256(self.public.read_bytes()).hexdigest())
 
     def test_missing_precommit_parent_rejected_before_private_or_public_writes(self):
         missing = self.root / "missing-precommit-parent" / "precommit.json"
@@ -107,6 +163,73 @@ class BlindStructuralExamTests(unittest.TestCase):
         self.assertFalse(self.public.exists())
         self.assertFalse(alternate.exists(),
                          "precommit must not be written through a dangling symlink")
+
+    def test_public_readback_mismatch_blocks_private_publication(self):
+        original = examiner_module._file_bytes
+
+        def forged_readback(path, limit):
+            if Path(path) == self.public:
+                return b"tampered-public-source-bytes"
+            return original(path, limit)
+
+        with patch.object(examiner_module, "_file_bytes", side_effect=forged_readback):
+            with self.assertRaisesRegex(ValueError, "public exam differs"):
+                prepare_exam(self.private, self.public, self.commit,
+                             count=2, rng=random.Random(49016))
+        self.assertFalse(self.private.exists())
+        self.assertFalse(self.commit.exists())
+
+    def test_precommit_readback_mismatch_blocks_private_publication(self):
+        original = examiner_module._file_bytes
+
+        def forged_readback(path, limit):
+            if Path(path) == self.commit:
+                return b"tampered-precommit-bytes"
+            return original(path, limit)
+
+        with patch.object(examiner_module, "_file_bytes", side_effect=forged_readback):
+            with self.assertRaisesRegex(ValueError, "precommit differs"):
+                prepare_exam(self.private, self.public, self.commit,
+                             count=2, rng=random.Random(49017))
+        self.assertFalse(self.private.exists())
+
+    def test_symlinked_private_parent_rejected_before_answer_redirection(self):
+        real_parent = self.root / "real-answer-parent"
+        real_parent.mkdir()
+        alias = self.root / "linked-answer-parent"
+        try:
+            os.symlink(real_parent, alias, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"directory symlinks unavailable: {exc}")
+        self.assertTrue(alias.is_dir())
+        self.assertTrue(alias.is_symlink())
+        redirected_private = alias / "private.json"
+        with self.assertRaisesRegex(ValueError, "symlink|link|reparse|parent"):
+            prepare_exam(redirected_private, self.public, self.commit,
+                         count=2, rng=random.Random(49014))
+        self.assertFalse((real_parent / "private.json").exists())
+        self.assertFalse(self.public.exists())
+        self.assertFalse(self.commit.exists())
+
+    def test_windows_junctioned_private_parent_rejected(self):
+        if os.name != "nt":
+            self.skipTest("NTFS junction test is Windows only")
+        real_parent = self.root / "real-junction-target"
+        real_parent.mkdir()
+        alias = self.root / "junction-alias"
+        result = subprocess.run(
+            ["cmd.exe", "/c", "mklink", "/J", str(alias), str(real_parent)],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            self.skipTest("junction creation unavailable in isolated temp directory")
+        self.assertTrue(alias.is_dir())
+        self.assertFalse(alias.is_symlink(), "junction should test non-symlink reparse paths")
+        with self.assertRaisesRegex(ValueError, "symlink|junction|reparse|parent"):
+            prepare_exam(alias / "private.json", self.public, self.commit,
+                         count=2, rng=random.Random(49015))
+        self.assertFalse((real_parent / "private.json").exists())
+        self.assertFalse(self.public.exists())
+        self.assertFalse(self.commit.exists())
 
     def test_public_prompt_omits_witness_and_private_material(self):
         private, public, plan = self.prepare()

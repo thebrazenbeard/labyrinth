@@ -16,6 +16,7 @@ from pathlib import Path
 import random
 import re
 import secrets
+import stat
 
 from .live_model_probe import (_canonical, _file_bytes, _load, _receipt,
                                _write_once, ID, SHA)
@@ -169,6 +170,16 @@ def prepare_exam(private_path, public_path, precommit_path, *,
     # another required destination is impossible to open (e.g. missing parent).
     if not all(p.parent.is_dir() for p in locations):
         raise FileNotFoundError("all three exam output parent directories must exist")
+    # Never follow an existing symlink/junction/reparse *ancestor* when
+    # publishing private examiner answers. This is a static preflight only:
+    # a separately privileged actor can still race the directory entries.
+    reparse_bit = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    for location in locations:
+        for parent in location.parents:
+            if (parent.is_symlink() or
+                    (getattr(parent.lstat(), "st_file_attributes", 0)
+                     & reparse_bit)):
+                raise ValueError("exam output parent is a symlink or reparse point")
     if worlds is None:
         if type(count) is not int or not 2 <= count <= 16 or count % 2:
             raise ValueError("generated exam count must be an even 2..16")
@@ -209,17 +220,26 @@ def prepare_exam(private_path, public_path, precommit_path, *,
                "trials": trials}
     public = {"schema": PUBLIC_SCHEMA, "exam_id": exam_id,
               "trials": [_public_trial(case) for case in trials]}
-    _write_once(private_path, private)
-    _write_once(public_path, public)
-    raw_private = _file_bytes(private_path, MAX_BYTES)
-    raw_public = _file_bytes(public_path, MAX_BYTES)
-    plan = {
+    # Commit to the exact bytes we INTEND to publish before exposing the
+    # private answers. A public/receipt write failure must not orphan secrets.
+    raw_private = _canonical(private) + b"\n"
+    raw_public = _canonical(public) + b"\n"
+    plan = _receipt({
         "schema": COMMIT_SCHEMA, "exam_id": exam_id, "case_count": n,
         "private_sha256": _sha(raw_private), "public_sha256": _sha(raw_public),
         "status": "NOT_EXECUTED",
         "custody_class": "CALLER_CONTROLLED_UNATTESTED",
-        "independent_custody_verified": False}
-    return _write_once(precommit_path, _receipt(plan))
+        "independent_custody_verified": False})
+    _write_once(public_path, public)
+    if _file_bytes(public_path, MAX_BYTES) != raw_public:
+        raise ValueError("published public exam differs from source commitment")
+    _write_once(precommit_path, plan)
+    if _file_bytes(precommit_path, MAX_BYTES) != _canonical(plan) + b"\n":
+        raise ValueError("published precommit differs from intended receipt")
+    _write_once(private_path, private)
+    if _file_bytes(private_path, MAX_BYTES) != raw_private:
+        raise ValueError("published private exam differs from source commitment")
+    return plan
 
 
 def _read_bundle(private_path, public_path, precommit_path,
