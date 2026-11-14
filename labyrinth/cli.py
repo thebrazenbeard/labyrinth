@@ -40,6 +40,26 @@ def _positive(raw: str) -> int:
     return value
 
 
+def _public_exam_seed(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("seed must be a signed 32-bit integer") from exc
+    if not -(2**31) <= value <= 2**31 - 1:
+        raise argparse.ArgumentTypeError("seed must be a signed 32-bit integer")
+    return value
+
+
+def _public_exam_variant(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("variant must be between 0 and 31") from exc
+    if not 0 <= value <= 31:
+        raise argparse.ArgumentTypeError("variant must be between 0 and 31")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="labyrinth", description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -89,6 +109,12 @@ def _parser() -> argparse.ArgumentParser:
     hf_audit = subcommands.add_parser("audit-hf-report", help="Offline internal consistency audit of a saved HF LoRA pilot")
     hf_audit.add_argument("--input", metavar="JSON", required=True, help="Saved HF pilot report")
     hf_audit.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
+    persistence = subcommands.add_parser(
+        "audit-hf-persistence", help="Check paired LoRA train/reload receipts against local checkpoint bytes")
+    persistence.add_argument("--run-dir", required=True, help="Saved LoRA training run directory")
+    persistence.add_argument("--reload-report", required=True, metavar="JSON")
+    persistence.add_argument("--base-model-dir", required=True, help="Independently supplied base checkpoint")
+    persistence.add_argument("--report", metavar="JSON", help="Exclusively create an audit result file")
     rg = subcommands.add_parser("benchmark-rg", help="Optional Reasoning Gym development-only scoring; not sealed evaluation")
     rg.add_argument("--dataset", required=True, help="Registered reasoning-gym task identifier")
     rg.add_argument("--size", type=_positive, default=16, help="Number of development cases (max 128)")
@@ -100,6 +126,20 @@ def _parser() -> argparse.ArgumentParser:
     rg.add_argument("--timeout-seconds", type=float, default=30.0)
     rg.add_argument("--allow-remote-ollama", action="store_true")
     rg.add_argument("--report", metavar="JSON", help="Exclusively create a JSON report")
+    minotaur = subcommands.add_parser(
+        "minotaur-exam", help="Run source-public Minotaur families with deterministic controls",
+    )
+    minotaur.add_argument("--seed", type=_public_exam_seed, default=2026,
+                          help="Constant-exam prompt seed, not an independent structural holdout")
+    minotaur.add_argument("--variant", type=_public_exam_variant, default=0,
+                          help="Constant-exam wording variant (0..31), mechanics unchanged")
+    minotaur.add_argument("--exact-cover", action="store_true",
+                          help="Opt in to a third, exact-cover mechanic (public v2 receipt; not neural transfer)")
+    minotaur.add_argument("--temporal-repair", action="store_true",
+                          help="With --exact-cover, opt in to a fourth timed-repair mechanic (public v3)")
+    minotaur.add_argument("--distributed-parity", action="store_true",
+                          help="With --exact-cover and --temporal-repair, opt in to a fifth no-communication mechanic (public v4)")
+    minotaur.add_argument("--report", metavar="JSON", help="Exclusively create a JSON receipt")
     subcommands.add_parser("train-hf", help="Opt-in bounded LoRA update of an existing local HF checkpoint")
     subcommands.add_parser("eval-hf", help="Reload and evaluate a saved HF LoRA pilot in a new process")
     return parser
@@ -145,6 +185,10 @@ def main(argv: list[str] | None = None) -> int:
                                   artifact=load_json(args.artifact, strict=True) if args.artifact else None)
         elif args.command == "audit-hf-report":
             report = audit_hf_report(load_json(args.input, strict=True))
+        elif args.command == "audit-hf-persistence":
+            from .hf_persistence_audit import audit_hf_persistence
+
+            report = audit_hf_persistence(args.run_dir, args.reload_report, args.base_model_dir)
         elif args.command == "train-toy":
             report = run_toy_experiment(
                 seed=args.seed, train_count=args.train_count, eval_count=args.eval_count,
@@ -169,6 +213,19 @@ def main(argv: list[str] | None = None) -> int:
                 )
             except RuntimeError as exc:
                 raise ValueError(str(exc)) from exc
+        elif args.command == "minotaur-exam":
+            if args.distributed_parity:
+                if not (args.exact_cover and args.temporal_repair):
+                    raise ValueError("--distributed-parity requires --exact-cover and --temporal-repair")
+                from .minotaur_public_v4 import run_public_exam_v4
+
+                report = run_public_exam_v4(seed=args.seed, variant=args.variant)
+            else:
+                from .minotaur_public_exam import run_public_exam
+
+                report = run_public_exam(seed=args.seed, variant=args.variant,
+                                         include_exact_cover=args.exact_cover,
+                                         include_temporal_repair=args.temporal_repair)
         else:
             adapter = _load_model(args)
             if args.command == "run":
@@ -192,7 +249,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote reproducible report to {args.report}", file=sys.stderr)
         else:
             print(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))
-        return 0 if args.command not in ("audit-report", "audit-hf-report") or report["status"] == "PASS" else 2
+        if args.command == "minotaur-exam":
+            return 0 if report["summary"]["independent_checks_agree"] else 2
+        return 0 if args.command not in ("audit-report", "audit-hf-report", "audit-hf-persistence") or report["status"] == "PASS" else 2
     except (ValueError, TypeError, OSError, json.JSONDecodeError, AdapterError) as exc:
         print(f"labyrinth: {exc}", file=sys.stderr)
         return 2

@@ -4,6 +4,29 @@ Labyrinth is an offline-first **reasoning challenge, training-lifecycle, and eva
 
 It is a working **prototype**, not evidence of generalized reasoning improvement. Prompt demonstrations are *persistent prompt memory*, not a model update. The separate toy backend really updates four numeric coefficients and reloads them, but its hand-engineered arithmetic hypothesis class is not an LLM. An **opt-in, dependency-isolated HF/PEFT LoRA pilot** now provides a real neural-weight-update code path. A bounded CPU smoke run on Lappy demonstrated numerical adapter changes and fresh-process reload with a tiny, **randomly initialized** HF model; it did **not** demonstrate improved reasoning.
 
+## Blind structural examiner — source-only research
+
+A [fresh two-phase mechanics examiner](docs/MINOTAUR_BLIND_STRUCTURAL_EVALUATOR_V1.md)
+now supports separately held private answers, candidate-visible rule tables,
+real action-plan replay, bounded UNSAT cross-checks, original precommit pins and
+optional examiner-signed commitments. An optional [local model HTTP observer](docs/MINOTAUR_LOCAL_MODEL_OBSERVATION_V1.md)
+now binds actual loopback Ollama requests and raw responses to an original
+observation digest rechecked by the scorer, without asserting authentic
+loaded weights or independent witness custody. A [matched-case control comparator](docs/MINOTAUR_PAIRED_TRIVIAL_CONTROLS_V1.md)
+now computes always-UNSAT and fixed-action scores and exact paired
+discordances from the same frozen exam, rather than comparing unrelated
+aggregate reports. A separate [JSON-enumerated model experiment](docs/MINOTAUR_JSON_ENUM_MODEL_BEHAVIOR_V1.md) now preserves raw structured model replies without confusing syntax-constrained output with native free-text observations. On four reused local near-twins, actual Qwen3 4B JSON-constrained inference scored 0/4, while a public-only deterministic enumerator scored 4/4 with zero weight updates; **format validity is not neural reasoning**. A separate [public-rule hybrid mechanics runtime](docs/MINOTAUR_PUBLIC_MECHANICS_HYBRID_RUNTIME_V1.md) now executes candidate plans against actual public transition tables and explicitly corrects wrong answers with deterministic fallback; on the same frozen four cases, a Qwen2.5 Coder proposal kept **1** candidate answer and corrected **3**, while Qwen3 4B kept **0** and corrected **4**. Both historical V1 corrected outputs scored 4/4 by source-only replay, **not** as model learning. A later [typed V2 provenance-bound verifier](docs/MINOTAUR_HYBRID_PROVENANCE_BOUND_V2.md) now rejects those corrected outputs at the raw-candidate scorer boundary and requires their original companion provenance before source-only verification; direct raw-model scoring of corrected V2 outputs fails. A fresh synthetic 12-case smoke check also scored 12/12 with six symbolic corrections. A 12-case on-host zero-update control got
+6/12 by always claiming UNSAT; a public-rule symbolic solver got 12/12 with
+six actual winning traces. Neither is a neural-learning result or independent
+examiner-custody qualification. A [read-only Windows examiner custody preflight](docs/MINOTAUR_EXAMINER_CUSTODY_PREFLIGHT_V1.md)
+now checks generic and low-level broad ACL rights, writable ancestors,
+and a real same-token read-only file-handle attempt. It also requires an
+exact source-to-volume-root ancestry readback: a dropped or forged layer
+is reported as inspection incomplete, never as a clean ACL. Lappy's
+private exam has inherited Authenticated Users Modify access, and the
+operating account can open its answer file without consuming any bytes.
+Neither finding is separate-principal custody attestation or permission repair.
+
 ## Run it
 
 Requires Python 3.10+; core functionality uses the standard library.
@@ -17,6 +40,138 @@ python -m labyrinth train-toy --seed 0 --train-count 64 --eval-count 64 --checkp
 python -m labyrinth toy-eval --seed 0 --eval-count 64 --checkpoint toy-checkpoint.json --report toy-reloaded.json
 python -m unittest discover -s tests -v
 ```
+
+### Minotaur hostile examination (development-only)
+
+The optional, standard-library-only exam modules exercise **four separate
+declared-world families** through one candidate bridge and a fifth causal-law
+revision family through its own intervention interface. These are public
+source-development challenges, not privately held-out graduation tests:
+
+```bash
+python -m labyrinth.minotaur_cross_exam
+python -m labyrinth minotaur-exam --seed 17 --variant 2
+python -m labyrinth minotaur-exam --seed 17 --variant 2 --exact-cover
+python -m labyrinth minotaur-exam --seed 17 --variant 2 --exact-cover --temporal-repair
+python -m labyrinth minotaur-exam --seed 17 --variant 2 --exact-cover --temporal-repair --distributed-parity
+python -m labyrinth minotaur-exam --seed 17 --report minotaur-public-receipt.json
+python -m unittest tests.test_minotaur_cross_exam tests.test_epistemic_shift_exam -q
+python -m unittest discover -s tests -q
+```
+
+The cross-family command runs public-rule deterministic **zero-update**
+controls on Constant, Diverse, Timegate, and Oracle Chamber. Oracle policy or
+conditional UNSAT certification is distinct from a physical escape. The
+causal-law examiner deliberately holds out stateful mechanisms from its
+stateless training mechanisms and tests provisional beliefs, contradictions,
+and independently replayed counterfactuals. Its best public symbolic control
+already encodes all six declared mechanisms, so success proves **neither**
+weight updates **nor** transfer by a model. The evaluator still shares a
+Python process with any in-process candidate; this is not private custody.
+
+`minotaur-exam` is a separate, offline, JSON-receipted **public symbolic
+control**. Its default v1 interface exercises two distinct declared-rule mechanics: two
+Constant chamber cases (an independently replayed legal escape and an
+independently checked finite-state UNSAT closure), plus all six Veiled Fork
+contingent-policy cases (independent Boolean existence oracle and replay for
+positive policies). Opt in to `--exact-cover` for v2: the unchanged eight default
+cases plus four constrained crew-allocation cases, totaling **12 public cases
+across three mechanically distinct families**. An independent specific-witness
+checker and separately coded existence checks can veto a claimed win; claimed
+finite impossibility also faces a third bounded reachability check. A novel
+proposed allocation can overturn an earlier wrong impossibility verdict when
+verified under the declared rules. A separate, versioned
+`minotaur-exact-cover-mechanics-v1` identity canonically recognizes site/crew
+renaming and reordering for **3- and 6-site scenarios** (at most 6! = 720
+site permutations), and caps budget at the number of crews needed to cover
+every site. The exact case/provenance `fingerprint` remains unchanged.
+For 9–18-site scenarios this bounded canonicalizer raises `ValueError`
+rather than inventing a mechanical-identity certificate; those scenarios
+still have ordinary symbolic verification. A structural-transfer prescreen
+rejects declared held-out/transfer overlap *when these source-derived bounded
+mechanics IDs are supplied*. Raw exact-case hashes, old receipts, and opaque
+self-declared mechanics labels are **not** independently validated identities.
+These public cases still fall far short of the distinct held-out and transfer
+mechanics required for neural graduation; see
+`docs/MINOTAUR_PUBLIC_EXAM_V2.md` for the precise evidence ceiling.
+Opting into `--temporal-repair` *together with* `--exact-cover` adds a fourth
+mechanic with renewable-energy, precedence-constrained, single-machine repair
+jobs and deadlines: **16 source-public cases across four mechanics** (v3).
+Its finite UNSAT claims require separate bounded reachability checks, while
+winning schedules undergo independent exact-witness replay. This additional
+public family still cannot meet the eight-distinct-heldout-and-transfer
+structural-mechanics qualification gate, let alone prove a neural update.
+Opting into `--distributed-parity` requires both earlier flags and returns a
+separate **v4** receipt: **20 source-public cases across five mechanics**.
+Its four new no-communication, simultaneous-local-information cases require a
+single deterministic two-actor policy that works in every declared world.
+Reported wins undergo both a direct replay and separately coded specific
+witness/GF(2) pinned-equation checks; finite UNSAT requires full policy-space
+enumeration and independent algebraic/DFS existence checks. A world-order
+permutation is an independent case *provenance* change, not a new mechanic:
+the normalized mechanics fingerprint is tracked separately. The separately
+versioned **distributed-parity mechanics identity v4** additionally removes
+unreachable observation slots and surplus budget, and recognizes local output
+polarity relabeling only when the effective asserted-one budget cannot bind
+(and no observation pair has contradictory parity declarations). The exact
+case/provenance fingerprint remains unchanged. Mechanics-identity v3 and v4
+digests are **not interchangeable** without exact source-version custody;
+neither digest authenticates an independent private evaluation. Its exact-public
+memorizer and fixed-script controls perform zero optimizer updates. All five
+mechanics are exposed in repository source, so this strengthens the symbolic
+tester but does **not** constitute blind transfer or neural model learning.
+
+Both modes return a nonzero exit code if independent checks disagree, and
+`--report` remains write-once. Seed and wording variants **do not generate
+independent structural holdouts**. All algorithms still rely on source-declared
+rules; neither an external model, secret evaluator, neural update, nor genuine
+model transfer is tested. Any certified UNSAT verdict is restricted to the
+declared finite rules.
+
+The structural-transfer *prescreen* additionally requires source-verifiable
+mechanical identities before it can return `PENDING_INDEPENDENT_CUSTODY`.
+Use `MechanicSource(case_id, kind, scenario)` for **every** precommitted case
+via `precommit(..., mechanic_sources=...)`; supported bounded kinds are
+`minotaur-exact-cover-mechanics-v1` (3/6 sites) and
+`distributed-parity-mechanics-v4` (bounded private-observation parity).
+The prescreen recomputes each identity, rejects unqualified/mismatched/missing
+bindings, and includes exact scenario descriptions in the manifest SHA-256
+commitment. Historical manifests without bindings retain their original SHA
+for reproducibility, but even valid HMAC signatures and perfect synthetic
+scores now yield `BLOCKED` rather than favorable prescreen status. A newly
+bound source manifest receives a **different** digest; old and new receipts
+must never be silently interchanged.
+
+The source binding does **not** independently prove that a claimed nonpublic
+test was private, that result rows were truly observed, that training ran, or
+that an external evaluator controlled the HMAC key. Keep source scenarios
+inside evaluator custody rather than exposing alleged private tests to the
+candidate. Even a favorable screen remains `PENDING_INDEPENDENT_CUSTODY`,
+never verified neural learning. Unsupported larger exact-cover graphs and
+other mechanics fail closed rather than receiving invented independent IDs.
+
+For a **real, bounded local inference observation** (rather than a replay
+fixture), `python -m labyrinth.live_model_probe` provides `commit`,
+`observe`, and `compare` commands against an already-running, loopback
+llama.cpp OpenAI-compatible endpoint. The tool writes an answer-key commitment
+before requesting generation, hashes an exact local GGUF file, records the
+actual model text and SHA-256, and optionally compares two independent run
+receipts for the *same* committed cases. It will never claim neural learning:
+a weight-file hash does not independently establish that the server loaded
+those bytes, two differing hashes do not prove training lineage, and the
+cases are not independently held by this code. See
+[Live Model Observation V1](docs/LIVE_MODEL_OBSERVATION_V1.md).
+No download, model launch, checkpoint modification, or override of TrainingDay
+physical-launch HOLD occurs.
+
+See the five exam protocols in `docs/CONSTANT_EXAM_PROTOCOL.md`,
+`docs/MINOTAUR_DIVERSE_EXAM_PROTOCOL.md`,
+`docs/MINOTAUR_TIMEGATE_HOSTILE_PROTOCOL.md`,
+`docs/MINOTAUR_ORACLE_CHAMBER_HOSTILE_PROTOCOL.md`, and
+`docs/MINOTAUR_EPISTEMIC_SHIFT_HOSTILE_PROTOCOL.md` for exact rules, falsifiers,
+remaining trust gaps, and how a novel discovery is challenged rather than
+discarded. No Lappy model, production process, protected evaluator, or
+official TrainingDay checkpoint is launched by these commands.
 
 `--count`, `--train-count`, and `--eval-count` mean tasks **per tier**. Reports are JSON; existing paths are never overwritten. CLI-supplied replay JSON and saved demonstration artifacts are limited to **8 MiB per input file** before parsing, including files that change during the read. Without a specified model, `replay:constant-zero` is a deterministic negative-control fixture that outputs `ANSWER: 0` for every question. It does not solve problems or learn. To get nontrivial scores offline, pass `--replay-file mapping.json`, where the JSON object maps exact public prompt text to fixed answer strings. Missing fixture keys fail closed.
 
@@ -77,6 +232,10 @@ python -m labyrinth train-hf --model-path LOCAL_HF_MODEL_DIR --output-dir NEW_EM
 python -m labyrinth eval-hf --run-dir NEW_EMPTY_PARENT/RUN_001 --report NEW_EMPTY_PARENT/reload.json
 # Offline check of a saved HF pilot report's internally reproducible fields:
 python -m labyrinth audit-hf-report --input NEW_EMPTY_PARENT/RUN_001/pilot_report.json
+# File-backed paired receipt gate: requires the separately written reload report,
+# the complete run directory and a separately supplied copy of the exact base.
+python -m labyrinth audit-hf-persistence --run-dir NEW_EMPTY_PARENT/RUN_001 \
+  --reload-report NEW_EMPTY_PARENT/reload.json --base-model-dir LOCAL_HF_MODEL_DIR
 ```
 
 This path never downloads weights, installs packages, runs arbitrary model text, or replaces the base checkpoint. It rejects existing output directories and checkpoints exceeding its strict 1 GiB no-quantization limit; therefore the existing ~6.15 GB 3B-class local checkpoint on Lappy is **not eligible** for this initial pilot. Its default two steps consume only two of eight default generated training examples. The public finite mazes are a mechanism smoke test, **not** a qualified learning effect. New runs from the v3 pilot use a **zero-learning-rate, same-exposure placebo**
@@ -96,6 +255,18 @@ separates numeric correctness from the trivial constant format token but does
 not make public finite arithmetic templates an independent reasoning exam.
 
 `audit-hf-report` is dependency-free and re-generates the declared train/eval case IDs, held-out prompt commitment, control metadata, training visit order, and reported evaluation metrics. It verifies file/tensor **digest receipt syntax**, but does not open or authenticate the checkpoint files. For responses whose entire text is recoverable from the stored 128-character preview, it independently rechecks the response digest and answer score. Longer responses whose hashes differ from their preview yield `INCOMPLETE`, never an unqualified `PASS`. Inconsistent records yield `FAIL`; the command exits nonzero for both. Source fingerprints must match the auditor checkout, so older reports should be audited at their source revision. All receipts and model-origin claims are self-reported: even `PASS` is **not proof** that training actually occurred or improved reasoning. The original run's full generated text was not always retained; future run schemas should save auditable full text in a separately controlled evidence artifact.
+
+`audit-hf-persistence` additionally requires both the original training report and the
+separately saved reload report. It verifies the reload's commitment to the **exact
+training-report bytes**, compares complete candidate/reload trial records and
+reported LoRA tensor digests, checks distinct reported process IDs, reruns the
+four-arm receipt audit, and independently hashes available base model/tokenizer
+and saved adapter files. It requires an explicit local base-model directory and
+does not import Torch or initiate training. `PASS` means **file-backed receipt
+consistency only**; both reports and checkpoint files can be forged, PIDs are
+not trusted process attestation, and this check does not prove structural
+transfer, reasoning or a genuine neural update. `INCOMPLETE` (e.g. a historical
+source mismatch or unverifiable truncated response) and `FAIL` both exit 2.
 
 **Executed Lappy CPU smoke (exact source commit `6f7b2924d7f6178623c9d014dece3762890bcf82`, 2026-10-26):** locally generated random tiny GPT-2 model, two PEFT LoRA optimizer updates, changed trainable tensor SHA-256, saved adapter, independent Python process reload and verified equality of the trained/reloaded tensor-value SHA-256. Both processes exited successfully. Held-out scores were **baseline 0/2, trained 0/2, untrained-adapter 0/2, corrupted supervision 0/2**. This is direct evidence of a working neural adapter training/persistence *mechanism*, not improved reasoning, pretrained adaptation or GPU training. See the [exact evidence record](docs/RESEARCH_LOG_2026-10-26.md) and [hostile review](docs/HF_PILOT_HOSTILE_REVIEW_2026-10-26.md). Independent structural/paraphrase holdouts are still needed before higher claims.
 

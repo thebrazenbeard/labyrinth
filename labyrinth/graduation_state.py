@@ -28,7 +28,7 @@ from .graduation_gate import (
 )
 
 
-_STATE_DOMAIN = b"labyrinth.minotaur.atomic-custody.v1\x00"
+_STATE_DOMAIN = b"labyrinth.minotaur.atomic-custody.v2\x00"
 _TABLE_SQL = """CREATE TABLE campaign (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     policy_fingerprint TEXT NOT NULL,
@@ -68,7 +68,7 @@ def _connect(path: Path) -> sqlite3.Connection:
 def _serialize(state: GateState) -> str:
     record = asdict(state)
     for name in ("consumed_run_ids", "consumed_suite_sha256s", "consumed_eval_case_ids",
-                 "consumed_eval_prompt_commitments"):
+                 "consumed_eval_prompt_commitments", "consumed_eval_semantic_family_ids"):
         record[name] = sorted(record[name])
     return json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
@@ -78,11 +78,13 @@ def _parse(serialized: str) -> GateState:
         record = json.loads(serialized)
         exact = {"next_attempt", "consumed_run_ids", "consumed_suite_sha256s",
                  "consumed_eval_case_ids", "consumed_eval_prompt_commitments",
+                 "consumed_eval_semantic_family_ids",
                  "graduated", "policy_fingerprint"}
         if type(record) is not dict or record.keys() != exact:
             raise ValueError("unexpected state schema")
         for field in ("consumed_run_ids", "consumed_suite_sha256s",
-                      "consumed_eval_case_ids", "consumed_eval_prompt_commitments"):
+                      "consumed_eval_case_ids", "consumed_eval_prompt_commitments",
+                      "consumed_eval_semantic_family_ids"):
             values = record[field]
             if (type(values) is not list or any(type(x) is not str for x in values)
                     or len(set(values)) != len(values)):
