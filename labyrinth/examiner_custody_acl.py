@@ -7,6 +7,8 @@ It never changes permissions, creates accounts, or upgrades qualification.
 from __future__ import annotations
 
 import argparse
+import csv
+from io import StringIO
 from hashlib import sha256
 import json
 import os
@@ -240,17 +242,113 @@ def audit_local_examiner_custody(private_cases_path, out_path, *,
     return _write_once(out, _receipt(report))
 
 
+def _current_windows_sid():
+    """Read current process principal; the output is not remote authentication."""
+    if os.name != "nt":
+        raise RuntimeError("local access probe requires Windows")
+    result = subprocess.run(
+        ["whoami.exe", "/user", "/fo", "csv", "/nh"],
+        shell=False, text=True, capture_output=True, timeout=10,
+        check=False)
+    try:
+        rows = list(csv.reader(StringIO(result.stdout)))
+    except csv.Error as exc:
+        raise RuntimeError("could not parse current Windows identity") from exc
+    if (result.returncode != 0 or len(rows) != 1 or len(rows[0]) != 2
+            or SID.fullmatch(rows[0][1]) is None):
+        raise RuntimeError("Windows process SID unavailable")
+    return rows[0][1]
+
+
+def _open_read_handle(path):
+    """Exercise OS-level read access without ever consuming private bytes."""
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(str(path), flags)
+    try:
+        # Deliberately do NOT call read() on the secret.
+        pass
+    finally:
+        os.close(descriptor)
+
+
 def probe_local_private_read_access(private_cases_path, out_path, *, examiner_sid=None):
-    """Attempt a real handle-only read-open with current Windows process token."""
-    raise NotImplementedError("current-process private-file handle probe is not implemented")
+    """Prove current token can open a private file; denial remains unattributed.
+
+    Must execute IN the process identity being evaluated. This cannot attest
+    an independent examiner or guarantee that process is the model runner.
+    """
+    if os.name != "nt":
+        raise RuntimeError("local Windows candidate open probe requires Windows")
+    file = Path(private_cases_path)
+    out = Path(out_path)
+    if out.exists():
+        raise FileExistsError("read probe evidence output already exists")
+    if file.absolute() == out.absolute():
+        raise ValueError("read probe output must not be the private source")
+    if examiner_sid is not None and (
+            type(examiner_sid) is not str or SID.fullmatch(examiner_sid) is None):
+        raise ValueError("declared examiner SID must be well-formed")
+    if not file.is_file() or file.is_symlink():
+        raise ValueError("private target must be an existing non-symlink file")
+    current = _current_windows_sid()
+    success = False
+    try:
+        _open_read_handle(file)
+        success = True
+    except PermissionError:
+        # An untrusted local operator can fake a denied result. Never qualify.
+        pass
+    report = {
+        "schema": "labyrinth.local-private-read-open-negative.v1",
+        "status": ("PRIVATE_READ_HANDLE_OPEN_SUCCEEDED" if success
+                   else "PRIVATE_READ_OPEN_DENIED_LOCAL_ONLY"),
+        "evidence_class": "SELF_REPORTED_LOCAL_PROCESS_ACCESS_OBSERVATION",
+        "private_path_sha256": sha256(str(file.absolute()).lower().encode("utf-8")).hexdigest(),
+        "process_sid_sha256": sha256(current.encode("ascii")).hexdigest(),
+        "claimed_examiner_sid_sha256": (sha256(examiner_sid.encode("ascii")).hexdigest()
+                                      if examiner_sid is not None else None),
+        "same_declared_examiner_principal": (
+            current == examiner_sid if examiner_sid is not None else None),
+        "read_open_succeeded": success,
+        "private_file_bytes_read": 0,
+        "candidate_process_identity_independently_attested": False,
+        "candidate_principal_read_denial_verified": False,
+        "independent_custody_verified": False,
+        "limitations": [
+            "The script must run under the actual candidate token to be relevant.",
+            "Successful read-open is negative evidence; no private file bytes were consumed.",
+            "A locally claimed read denial does not authenticate examiner independence.",
+            "The caller-supplied examiner SID is not an independent trust anchor.",
+            "The process can fabricate its own unsigned report or misrepresent identity.",
+        ],
+    }
+    return _write_once(out, _receipt(report))
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--private", required=True)
     parser.add_argument("--signer-private-key")
+    parser.add_argument("--probe-local-read", action="store_true")
+    parser.add_argument("--examiner-sid", help="caller-supplied SID, not a trust anchor")
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
+    if args.probe_local_read:
+        if args.signer_private_key:
+            parser.error("signer-private-key is not accepted in local read probe mode")
+        report = probe_local_private_read_access(
+            args.private, args.out, examiner_sid=args.examiner_sid)
+        print(json.dumps({
+            "status": report["status"],
+            "read_open_succeeded": report["read_open_succeeded"],
+            "same_declared_examiner_principal":
+                report["same_declared_examiner_principal"],
+            "independent_custody_verified": False,
+            "receipt_sha256": report["receipt_sha256"],
+        }, sort_keys=True))
+        return 2 if report["read_open_succeeded"] else 3
+    if args.examiner_sid is not None:
+        parser.error("--examiner-sid requires --probe-local-read")
     report = audit_local_examiner_custody(
         args.private, args.out, signing_private_key_path=args.signer_private_key)
     print(json.dumps({
