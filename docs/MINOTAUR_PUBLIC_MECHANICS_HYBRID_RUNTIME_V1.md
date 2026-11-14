@@ -46,7 +46,13 @@ Example:
 
 The runner is **offline**: no model inference, network access or training
 happens during the hybrid execution. Its outputs are exclusive-create
-artifacts. The original candidate observations, public tables, source
+artifacts. Both output parent directories must already exist. The provenance
+report is written **first**, and the model-compatible corrected response roster
+is published **last**. A failed report write therefore cannot leave a corrected
+response file without the record of symbolic substitutions. Two separate
+filesystem writes are NOT a fully atomic transaction: consumers must require
+and validate both files and their original byte hashes before displaying a
+complete hybrid result. The original candidate observations, public tables, source
 precommit and scores remain unmodified.
 
 ### Important provenance boundary
