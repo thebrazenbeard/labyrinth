@@ -39,11 +39,7 @@ A 96-token original-protocol attempt with Qwen3 4B returned too-long text and do
 
 The original action replay found **ZERO winning/correct answers**, despite valid JSON. Qwen3 4B JSON observation SHA 1f991dac831a178484a73d2bc0be33b8f8e7aaaed5a2809af33f3cac9207c9e2; declared model tag digest 0edcdef34593eac1aa2be9c7d06c432dcf81945adca5eca2f27662c18f168ba0. Exact paired score receipt 2201c027e9b55215797d7591532b5aebc9342b743aa3af6321356ce72f8449f0; strict score receipt 244b59e60a816ce71e941b2f0ae4ab6c62d7499e977e5ab33704e7f5ee09ac83. Compared with always UNSAT 2/4, exact two-sided paired p=0.5, NOT a generalization or statistical confidence claim.
 
-A separate manually written *public-only* exhaustive enumerator ran over these very same transition tables without opening the private case file while generating responses. It returned:
-
-    PLAN: A B C | UNSAT | PLAN: A C | UNSAT
-
-The original private scorer later verified **4/4**. Candidate response SHA b11543a063af018a7cddaac287c1b80d4fc328f3cfb08df2a74a238bfb9887bf; paired source-only receipt 1d94857fa4287275ea7e054224aee9de0949e9bb98c7bec9889bbd85d786ebcb. Its evidence remains invocation_evidence=NOT_SUPPLIED and neural_learning_verified=false, because it is not a neural model. This is proof that the public mechanics can be solved algorithmically, not proof a neural candidate learned how.
+A separate manually written *public-only* exhaustive enumerator ran over those same transition tables, without opening the private-case file during response generation. It produced a four-response roster retained **outside Git**; its exact correct plans and per-case SAT/UNSAT labels are intentionally **not published in this document**. The original private scorer later verified **4/4**. Candidate response SHA b11543a063af018a7cddaac287c1b80d4fc328f3cfb08df2a74a238bfb9887bf; paired source-only receipt 1d94857fa4287275ea7e054224aee9de0949e9bb98c7bec9889bbd85d786ebcb. Its evidence remains invocation_evidence=NOT_SUPPLIED and neural_learning_verified=false, because it is not a neural model. This is proof that the public mechanics can be solved algorithmically, not proof a neural candidate learned how.
 
 Original files/observations are retained outside Git at D:\VERA\experiments\minotaur-wave45-20261114. An isolated CPU-only cloud-disabled Ollama service at 127.0.0.1:11580 was stopped after the experiments. The owned child PID 80196 is gone and port 11580 is closed, with no shared service touched. No weight updates, training launch, paid cloud or protected-main changes occurred.
 
