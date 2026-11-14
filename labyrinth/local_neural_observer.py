@@ -101,9 +101,16 @@ def observe_public_exam(public_path, responses_out, observation_out, endpoint, m
     bundle = _public_trials(public_raw)
     opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
     before_digest = _declared_digest(opener, base, model, timeout)
+    tag_checks = 1
     rows = []
     observed_trials = []
     for trial in bundle["trials"]:
+        # The original before/after-only check missed a model tag switched
+        # for one case and restored before the final check. These additional
+        # snapshots narrow that gap; they still cannot attest served weights.
+        if _declared_digest(opener, base, model, timeout) != before_digest:
+            raise ValueError("server advertised model digest changed before trial")
+        tag_checks += 1
         start = time.monotonic()
         result = _http_json(opener, base + "/api/generate",
                             {"model": model, "prompt": trial["prompt"],
@@ -117,11 +124,14 @@ def observe_public_exam(public_path, responses_out, observation_out, endpoint, m
                 or type(result.get("response")) is not str
                 or len(result["response"]) > 128
                 or type(result.get("done_reason")) is not str
-                or result["done_reason"] not in ("stop", "length")
+                or result["done_reason"] != "stop"
                 or type(result.get("eval_count")) is not int
                 or not 0 <= result["eval_count"] <= 100000):
             raise ValueError("invalid local model reply or model identity")
         text = result["response"]
+        if _declared_digest(opener, base, model, timeout) != before_digest:
+            raise ValueError("server advertised model digest changed after trial")
+        tag_checks += 1
         rows.append({"trial_id": trial["trial_id"], "response": text})
         observed_trials.append({
             "trial_id": trial["trial_id"],
@@ -131,8 +141,6 @@ def observe_public_exam(public_path, responses_out, observation_out, endpoint, m
             "eval_count": result["eval_count"],
             "elapsed_ms": max(0, round((time.monotonic() - start) * 1000)),
         })
-    if _declared_digest(opener, base, model, timeout) != before_digest:
-        raise ValueError("server advertised model digest changed during exam")
     responses = {"schema": RESPONSE_SCHEMA, "exam_id": bundle["exam_id"],
                  "responses": rows}
     responses_raw = _canonical(responses) + b"\n"
@@ -143,6 +151,8 @@ def observe_public_exam(public_path, responses_out, observation_out, endpoint, m
         "public_file_sha256": _sha(public_raw),
         "responses_file_sha256": _sha(responses_raw),
         "model_tag": model, "declared_model_digest": before_digest,
+        "model_tag_check_policy": "INITIAL_AND_PER_TRIAL_BEFORE_AFTER",
+        "model_tag_check_count": tag_checks,
         "loopback_endpoint": base, "trials": observed_trials,
         "served_weight_bytes_attested": False,
         "independent_custody_verified": False,
@@ -183,7 +193,8 @@ def verify_local_observation(observation_path, expected_observation_sha256,
     doc = _load(_file_bytes(observation_path, MAX_CASE_BYTES))
     expected = {"schema", "status", "exam_id", "trial_count",
                 "public_file_sha256", "responses_file_sha256", "model_tag",
-                "declared_model_digest", "loopback_endpoint", "trials",
+                "declared_model_digest", "model_tag_check_policy",
+                "model_tag_check_count", "loopback_endpoint", "trials",
                 "served_weight_bytes_attested", "independent_custody_verified",
                 "neural_learning_verified", "limitations", "receipt_sha256"}
     if (type(doc) is not dict or set(doc) != expected
@@ -202,6 +213,9 @@ def verify_local_observation(observation_path, expected_observation_sha256,
             or MODEL.fullmatch(doc["model_tag"]) is None
             or type(doc["declared_model_digest"]) is not str
             or SHA.fullmatch(doc["declared_model_digest"]) is None
+            or doc["model_tag_check_policy"] != "INITIAL_AND_PER_TRIAL_BEFORE_AFTER"
+            or type(doc["model_tag_check_count"]) is not int
+            or doc["model_tag_check_count"] != 1 + 2 * len(bundle["trials"])
             or doc["served_weight_bytes_attested"] is not False
             or doc["independent_custody_verified"] is not False
             or doc["neural_learning_verified"] is not False
@@ -225,7 +239,7 @@ def verify_local_observation(observation_path, expected_observation_sha256,
                 _sha(question["prompt"].encode("utf-8")) or
                 observed["response_sha256"] !=
                 _sha(answer["response"].encode("utf-8")) or
-                observed["done_reason"] not in ("stop", "length") or
+                observed["done_reason"] != "stop" or
                 type(observed["eval_count"]) is not int or
                 not 0 <= observed["eval_count"] <= 100000 or
                 type(observed["elapsed_ms"]) is not int or
