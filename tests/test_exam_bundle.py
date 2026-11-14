@@ -153,6 +153,26 @@ class StagedExamBundleTests(unittest.TestCase):
             exam_bundle.verify_exam_bundle(
                 alias, expected_manifest_sha256=prepared["manifest_sha256"])
 
+    def test_windows_junction_with_original_ready_name_must_still_fail(self):
+        if os.name != "nt":
+            self.skipTest("Windows NTFS junction-only regression")
+        prepared = self.create()
+        relocated_parent = self.root / "other-parent"
+        relocated_parent.mkdir()
+        original = relocated_parent / self.bundle.name
+        self.bundle.rename(original)
+        result = subprocess.run(
+            ["cmd.exe", "/c", "mklink", "/J", str(self.bundle), str(original)],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            self.skipTest("isolated Windows junction creation unavailable")
+        self.assertEqual(self.bundle.name, original.name)
+        self.assertTrue(self.bundle.is_dir())
+        self.assertFalse(self.bundle.is_symlink())
+        with self.assertRaisesRegex(ValueError, "junction|reparse|ready|redirect"):
+            exam_bundle.verify_exam_bundle(
+                self.bundle, expected_manifest_sha256=prepared["manifest_sha256"])
+
     def test_wrong_held_manifest_pin_rejected(self):
         self.create()
         with self.assertRaisesRegex(ValueError, "manifest|pin|SHA"):
