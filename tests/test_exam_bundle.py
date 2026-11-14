@@ -70,6 +70,22 @@ class StagedExamBundleTests(unittest.TestCase):
         self.assertFalse(self.bundle.exists())
         self.assertEqual(list(self.root.iterdir()), [])
 
+    def test_corrupted_staged_public_source_cannot_be_published(self):
+        original = exam_bundle._write_once
+
+        def tamper_at_manifest_write(path, obj):
+            result = original(path, obj)
+            if Path(path).name == "manifest.json":
+                published_public = Path(path).parent / "public.json"
+                published_public.write_bytes(published_public.read_bytes() + b" ")
+            return result
+
+        with patch.object(exam_bundle, "_write_once", side_effect=tamper_at_manifest_write):
+            with self.assertRaises(ValueError):
+                self.create()
+        self.assertFalse(self.bundle.exists())
+        self.assertEqual(list(self.root.iterdir()), [])
+
     def test_final_rename_failure_does_not_publish_partial_bundle(self):
         with patch.object(exam_bundle.os, "rename",
                           side_effect=OSError("injected final rename failure")):
