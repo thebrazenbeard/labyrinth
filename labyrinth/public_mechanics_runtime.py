@@ -67,6 +67,10 @@ def run_public_mechanics(public_path, candidate_path, responses_out, report_out,
     if (len({str(p.absolute()) for p in files}) != len(files)
             or any(p.exists() for p in files[2:])):
         raise ValueError("hybrid requires distinct original inputs and new output paths")
+    # Preflight both output destinations before producing a receipt or a
+    # corrected roster. This is not an atomic two-file transaction.
+    if not all(p.parent.is_dir() for p in files[2:]):
+        raise FileNotFoundError("both hybrid output parent directories must exist")
     if ((observation_path is None) != (expected_observation_sha256 is None)):
         raise ValueError("original model observation and its pin are both required")
     if (type(expected_public_sha256) is not str
@@ -163,8 +167,11 @@ def run_public_mechanics(public_path, candidate_path, responses_out, report_out,
             "No private exam keys, authenticated examiner or external custody are supplied.",
         ],
     })
-    _write_once(responses_out, selected)
+    # Provenance must be published FIRST. A failure to write its receipt
+    # must never leave a silently corrected answer file that looks neural.
+    # The final response file may still fail; consumers must check BOTH.
     _write_once(report_out, report)
+    _write_once(responses_out, selected)
     return report
 
 
