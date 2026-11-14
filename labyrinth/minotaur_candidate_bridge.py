@@ -241,10 +241,11 @@ class SubprocessCandidateAdapter:
     examiner-owned file paths: independent custody is NOT established.
     """
 
-    __slots__ = ("command", "model_id", "timeout_seconds")
+    __slots__ = ("command", "model_id", "timeout_seconds", "unix_user_id", "unix_group_id")
 
     def __init__(self, command: tuple[str, ...], *, model_id: str,
-                 timeout_seconds: float = 10.0):
+                 timeout_seconds: float = 10.0, unix_user_id: int | None = None,
+                 unix_group_id: int | None = None):
         if (type(command) is not tuple or not 1 <= len(command) <= 16 or
                 any(type(arg) is not str or not arg or len(arg) > 4096 for arg in command)
                 or not os.path.isabs(command[0])):
@@ -252,9 +253,23 @@ class SubprocessCandidateAdapter:
         if (type(timeout_seconds) not in (float, int)
                 or not 0.1 <= timeout_seconds <= 60):
             raise ValueError("candidate timeout must be between 0.1 and 60 seconds")
+        if (unix_user_id is None) != (unix_group_id is None):
+            raise ValueError("POSIX candidate identity requires both user and group")
+        if unix_user_id is not None:
+            if (os.name != "posix" or type(unix_user_id) is not int
+                    or type(unix_group_id) is not int
+                    or not 1 <= unix_user_id < 2**31
+                    or not 1 <= unix_group_id < 2**31):
+                raise ValueError("candidate identity requires non-root POSIX UID and GID")
+            if os.geteuid() != 0:
+                raise PermissionError("POSIX candidate identity drop requires root examiner")
+            if "microsoft" in os.uname().release.lower():
+                raise PermissionError("WSL interop bypasses candidate Linux UID isolation")
         self.command = command
         self.model_id = model_id
         self.timeout_seconds = timeout_seconds
+        self.unix_user_id = unix_user_id
+        self.unix_group_id = unix_group_id
 
     def generate(self, prompt: str, *, seed: int | None = None) -> str:
         if type(prompt) is not str or len(prompt) > 64000:
@@ -265,6 +280,14 @@ class SubprocessCandidateAdapter:
         # import-path overrides are copied from the examiner environment.
         environment = {key: os.environ[key] for key in ("SystemRoot", "WINDIR")
                        if key in os.environ}
+        launch_identity = {}
+        if self.unix_user_id is not None:
+            if (os.name != "posix" or os.geteuid() != 0
+                    or "microsoft" in os.uname().release.lower()):
+                raise PermissionError("candidate UID drop no longer authorized")
+            # Clear supplementary groups before dropping effective UID/GID.
+            launch_identity = {"user": self.unix_user_id,
+                               "group": self.unix_group_id, "extra_groups": ()}
         # Feed stdin from an on-disk PUBLIC request so neither side can
         # deadlock writing an input pipe while the child fills stdout.
         # A separate daemon reader caps bytes held in examiner memory.
@@ -275,7 +298,7 @@ class SubprocessCandidateAdapter:
                 child = subprocess.Popen(
                     self.command, stdin=source, stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL, cwd=directory, env=environment,
-                    shell=False)
+                    shell=False, **launch_identity)
                 result: queue.Queue[bytes | BaseException] = queue.Queue(maxsize=1)
                 cap = MAX_RESPONSE_CHARACTERS * 4
                 def read_bounded() -> None:
