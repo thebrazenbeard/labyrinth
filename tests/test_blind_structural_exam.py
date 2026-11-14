@@ -55,6 +55,26 @@ class BlindStructuralExamTests(unittest.TestCase):
         return score_exam(self.private, self.public, self.commit, self.responses,
                           self.out, expected_precommit_sha256=plan["receipt_sha256"])
 
+    def test_missing_precommit_parent_rejected_before_private_or_public_writes(self):
+        missing = self.root / "missing-precommit-parent" / "precommit.json"
+        with self.assertRaises((FileNotFoundError, ValueError)):
+            prepare_exam(self.private, self.public, missing,
+                         count=2, rng=random.Random(47012))
+        self.assertFalse(self.private.exists(),
+                         "private answers must not exist without a precommit destination")
+        self.assertFalse(self.public.exists(),
+                         "public exam must not exist without a precommit destination")
+        self.assertFalse(missing.exists())
+
+    def test_missing_public_parent_rejected_before_private_answer_write(self):
+        missing = self.root / "missing-public-parent" / "public.json"
+        with self.assertRaises((FileNotFoundError, ValueError)):
+            prepare_exam(self.private, missing, self.commit,
+                         count=2, rng=random.Random(47013))
+        self.assertFalse(self.private.exists(),
+                         "private answers must not survive failed public output preflight")
+        self.assertFalse(self.commit.exists())
+
     def test_public_prompt_omits_witness_and_private_material(self):
         private, public, plan = self.prepare()
         self.assertEqual(len(public["trials"]), 8)
