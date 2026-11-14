@@ -164,6 +164,35 @@ class BlindStructuralExamTests(unittest.TestCase):
         self.assertFalse(alternate.exists(),
                          "precommit must not be written through a dangling symlink")
 
+    def test_public_readback_mismatch_blocks_private_publication(self):
+        original = examiner_module._file_bytes
+
+        def forged_readback(path, limit):
+            if Path(path) == self.public:
+                return b"tampered-public-source-bytes"
+            return original(path, limit)
+
+        with patch.object(examiner_module, "_file_bytes", side_effect=forged_readback):
+            with self.assertRaisesRegex(ValueError, "public exam differs"):
+                prepare_exam(self.private, self.public, self.commit,
+                             count=2, rng=random.Random(49016))
+        self.assertFalse(self.private.exists())
+        self.assertFalse(self.commit.exists())
+
+    def test_precommit_readback_mismatch_blocks_private_publication(self):
+        original = examiner_module._file_bytes
+
+        def forged_readback(path, limit):
+            if Path(path) == self.commit:
+                return b"tampered-precommit-bytes"
+            return original(path, limit)
+
+        with patch.object(examiner_module, "_file_bytes", side_effect=forged_readback):
+            with self.assertRaisesRegex(ValueError, "precommit differs"):
+                prepare_exam(self.private, self.public, self.commit,
+                             count=2, rng=random.Random(49017))
+        self.assertFalse(self.private.exists())
+
     def test_symlinked_private_parent_rejected_before_answer_redirection(self):
         real_parent = self.root / "real-answer-parent"
         real_parent.mkdir()
