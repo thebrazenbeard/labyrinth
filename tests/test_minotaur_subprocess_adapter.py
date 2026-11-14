@@ -138,5 +138,25 @@ class ProcessCandidateBoundaryTests(unittest.TestCase):
                              "Timed-out candidate left a live grandchild behind")
 
 
+
+    def test_detached_stdout_holder_does_not_stall_cleanup(self):
+        """A detached stdout-holder cannot extend the examiner's output deadline."""
+        if os.name != "posix":
+            return  # Windows process-tree deadline remains unqualified.
+        # A synthetic grandchild escapes the process group and exits naturally.
+        grandchild = "import time;time.sleep(2.5)"
+        parent = ("import subprocess,sys;"
+                  "subprocess.Popen((sys.executable,'-c',sys.argv[1]),"
+                  "start_new_session=True);"
+                  "print('not JSON',flush=True)")
+        started = time.monotonic()
+        with self.assertRaises(TimeoutError):
+            probe((sys.executable, "-c", parent, grandchild),
+                  seconds=0.25).generate('{"public":true}')
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 1.4,
+                        "detached stdout holder blocked bounded candidate cleanup")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import select
 import signal
 import subprocess
 import tempfile
@@ -232,6 +233,31 @@ class FixedActionAdapter:
         return _json({"kind": "CLAIM", "claim": {"kind": "ABSTAIN", "assessment": "UNKNOWN"}})
 
 
+def _read_stdout_posix(pipe: Any, *, cap: int, deadline: float) -> bytes:
+    """Poll one candidate pipe without an EOF-blocked reader thread.
+
+    A detached grandchild may inherit stdout indefinitely; readiness polling
+    lets the examiner enforce its deadline and close its own file descriptor.
+    This does not kill or contain the detached process.
+    """
+    descriptor = pipe.fileno()
+    fragments: list[bytes] = []
+    remaining_bytes = cap + 1
+    while remaining_bytes:
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0:
+            raise TimeoutError("candidate output deadline exceeded")
+        ready, _, _ = select.select([descriptor], [], [], remaining_seconds)
+        if not ready:
+            raise TimeoutError("candidate output deadline exceeded")
+        data = os.read(descriptor, remaining_bytes)
+        if not data:
+            break
+        fragments.append(data)
+        remaining_bytes -= len(data)
+    return b"".join(fragments)
+
+
 class SubprocessCandidateAdapter:
     """Optional public-JSON child protocol, NOT an OS access-control boundary.
 
@@ -291,7 +317,8 @@ class SubprocessCandidateAdapter:
                                     "group": self.unix_group_id, "extra_groups": ()})
         # Feed stdin from an on-disk PUBLIC request so neither side can
         # deadlock writing an input pipe while the child fills stdout.
-        # A separate daemon reader caps bytes held in examiner memory.
+        # POSIX uses deadline-aware pipe polling; Windows retains its bounded
+        # daemon reader. Neither path establishes a sandbox or model identity.
         with tempfile.TemporaryDirectory(prefix="labyrinth_candidate_") as directory:
             request_file = Path(directory) / "public_request.json"
             request_file.write_bytes(request)
@@ -300,23 +327,30 @@ class SubprocessCandidateAdapter:
                     self.command, stdin=source, stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL, cwd=directory, env=environment,
                     shell=False, **launch_identity)
-                result: queue.Queue[bytes | BaseException] = queue.Queue(maxsize=1)
                 cap = MAX_RESPONSE_CHARACTERS * 4
-                def read_bounded() -> None:
-                    try:
-                        result.put(child.stdout.read(cap + 1))
-                    except BaseException as exc:
-                        result.put(exc)
-                reader = threading.Thread(target=read_bounded, daemon=True)
-                reader.start()
                 deadline = time.monotonic() + self.timeout_seconds
+                reader: threading.Thread | None = None
+                if os.name != "posix":
+                    # Windows pipe waits still use the legacy daemon reader;
+                    # independent Windows tree containment is NOT established.
+                    result: queue.Queue[bytes | BaseException] = queue.Queue(maxsize=1)
+                    def read_bounded() -> None:
+                        try:
+                            result.put(child.stdout.read(cap + 1))
+                        except BaseException as exc:
+                            result.put(exc)
+                    reader = threading.Thread(target=read_bounded, daemon=True)
+                    reader.start()
                 try:
-                    try:
-                        raw = result.get(timeout=self.timeout_seconds)
-                    except queue.Empty as exc:
-                        raise TimeoutError("candidate output deadline exceeded") from exc
-                    if isinstance(raw, BaseException):
-                        raise RuntimeError("candidate output read failed") from raw
+                    if os.name == "posix":
+                        raw = _read_stdout_posix(child.stdout, cap=cap, deadline=deadline)
+                    else:
+                        try:
+                            raw = result.get(timeout=self.timeout_seconds)
+                        except queue.Empty as exc:
+                            raise TimeoutError("candidate output deadline exceeded") from exc
+                        if isinstance(raw, BaseException):
+                            raise RuntimeError("candidate output read failed") from raw
                     if len(raw) > cap:
                         return "X" * (MAX_RESPONSE_CHARACTERS + 1)
                     child.wait(timeout=max(0.01, deadline - time.monotonic()))
@@ -335,7 +369,8 @@ class SubprocessCandidateAdapter:
                     elif child.poll() is None:
                         child.kill()
                     child.wait()
-                    reader.join(timeout=0.5)
+                    if reader is not None:
+                        reader.join(timeout=0.5)
                     child.stdout.close()
 
 
