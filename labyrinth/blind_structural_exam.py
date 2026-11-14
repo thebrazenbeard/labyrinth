@@ -159,7 +159,11 @@ def prepare_exam(private_path, public_path, precommit_path, *,
                  count=8, rng=None, worlds=None) -> dict:
     """Prepare caller-held answer key and a separate candidate-facing bundle."""
     locations = [Path(private_path), Path(public_path), Path(precommit_path)]
-    if len({str(p.absolute()) for p in locations}) != 3 or any(p.exists() for p in locations):
+    if (len({str(p.absolute()) for p in locations}) != 3
+            or any(p.exists() or p.is_symlink() for p in locations)):
+        # Path.exists() is false for a dangling symlink. Without this
+        # rejection, exclusive-create output follows its link target and
+        # could redirect private answers or an apparently committed exam.
         raise ValueError("exam preparation requires three distinct fresh output paths")
     # The private answer key must not be created before discovering that
     # another required destination is impossible to open (e.g. missing parent).
