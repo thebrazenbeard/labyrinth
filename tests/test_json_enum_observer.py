@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 import threading
 import unittest
 
-from labyrinth.blind_structural_exam import prepare_exam, score_exam
+from labyrinth.blind_structural_exam import prepare_exam, score_exam, _public_trial
 from labyrinth.json_enum_observer import observe_json_enum_exam
 from labyrinth.local_neural_observer import verify_local_observation
 
@@ -202,6 +202,23 @@ class JsonEnumModelEvidenceTests(unittest.TestCase):
             verify_local_observation(
                 self.observation, evidence["receipt_sha256"],
                 self.public.read_bytes(), self.responses.read_bytes())
+
+    def test_four_move_question_rejected_before_any_model_request(self):
+        # Keep enum enumeration bounded to <=40 strings; never silently
+        # broaden an unverified small-model format protocol.
+        bundle = json.loads(self.public.read_text(encoding="utf-8"))
+        row = bundle["trials"][0]
+        world = row["world"]
+        world["max_moves"] = 4
+        row["prompt"] = _public_trial({"trial_id": row["trial_id"],
+                                       "world": world})["prompt"]
+        self.public.write_text(json.dumps(bundle), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "max_moves"):
+            self.run_observer()
+        self.assertEqual(self.state["gets"], 0)
+        self.assertEqual(self.state["posts"], [])
+        self.assertFalse(self.responses.exists())
+        self.assertFalse(self.observation.exists())
 
     def test_reused_output_paths_and_nonloopback_endpoint_rejected(self):
         self.run_observer()
