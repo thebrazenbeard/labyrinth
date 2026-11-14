@@ -31,7 +31,8 @@ class LocalModelEvidenceTests(unittest.TestCase):
         self.model = "qwen3.5:0.8b"
         self.state = {"gets": 0, "posts": [], "first_digest": "b" * 64,
                       "last_digest": "b" * 64, "reply_model": self.model,
-                      "reply": "PLAN: A", "redirect": False, "done": True}
+                      "reply": "PLAN: A", "redirect": False, "done": True,
+                      "done_reason": "stop", "tag_sequence": None}
         state = self.state
 
         class Handler(BaseHTTPRequestHandler):
@@ -52,8 +53,12 @@ class LocalModelEvidenceTests(unittest.TestCase):
                 if self.path != "/api/tags":
                     return self._send({"error": "bad route"}, 404)
                 state["gets"] += 1
-                digest = (state["first_digest"] if state["gets"] == 1
-                          else state["last_digest"])
+                digest = (
+                    state["tag_sequence"][min(state["gets"] - 1,
+                                              len(state["tag_sequence"]) - 1)]
+                    if state["tag_sequence"] is not None
+                    else (state["first_digest"] if state["gets"] == 1
+                          else state["last_digest"]))
                 self._send({"models": [{
                     "name": "qwen3.5:0.8b", "digest": digest, "size": 5000
                 }]})
@@ -69,7 +74,7 @@ class LocalModelEvidenceTests(unittest.TestCase):
                 state["posts"].append(req)
                 self._send({"model": state["reply_model"],
                             "response": state["reply"],
-                            "done": state["done"], "done_reason": "stop",
+                            "done": state["done"], "done_reason": state["done_reason"],
                             "eval_count": 3})
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -87,7 +92,10 @@ class LocalModelEvidenceTests(unittest.TestCase):
         observed = self.run_observe()
         public = json.loads(self.public.read_text(encoding="utf-8"))
         answers = json.loads(self.responses.read_text(encoding="utf-8"))
-        self.assertEqual(self.state["gets"], 2)
+        self.assertEqual(self.state["gets"], 5)
+        self.assertEqual(observed["model_tag_check_count"], 5)
+        self.assertEqual(observed["model_tag_check_policy"],
+                         "INITIAL_AND_PER_TRIAL_BEFORE_AFTER")
         self.assertEqual(len(self.state["posts"]), 2)
         self.assertEqual([call["prompt"] for call in self.state["posts"]],
                          [row["prompt"] for row in public["trials"]])
@@ -118,6 +126,52 @@ class LocalModelEvidenceTests(unittest.TestCase):
             verify_local_observation(self.observation, "0" * 64,
                                      self.public.read_bytes(), self.responses.read_bytes())
         self.assertFalse(self.score_file.exists())
+
+    def test_legacy_v1_receipt_stays_replayable_with_weaker_evidence_label(self):
+        current = self.run_observe()
+        legacy = json.loads(self.observation.read_text(encoding="utf-8"))
+        legacy["schema"] = "labyrinth.blind-model-local-http.v1"
+        legacy.pop("model_tag_check_policy")
+        legacy.pop("model_tag_check_count")
+        legacy.pop("receipt_sha256")
+        legacy_sha = sha256(json.dumps(
+            legacy, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False).encode("utf-8")).hexdigest()
+        legacy["receipt_sha256"] = legacy_sha
+        self.observation.write_text(json.dumps(legacy), encoding="utf-8")
+        verified = verify_local_observation(
+            self.observation, legacy_sha, self.public.read_bytes(),
+            self.responses.read_bytes())
+        self.assertEqual(verified["evidence"],
+                         "LOCAL_HTTP_V1_FINAL_ONLY_NOT_ATTESTED")
+        self.assertNotEqual(legacy_sha, current["receipt_sha256"])
+        result = score_exam(
+            self.private, self.public, self.precommit, self.responses,
+            self.score_file, expected_precommit_sha256=self.plan["receipt_sha256"],
+            observation_path=self.observation,
+            expected_observation_sha256=legacy_sha)
+        self.assertEqual(result["invocation_evidence"],
+                         "LOCAL_HTTP_V1_FINAL_ONLY_NOT_ATTESTED")
+        self.assertFalse(result["neural_learning_verified"])
+        self.assertFalse(result["independent_custody_verified"])
+
+    def test_legacy_v1_truncated_generation_does_not_become_completed_model_evidence(self):
+        self.run_observe()
+        v1 = json.loads(self.observation.read_text(encoding="utf-8"))
+        v1["schema"] = "labyrinth.blind-model-local-http.v1"
+        v1.pop("model_tag_check_policy")
+        v1.pop("model_tag_check_count")
+        v1["trials"][0]["done_reason"] = "length"
+        v1.pop("receipt_sha256")
+        v1_sha = sha256(json.dumps(
+            v1, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False).encode("utf-8")).hexdigest()
+        v1["receipt_sha256"] = v1_sha
+        self.observation.write_text(json.dumps(v1), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "response|incomplete|observation"):
+            verify_local_observation(
+                self.observation, v1_sha, self.public.read_bytes(),
+                self.responses.read_bytes())
 
     def test_score_can_check_original_http_observation_digest_without_promoting_custody(self):
         receipt = self.run_observe()
@@ -191,6 +245,50 @@ class LocalModelEvidenceTests(unittest.TestCase):
     def test_model_digest_changes_mid_exam_rejected_without_outputs(self):
         self.state["last_digest"] = "c" * 64
         with self.assertRaisesRegex(ValueError, "digest|model"):
+            self.run_observe()
+        self.assertFalse(self.responses.exists())
+        self.assertFalse(self.observation.exists())
+
+    def test_transient_advertised_model_swap_between_queries_rejected(self):
+        # Old code checked exactly first and last. Both are B. But during
+        # the first case the tag switches to C and later switches back.
+        self.state["tag_sequence"] = [
+            "b" * 64, "b" * 64, "c" * 64, "b" * 64, "b" * 64, "b" * 64]
+        with self.assertRaisesRegex(ValueError, "digest|model|changed"):
+            self.run_observe()
+        self.assertFalse(self.responses.exists())
+        self.assertFalse(self.observation.exists())
+
+    def test_transient_digest_flip_only_before_second_trial_is_rejected(self):
+        # The first case is stable; the second case's preflight switches
+        # to another advertised digest, then would switch back afterward.
+        self.state["tag_sequence"] = [
+            "b" * 64, "b" * 64, "b" * 64, "c" * 64, "b" * 64]
+        with self.assertRaisesRegex(ValueError, "digest|model|changed"):
+            self.run_observe()
+        self.assertFalse(self.responses.exists())
+        self.assertFalse(self.observation.exists())
+
+    def test_rehashed_v2_receipt_with_fake_per_trial_check_count_rejected(self):
+        self.run_observe()
+        forged = json.loads(self.observation.read_text(encoding="utf-8"))
+        forged["model_tag_check_count"] = 2
+        forged.pop("receipt_sha256")
+        forged_sha = sha256(json.dumps(
+            forged, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False).encode("utf-8")).hexdigest()
+        forged["receipt_sha256"] = forged_sha
+        self.observation.write_text(json.dumps(forged), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "observation|pin|evidence"):
+            verify_local_observation(
+                self.observation, forged_sha, self.public.read_bytes(),
+                self.responses.read_bytes())
+
+    def test_truncated_response_cannot_get_a_successful_model_receipt(self):
+        # Even a syntactically valid plan may only be a token-cap prefix.
+        self.state["reply"] = "PLAN: A"
+        self.state["done_reason"] = "length"
+        with self.assertRaisesRegex(ValueError, "incomplete|finish|length|model reply"):
             self.run_observe()
         self.assertFalse(self.responses.exists())
         self.assertFalse(self.observation.exists())
