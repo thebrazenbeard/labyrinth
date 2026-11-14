@@ -100,6 +100,22 @@ class PublicMechanicsHybridTests(unittest.TestCase):
         self.assertEqual(scored["case_count"], 2)
         self.assertEqual(scored["invocation_evidence"], "NOT_SUPPLIED")
 
+    def test_corrected_roster_is_not_neural_candidate_schema_and_cannot_be_scored_directly(self):
+        self.make_candidate(["UNSAT", "UNSAT"])
+        self.run_hybrid()
+        corrected = json.loads(self.hybrid.read_text(encoding="utf-8"))
+        self.assertEqual(
+            corrected["schema"], "labyrinth.public-mechanics-selected.v2")
+        self.assertNotEqual(corrected["schema"], RESPONSE_SCHEMA)
+        # The old source-only examiner must reject hybrid answers unless
+        # an explicit source-hybrid verification path has been used.
+        with self.assertRaisesRegex(ValueError, "candidate|schema|response"):
+            score_exam(
+                self.private, self.public, self.precommit, self.hybrid,
+                self.score,
+                expected_precommit_sha256=self.plan["receipt_sha256"])
+        self.assertFalse(self.score.exists())
+
     def test_candidate_false_unsat_on_satisfiable_case_is_replaced_without_neural_credit(self):
         self.make_candidate(["UNSAT", "UNSAT"])
         report = self.run_hybrid()
