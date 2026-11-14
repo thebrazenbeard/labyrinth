@@ -64,6 +64,33 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "nesting exceeds"):
                 load_json(source)
 
+    def test_json_loader_rejects_over_depth_before_decoder_is_invoked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "over-depth.json"
+            source.write_bytes(b"[" * 129 + b"0" + b"]" * 129)
+            with patch("labyrinth.runner.json.loads") as decode:
+                with self.assertRaisesRegex(ValueError, "nesting exceeds"):
+                    load_json(source)
+                decode.assert_not_called()
+
+    def test_json_nesting_budget_ignores_brackets_and_escaped_quotes_in_strings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "quoted-brackets.json"
+            payload = {"quoted": "[{" * 130 + "escaped \\"quote\\" " + "}]" * 130}
+            source.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(load_json(source), payload)
+
+    def test_json_loader_accepts_bounded_nested_array(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "within-budget.json"
+            source.write_bytes(b"[" * 128 + b"0" + b"]" * 128)
+            value = load_json(source)
+            for _ in range(128):
+                self.assertIsInstance(value, list)
+                self.assertEqual(len(value), 1)
+                value = value[0]
+            self.assertEqual(value, 0)
+
     def test_replay_correct_answers_and_private_answer_keys(self):
         cases = generate_maze(seed=21, count=2, tiers=(1, 2, 3), split="eval")
         model = ReplayAdapter({c.prompt: f"ANSWER: {c.answer}" for c in cases})
