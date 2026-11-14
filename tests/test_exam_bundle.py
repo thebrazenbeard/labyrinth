@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import random
+import subprocess
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
@@ -110,6 +111,31 @@ class StagedExamBundleTests(unittest.TestCase):
             exam_bundle.prepare_exam_bundle(
                 alias / "ready-exam", count=2, rng=random.Random(50014))
         self.assertFalse((target / "ready-exam").exists())
+
+    def test_unpublished_staging_name_is_not_accepted_as_ready(self):
+        prepared = self.create()
+        staged = self.root / ".ready-exam.stage-interrupted"
+        self.bundle.rename(staged)
+        self.assertTrue((staged / "manifest.json").is_file())
+        with self.assertRaisesRegex(ValueError, "ready|publish|name|staging"):
+            exam_bundle.verify_exam_bundle(
+                staged, expected_manifest_sha256=prepared["manifest_sha256"])
+
+    def test_windows_junction_alias_cannot_masquerade_as_ready_bundle(self):
+        if os.name != "nt":
+            self.skipTest("Windows NTFS junction-only regression")
+        prepared = self.create()
+        alias = self.root / "redirected-ready"
+        result = subprocess.run(
+            ["cmd.exe", "/c", "mklink", "/J", str(alias), str(self.bundle)],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            self.skipTest("isolated Windows junction creation unavailable")
+        self.assertTrue(alias.is_dir())
+        self.assertFalse(alias.is_symlink())
+        with self.assertRaisesRegex(ValueError, "junction|reparse|ready|redirect"):
+            exam_bundle.verify_exam_bundle(
+                alias, expected_manifest_sha256=prepared["manifest_sha256"])
 
     def test_wrong_held_manifest_pin_rejected(self):
         self.create()
