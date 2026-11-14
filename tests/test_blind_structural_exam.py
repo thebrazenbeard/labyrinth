@@ -11,6 +11,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import random
 from tempfile import TemporaryDirectory
@@ -74,6 +75,38 @@ class BlindStructuralExamTests(unittest.TestCase):
         self.assertFalse(self.private.exists(),
                          "private answers must not survive failed public output preflight")
         self.assertFalse(self.commit.exists())
+
+    def test_dangling_private_output_symlink_rejected_before_answer_redirect(self):
+        alternate = self.root / "uncommitted-answer-target.json"
+        try:
+            os.symlink(alternate, self.private)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"creating test-only Windows symlinks unavailable: {exc}")
+        self.assertFalse(self.private.exists())
+        self.assertTrue(self.private.is_symlink())
+        with self.assertRaisesRegex(ValueError, "fresh|symlink|link"):
+            prepare_exam(self.private, self.public, self.commit,
+                         count=2, rng=random.Random(47014))
+        self.assertFalse(alternate.exists(),
+                         "private answers must never be redirected to a dangling link target")
+        self.assertFalse(self.public.exists())
+        self.assertFalse(self.commit.exists())
+
+    def test_dangling_precommit_symlink_rejected_before_any_case_written(self):
+        alternate = self.root / "uncommitted-precommit-target.json"
+        try:
+            os.symlink(alternate, self.commit)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"creating test-only Windows symlinks unavailable: {exc}")
+        self.assertFalse(self.commit.exists())
+        self.assertTrue(self.commit.is_symlink())
+        with self.assertRaisesRegex(ValueError, "fresh|symlink|link"):
+            prepare_exam(self.private, self.public, self.commit,
+                         count=2, rng=random.Random(47015))
+        self.assertFalse(self.private.exists())
+        self.assertFalse(self.public.exists())
+        self.assertFalse(alternate.exists(),
+                         "precommit must not be written through a dangling symlink")
 
     def test_public_prompt_omits_witness_and_private_material(self):
         private, public, plan = self.prepare()
