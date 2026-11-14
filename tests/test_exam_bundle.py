@@ -87,9 +87,45 @@ class StagedExamBundleTests(unittest.TestCase):
         self.assertEqual(list(self.root.iterdir()), [])
 
     def test_final_rename_failure_does_not_publish_partial_bundle(self):
-        with patch.object(exam_bundle.os, "rename",
+        with patch.object(exam_bundle, "_publish_ready",
                           side_effect=OSError("injected final rename failure")):
             with self.assertRaisesRegex(OSError, "rename failure"):
+                self.create()
+        self.assertFalse(self.bundle.exists())
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_unix_raced_empty_destination_is_not_silently_replaced(self):
+        if os.name != "posix":
+            self.skipTest("POSIX directory rename can replace an empty destination")
+        real_exists = Path.exists
+        checks = 0
+
+        def race_between_check_and_publish(path, *args, **kwargs):
+            nonlocal checks
+            was_present = real_exists(path, *args, **kwargs)
+            if path == self.bundle and not was_present:
+                checks += 1
+                if checks == 2:
+                    # A separate actor creates an empty directory AFTER the
+                    # pre-rename freshness check but BEFORE the actual rename.
+                    self.bundle.mkdir()
+            return was_present
+
+        with patch.object(Path, "exists", new=race_between_check_and_publish):
+            with self.assertRaises(FileExistsError):
+                self.create()
+        self.assertEqual(checks, 2)
+        self.assertTrue(self.bundle.is_dir())
+        self.assertEqual(list(self.bundle.iterdir()), [],
+                         "concurrent empty directory must not be overwritten")
+        self.assertFalse(any(".stage-" in p.name for p in self.root.iterdir()),
+                         "rejected bundle stage must be cleaned")
+
+    def test_linux_missing_no_replace_syscall_refuses_publication(self):
+        if not os.sys.platform.startswith("linux"):
+            self.skipTest("Linux-specific fail-closed feature detection")
+        with patch.object(exam_bundle.ctypes, "CDLL", return_value=object()):
+            with self.assertRaisesRegex(OSError, "renameat2"):
                 self.create()
         self.assertFalse(self.bundle.exists())
         self.assertEqual(list(self.root.iterdir()), [])

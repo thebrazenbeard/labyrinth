@@ -46,12 +46,16 @@ separately scoped `public.json` content over an authorized interface.
    original source hashes are read back and validated.
 3. A strict source-only manifest is written and the entire staged bundle is
    verified, including original finite mechanics witnesses and exact bytes.
-4. Only after these checks, an `os.rename(stage, ready)` exposes the final
-   directory name. The verifier rejects staging names and NTFS junction
-   aliases as ready bundles.
-5. Ordinary staging/write/rename exceptions remove the **newly owned**
-   temporary directory and do not create the ready destination. Existing
-   destination files or directories are not intentionally replaced.
+4. Only after these checks, the platform-specific no-replace publication
+   operation exposes the final ready directory. Windows uses `os.rename`,
+   which fails if the destination exists. On Linux, the runtime calls
+   `renameat2` with `RENAME_NOREPLACE` so a concurrently created empty
+   destination is NOT silently replaced. If libc, the kernel, or the target
+   filesystem cannot supply the operation, the runtime fails closed. Other
+   operating systems are currently unsupported for bundle publication.
+   The verifier rejects staging names and NTFS junction aliases.
+5. Ordinary staging/write/publication exceptions remove the **newly owned**
+   temporary directory and leave a concurrently created destination intact.
 
 **Never infer actual examiner custody from these properties.** The SHA is a
 caller-held consistency pin. A user with access to the staging parent can
@@ -64,19 +68,26 @@ destination, dangling output symlink, symlinked parent, missing bundle,
 manifest-write refusal, rename refusal, wrong external manifest SHA,
 modified private/public/manifest files, extra/missing members, rejected
 staging-directory name, and rejected actual Windows NTFS junction alias.
+A Linux-specific race test creates an empty final directory **between**
+the last `Path.exists()` check and publication. Before the fix, ordinary
+`os.rename` silently replaced that directory on Lappy Ubuntu WSL.
+With `RENAME_NOREPLACE`, the same test fails publication with EEXIST,
+preserves the destination, and cleans the failed staging directory.
+A Linux-only test also verifies that absent `renameat2` support is
+rejected, not downgraded to the unsafe rename.
 
 This is **not** a guaranteed crash-atomic or power-loss-durable directory:
 a crash before the final rename may leave an unready staging directory;
 filesystem durability and parent-directory fsync have not been qualified.
-Even if final rename is ordinarily one namespace operation, its exact
-security, filesystem and power-loss behavior must be proved for the
-target volume and environment. An attacker racing directory mappings can
-still bypass static pathname preflight. Python documents that `os.rename`
-has platform-dependent behavior on an existing destination; on Unix, an
-existing **empty directory** can be replaced. Therefore the
-check-then-rename sequence is not a race-free no-clobber guarantee against
-another actor. See:
+Even if a no-replace rename is ordinarily a single namespace operation,
+its exact security, filesystem and power-loss behavior must be proved for
+the target volume and environment. An attacker racing directory mappings
+can still bypass static pathname preflight; the Linux no-replace flag
+prevents replacing the destination entry, not substituting untrusted parent
+directories or leaking private files. Not every Linux filesystem supports
+the syscall flag; unsupported operations fail without publishing. See:
 
+- Linux `renameat2(RENAME_NOREPLACE)`: https://man7.org/linux/man-pages/man2/renameat2.2.html
 - Python 3.12 `os.rename`: https://docs.python.org/3.12/library/os.html#os.rename
 - Microsoft `MoveFileEx`: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexa
 - Microsoft [Moving and Replacing Files](https://learn.microsoft.com/en-us/windows/win32/fileio/moving-and-replacing-files)

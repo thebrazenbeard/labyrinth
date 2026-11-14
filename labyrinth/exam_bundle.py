@@ -11,12 +11,15 @@ examiner identity, model execution, weight attestation or neural learning.
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 from hashlib import sha256
 import json
 import os
 from pathlib import Path
 import shutil
 import stat
+import sys
 import tempfile
 
 from .blind_structural_exam import MAX_BYTES, _read_bundle, prepare_exam
@@ -117,6 +120,37 @@ def verify_exam_bundle(bundle, *, expected_manifest_sha256):
         ready_name=Path(bundle).name)
 
 
+def _publish_ready(stage: Path, ready: Path) -> None:
+    """Publish the complete directory without replacing a concurrent target.
+
+    Windows os.rename rejects an existing destination. On Linux ordinary
+    os.rename can overwrite an empty directory, so use renameat2 with the
+    RENAME_NOREPLACE flag. Fail closed if the kernel/libc/filesystem cannot
+    provide that operation; never downgrade to a clobbering rename.
+    """
+    if os.name == "nt":
+        os.rename(stage, ready)
+        return
+    if not sys.platform.startswith("linux"):
+        raise OSError(errno.ENOTSUP,
+                      "atomic no-replace bundle rename unavailable on this OS")
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise OSError(errno.ENOTSUP,
+                      "Linux libc does not expose renameat2")
+    renameat2.argtypes = (
+        ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p,
+        ctypes.c_uint)
+    renameat2.restype = ctypes.c_int
+    # Linux AT_FDCWD=-100, RENAME_NOREPLACE=1. Both paths share a parent.
+    if renameat2(-100, os.fsencode(stage), -100, os.fsencode(ready), 1):
+        err = ctypes.get_errno()
+        if err == errno.EEXIST:
+            raise FileExistsError(err, os.strerror(err), os.fspath(ready))
+        raise OSError(err, os.strerror(err), os.fspath(ready))
+
+
 def prepare_exam_bundle(destination, *, count=8, rng=None, worlds=None):
     """Stage complete original exam files and publish by sibling rename.
 
@@ -157,7 +191,7 @@ def prepare_exam_bundle(destination, *, count=8, rng=None, worlds=None):
             ready_name=ready.name)
         if ready.exists() or ready.is_symlink():
             raise FileExistsError("ready bundle was created during staging")
-        os.rename(stage, ready)
+        _publish_ready(stage, ready)
         published = True
         return {
             "schema": SCHEMA,
