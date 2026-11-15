@@ -773,6 +773,10 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
             last = _verdict(initial)
             if decision == "CLAIM" and index < len(receipt.turns) - 1:
                 return False
+        if (receipt.turns and receipt.turns[-1].disposition == "ACTION"
+                and not _terminal(initial) and len(receipt.turns) < call_limit):
+            # Runner would request another model response on this active case.
+            return False
         return (receipt.final_verdict == last
                 and receipt.verified_escape == _is_verified_escape(last, last_feedback))
     except (ValueError, TypeError, KeyError, AttributeError, OSError, RecursionError):

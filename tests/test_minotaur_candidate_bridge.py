@@ -608,6 +608,25 @@ class CandidateBridgeTests(unittest.TestCase):
         forged = _seal(**receipt_fields)
         self.assertFalse(audit_receipt(forged, public, factory))
 
+    def test_rehashed_receipt_cannot_stop_early_with_unused_model_calls(self):
+        public, factory, _ = context()
+        legitimate = run_candidate(
+            public, factory, FixedActionAdapter(("wait",)), max_model_calls=1)
+        self.assertEqual(len(legitimate.turns), 1)
+        self.assertEqual(legitimate.turns[0].disposition, "ACTION")
+        self.assertTrue(audit_receipt(legitimate, public, factory))
+
+        # Re-sign an otherwise real one-action trace to claim a larger budget.
+        # The runner cannot stop after ACTION with calls still available.
+        fields_without_digest = {
+            field.name: getattr(legitimate, field.name)
+            for field in fields(RunReceipt)
+            if field.name != "receipt_sha256"
+        }
+        forged = _seal(**{**fields_without_digest, "max_model_calls": 32})
+        self.assertNotEqual(forged.receipt_sha256, legitimate.receipt_sha256)
+        self.assertFalse(audit_receipt(forged, public, factory))
+
     def test_write_once_receipt_and_roundtrip_self_digest(self):
         public, factory, _ = context()
         receipt = run_candidate(public, factory, FixedActionAdapter(WINNING_SEED_ZERO))
