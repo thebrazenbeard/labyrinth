@@ -194,6 +194,56 @@ class ProcessCandidateBoundaryTests(unittest.TestCase):
                         "Windows inherited stdout extended the candidate deadline")
 
 
+    def test_windows_candidate_cannot_start_before_job_attachment(self):
+        """Synthetic model code must not run during a delayed Windows attach."""
+        if os.name != "nt":
+            return  # Keep the strict Linux neural-CPU skip contract.
+        from labyrinth import _windows_gated_launch as jobs
+        with tempfile.TemporaryDirectory(prefix="minotaur_gate_w65_") as root:
+            marker = Path(root, "executed.txt")
+            command = os.path.join(os.environ["SystemRoot"], "System32", "cmd.exe")
+            ping = os.path.join(os.environ["SystemRoot"], "System32", "PING.EXE")
+            script = Path(root, "candidate.cmd")
+            script.write_text(f'@echo off\necho executed>"{marker}"\n'
+                              f'"{ping}" -n 5 127.0.0.1 >NUL\necho attached\n',
+                              encoding="utf-8")
+            original = jobs.attach_kill_on_close
+            observed = []
+            def delayed_attachment(child):
+                time.sleep(0.75)
+                observed.append(marker.exists())
+                self.assertFalse(marker.exists(),
+                                 "candidate executed before Windows job attachment")
+                return original(child)
+            with mock.patch.object(jobs, "attach_kill_on_close",
+                                   side_effect=delayed_attachment):
+                output = probe((command, "/d", "/c", str(script)),
+                               seconds=12.0).generate('{"public":true}')
+            self.assertEqual(observed, [False],
+                             "candidate executed before it entered the Windows job")
+            self.assertTrue(marker.exists(), "candidate never started after attach")
+            self.assertEqual(output.strip(), "attached")
+
+    def test_windows_failed_job_attachment_never_releases_candidate(self):
+        """Denied job association must kill bootstrap before untrusted code."""
+        if os.name != "nt":
+            return
+        from labyrinth import _windows_gated_launch as jobs
+        with tempfile.TemporaryDirectory(prefix="minotaur_denied_w65_") as root:
+            marker = Path(root, "executed.txt")
+            cmd = os.path.join(os.environ["SystemRoot"], "System32", "cmd.exe")
+            script = Path(root, "candidate.cmd")
+            script.write_text(f'@echo off\necho executed>"{marker}"\n',
+                              encoding="utf-8")
+            with mock.patch.object(jobs, "attach_kill_on_close",
+                                   side_effect=PermissionError("synthetic job denial")):
+                with self.assertRaises(PermissionError):
+                    probe((cmd, "/d", "/c", str(script)),
+                          seconds=5.0).generate('{"public":true}')
+            time.sleep(0.25)
+            self.assertFalse(marker.exists(),
+                             "untrusted candidate ran after denied job association")
+
     def test_windows_candidate_descendant_dies_after_parent_timeout(self):
         """Real same-job descendant must not execute after examiner cleanup."""
         if os.name != "nt":
