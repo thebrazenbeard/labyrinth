@@ -72,7 +72,11 @@ def _no_nan(_value: str) -> Any:
     raise ValueError("non-finite JSON number")
 
 
-def _public(value: Mapping[str, Any]) -> str:
+def _public(value: Mapping[str, Any], *, require_plain_containers: bool = False) -> str:
+    # Check type identity BEFORE isinstance/Mapping iteration: programmable
+    # __class__ and container methods are not part of a JSON data boundary.
+    if require_plain_containers and type(value) is not dict:
+        raise ValueError("process-only public view requires plain JSON containers")
     if not isinstance(value, Mapping):
         raise ValueError("public view must be a mapping")
     active_containers: set[int] = set()
@@ -85,8 +89,17 @@ def _public(value: Mapping[str, Any]) -> str:
         visited_nodes += 1
         if len(path) > 32 or visited_nodes > 20_000:
             raise ValueError("public view nesting or node budget exceeded")
-        is_mapping = isinstance(node, Mapping)
-        is_sequence = isinstance(node, (list, tuple))
+        if require_plain_containers:
+            # Reject subclasses before invoking their iterator or mapping
+            # methods in the examiner process.
+            kind = type(node)
+            if kind not in (dict, list, tuple, str, int, float, bool, type(None)):
+                raise ValueError("process-only public view requires plain JSON containers")
+            is_mapping = kind is dict
+            is_sequence = kind in (list, tuple)
+        else:
+            is_mapping = isinstance(node, Mapping)
+            is_sequence = isinstance(node, (list, tuple))
         if not is_mapping and not is_sequence:
             # A host-controlled scalar subclass may execute arbitrary methods
             # during json.dumps. Only inert JSON primitives cross this seam.
@@ -488,7 +501,8 @@ def _validated_budget(public: Mapping[str, Any], limit: int) -> int:
     return candidate
 
 
-def _bind_public_start(session: Any, supplied_json: str, initial: Mapping[str, Any]) -> str:
+def _bind_public_start(session: Any, supplied_json: str, initial: Mapping[str, Any],
+                       *, require_plain_containers: bool = False) -> str:
     """Cross-check the advertised world against its host-owned public rules.
 
     Observation-only legacy examiners are explicitly unqualified as a full
@@ -496,7 +510,7 @@ def _bind_public_start(session: Any, supplied_json: str, initial: Mapping[str, A
     """
     source = getattr(session, "public_start", None)
     if callable(source):
-        if _public(source()) != supplied_json:
+        if _public(source(), require_plain_containers=require_plain_containers) != supplied_json:
             raise ValueError("candidate public rules do not match the host examiner")
         return "HOST_PUBLIC_VIEW_MATCHED"
     supplied = json.loads(supplied_json)
@@ -537,10 +551,8 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
     """
     if type(seed) is not int or not 0 <= seed < 2**31:
         raise ValueError("invalid evaluation seed")
-    public_json = _public(public_start)
-    public_snapshot = json.loads(public_json)
-    budget = _validated_budget(public_snapshot, max_model_calls)
-    call_limit = min(max_model_calls, budget + 1)
+    # Validate adapter authority before traversing even public caller objects.
+    # Custom mappings may execute Python code through items()/iteration.
     # Subclasses may override generate() and perform arbitrary, even remote,
     # effects. Only the two exact frozen control implementations are trusted.
     fixed = type(adapter) in (FixedActionAdapter, ReplayAdapter)
@@ -561,10 +573,16 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
     # locality, inference weights, provider, or independence from cloud APIs.
     provenance = ("DETERMINISTIC_CONTROL" if fixed else
                   "MODEL_SUBPROCESS_UNATTESTED" if separated else "MODEL_ADAPTER_UNATTESTED")
+    public_json = _public(public_start, require_plain_containers=require_process_separation)
+    public_snapshot = json.loads(public_json)
+    budget = _validated_budget(public_snapshot, max_model_calls)
+    call_limit = min(max_model_calls, budget + 1)
     session = session_factory()
-    initial = json.loads(_public(_session_view(session, first=True)))
+    initial = json.loads(_public(_session_view(session, first=True),
+                                 require_plain_containers=require_process_separation))
     last_feedback = initial
-    binding = _bind_public_start(session, public_json, initial)
+    binding = _bind_public_start(session, public_json, initial,
+                                 require_plain_containers=require_process_separation)
     history: list[dict[str, Any]] = []
     turns: list[TurnReceipt] = []
     final = _verdict(initial)
@@ -607,7 +625,8 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
                 charged_actions += 1
             else:
                 feedback = session.submit(_claim_for_host(content))
-            feedback_json = _public(feedback)
+            feedback_json = _public(feedback,
+                                    require_plain_containers=require_process_separation)
             feedback = json.loads(feedback_json)
         except Exception:
             turns.append(TurnReceipt(request, response, None, "EVALUATOR_ERROR"))
@@ -650,17 +669,24 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
             return False
         fields = asdict(receipt)
         claimed = fields.pop("receipt_sha256")
-        if claimed != _sha(_json(fields)) or receipt.public_start_json != _public(public_start):
+        # Replay may only enforce the provenance claimed by a self-hashed
+        # receipt; this is not independently authenticated process identity.
+        strict_plain = receipt.adapter_provenance == "MODEL_SUBPROCESS_UNATTESTED"
+        if (claimed != _sha(_json(fields))
+                or receipt.public_start_json != _public(
+                    public_start, require_plain_containers=strict_plain)):
             return False
         if receipt.source_tree_sha256 != _source_state()["source_tree_sha256"]:
             return False
         if type(receipt.max_model_calls) is not int or not 1 <= receipt.max_model_calls <= MAX_ACTIONS:
             return False
         session = session_factory()
-        initial = json.loads(_public(_session_view(session, first=True)))
+        initial = json.loads(_public(_session_view(session, first=True),
+                                     require_plain_containers=strict_plain))
         last_feedback = initial
-        if receipt.public_binding != _bind_public_start(session, receipt.public_start_json,
-                                                        initial):
+        if receipt.public_binding != _bind_public_start(
+                session, receipt.public_start_json, initial,
+                require_plain_containers=strict_plain):
             return False
         if not receipt.turns and not _terminal(initial):
             return False
@@ -698,7 +724,7 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
                 charged_actions += 1
             feedback = (_apply_action(session, content) if decision == "ACTION"
                         else session.submit(_claim_for_host(content)))
-            feedback_json = _public(feedback)
+            feedback_json = _public(feedback, require_plain_containers=strict_plain)
             if feedback_json != turn.public_feedback_json:
                 return False
             feedback = json.loads(feedback_json)
