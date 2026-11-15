@@ -1,6 +1,6 @@
 """Public-only candidate/model bridge tests against a real finite examiner."""
 
-from dataclasses import replace
+from dataclasses import fields, replace
 from collections.abc import Mapping
 import json
 from pathlib import Path
@@ -12,6 +12,8 @@ from labyrinth.timegate_exam import CandidateSession, candidate_view, make_case
 from labyrinth.timegate_oracle import reachable_closure
 from labyrinth.minotaur_candidate_bridge import (
     FixedActionAdapter,
+    RunReceipt,
+    TurnReceipt,
     audit_receipt,
     run_candidate,
     run_matched_pair,
@@ -498,6 +500,70 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertFalse(audit_receipt(receipt, other_public, other_factory))
         self.assertFalse(audit_receipt(replace(receipt, source_tree_sha256="0" * 64), public, factory))
         self.assertFalse(audit_receipt(replace(receipt, max_model_calls=2), public, factory))
+
+    def test_receipt_subclass_never_runs_host_callback_during_audit_or_save(self):
+        public, factory, _ = context()
+        valid = run_candidate(public, factory, FixedActionAdapter(("wait",)))
+        callbacks = []
+
+        class ProgrammableReceipt(RunReceipt):
+            def __getattribute__(self, key):
+                if key == "schema":
+                    callbacks.append("receipt host callback")
+                return super().__getattribute__(key)
+
+        supplied = ProgrammableReceipt(**{
+            field.name: getattr(valid, field.name) for field in fields(RunReceipt)
+        })
+        self.assertFalse(audit_receipt(supplied, public, factory))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "output.json"
+            with self.assertRaises(TypeError):
+                save_receipt_new(path, supplied)
+            self.assertFalse(path.exists())
+        self.assertEqual(callbacks, [])
+
+    def test_nested_programmable_turn_cannot_execute_during_audit_or_save(self):
+        public, factory, _ = context()
+        valid = run_candidate(public, factory, FixedActionAdapter(("wait",)))
+        callbacks = []
+
+        class ProgrammableTurn(TurnReceipt):
+            def __getattribute__(self, key):
+                if key == "prompt_json":
+                    callbacks.append("turn host callback")
+                return super().__getattribute__(key)
+
+        turn = valid.turns[0]
+        forged = replace(valid, turns=(ProgrammableTurn(
+            turn.prompt_json, turn.response_text,
+            turn.public_feedback_json, turn.disposition),))
+        self.assertFalse(audit_receipt(forged, public, factory))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "output.json"
+            with self.assertRaises(TypeError):
+                save_receipt_new(path, forged)
+            self.assertFalse(path.exists())
+        self.assertEqual(callbacks, [])
+
+    def test_receipt_scalar_object_cannot_run_deepcopy_callback(self):
+        public, factory, _ = context()
+        valid = run_candidate(public, factory, FixedActionAdapter(("wait",)))
+        callbacks = []
+
+        class ProgrammableScalar:
+            def __deepcopy__(self, memo):
+                callbacks.append("deepcopy host callback")
+                return "forged"
+
+        forged = replace(valid, source_tree_sha256=ProgrammableScalar())
+        self.assertFalse(audit_receipt(forged, public, factory))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "output.json"
+            with self.assertRaises(TypeError):
+                save_receipt_new(path, forged)
+            self.assertFalse(path.exists())
+        self.assertEqual(callbacks, [])
 
     def test_write_once_receipt_and_roundtrip_self_digest(self):
         public, factory, _ = context()
