@@ -657,6 +657,38 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
                  verified_escape=_is_verified_escape(final, last_feedback))
 
 
+def _inert_receipt_shape(receipt: Any) -> bool:
+    """Reject programmable receipt objects before dataclass serialization.
+
+    Exact built-in field types prevent user-defined __getattribute__ and
+    __deepcopy__ callbacks. This is a local object safety check, NOT a
+    signer, provenance, or execution attestation.
+    """
+    if type(receipt) is not RunReceipt:
+        return False
+    for name in ("schema", "model_id_unattested", "adapter_provenance",
+                 "public_start_json", "public_binding", "source_tree_sha256",
+                 "final_verdict", "receipt_sha256"):
+        if type(getattr(receipt, name)) is not str:
+            return False
+    if (type(receipt.seed) is not int or type(receipt.max_model_calls) is not int
+            or type(receipt.verified_escape) is not bool
+            or (receipt.source_commit_unattested is not None
+                and type(receipt.source_commit_unattested) is not str)
+            or type(receipt.turns) is not tuple
+            or len(receipt.turns) > MAX_ACTIONS + 1):
+        return False
+    return all(
+        type(turn) is TurnReceipt
+        and type(turn.prompt_json) is str
+        and type(turn.response_text) is str
+        and (turn.public_feedback_json is None
+             or type(turn.public_feedback_json) is str)
+        and type(turn.disposition) is str
+        for turn in receipt.turns
+    )
+
+
 def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
                   session_factory: Callable[[], Any]) -> bool:
     """Replay observed actions against a fresh host-held case, not model identity.
@@ -665,7 +697,7 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
     model produced the response bytes or that self-hashed data are authentic.
     """
     try:
-        if not isinstance(receipt, RunReceipt) or receipt.schema != SCHEMA:
+        if not _inert_receipt_shape(receipt) or receipt.schema != SCHEMA:
             return False
         fields = asdict(receipt)
         claimed = fields.pop("receipt_sha256")
@@ -769,8 +801,8 @@ def run_matched_pair(public_start: Mapping[str, Any], session_factory: Callable[
 
 def save_receipt_new(path: str | Path, receipt: RunReceipt) -> None:
     """Create a receipt file exclusively; never overwrite existing evidence."""
-    if not isinstance(receipt, RunReceipt):
-        raise TypeError("only a RunReceipt may be persisted")
+    if not _inert_receipt_shape(receipt):
+        raise TypeError("only an inert RunReceipt may be persisted")
     target = Path(path)
     if target.is_symlink():
         raise FileExistsError("receipt destination is a symlink")
