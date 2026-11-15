@@ -189,10 +189,12 @@ class SemanticFamilyGateTests(unittest.TestCase):
         receipt = evaluated_receipt()
         case_id = receipt["slices"]["transfer"][0]["case_id"]
         relabels = {case_id: receipt["training_semantic_family_ids"][0]}
-        policy = _bound_relabel(receipt, relabels)
-        result = decision(receipt, policy=policy)
-        self.assertEqual(result.disposition, "BLOCKED")
-        self.assertFalse(result.state.graduated)
+        # Wave66 rejects train/evaluation overlap when the frozen policy is
+        # constructed, BEFORE allowing a signed trial to reach the gate.
+        # The former BLOCKED verdict was later but not stronger.
+        with self.assertRaisesRegex(
+                ValueError, "training/evaluation semantic-family overlap"):
+            _bound_relabel(receipt, relabels)
 
     def test_precommitted_family_reused_across_slices_blocks_graduation(self):
         receipt = evaluated_receipt()

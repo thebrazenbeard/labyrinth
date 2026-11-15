@@ -82,3 +82,25 @@ This fixes a software leak in source-level admission but does not
 resolve the underlying semantic-diversity or examiner-separation
 requirements of issues #147 and #146. No model training, deploy,
 protected merge, examiner ACL, credential, or shared runtime changed.
+
+## Hosted-CI red follow-up and compatibility correction (2026-11-15)
+
+First immutable commit `9a92578244162eb81f863d5c03300b3fe3c298a4`
+was **NOT** full-suite green: hosted Python 3.12 job
+`132744036210` in workflow `43691870990` ran **1,283 tests**,
+**one ERROR** in `test_round6_semantic_gate.
+test_precommitted_family_seen_in_training_blocks_transfer`.
+The old test assumed a contaminated registry could be instantiated and
+then receive a signed `BLOCKED` GateDecision; the new necessary preflight
+invariant instead raised `ValueError` during policy construction.
+Reproduced locally on Windows: same error, focused exit1.
+
+**Correction:** update only that preexisting hostile test to assert an
+explicit `ValueError` containing
+`training/evaluation semantic-family overlap` at registry freeze.
+The rejected condition is unchanged; rejection moves earlier.
+Windows post-correction: 16 Round6 + 30 graduation + 6 state
++ 6 Round4 control tests PASS. WSL Ubuntu26.04 post-correction:
+16 Round6 normal + 16 Round6 optimized + 30 graduation + 6 state
+tests PASS. Compiler and Git whitespace checks PASS.
+Full hosted CI on the amended immutable head is a separate verdict.
