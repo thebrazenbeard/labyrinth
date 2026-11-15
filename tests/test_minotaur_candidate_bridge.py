@@ -565,6 +565,18 @@ class CandidateBridgeTests(unittest.TestCase):
             self.assertFalse(path.exists())
         self.assertEqual(callbacks, [])
 
+    def test_write_once_rejects_stale_self_digest_before_file_creation(self):
+        public, factory, _ = context()
+        valid = run_candidate(public, factory, FixedActionAdapter(("wait",)))
+        stale = replace(valid, final_verdict="VERIFIED_FAILURE")
+        self.assertNotEqual(valid.final_verdict, stale.final_verdict)
+        self.assertFalse(audit_receipt(stale, public, factory))
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "tampered.json"
+            with self.assertRaisesRegex(ValueError, "receipt digest"):
+                save_receipt_new(path, stale)
+            self.assertFalse(path.exists())
+
     def test_write_once_receipt_and_roundtrip_self_digest(self):
         public, factory, _ = context()
         receipt = run_candidate(public, factory, FixedActionAdapter(WINNING_SEED_ZERO))
