@@ -139,6 +139,54 @@ class MinotaurGraduationTests(unittest.TestCase):
         self.assertTrue(result.state.graduated)
         self.assertFalse(hasattr(result, "metrics"))
 
+    def test_prior_training_mechanism_cannot_graduate_as_later_holdout(self):
+        # An evaluator may honestly identify the same mechanics under distinct
+        # case IDs and prompts. The signed roster must still remain train/eval
+        # disjoint over the ENTIRE campaign, not only the current attempt.
+        contaminated_registry = []
+        for entry in _REGISTRY:
+            if entry.attempt == 2 and entry.slice_name == "train":
+                entry = replace(
+                    entry, semantic_family_id=_semantic_sha(
+                        f"later-train:{entry.case_id}"))
+            elif (entry.attempt == 2 and entry.slice_name == "heldout"
+                  and entry.case_id.endswith("-000")):
+                entry = replace(entry, semantic_family_id=_semantic_sha("train-1"))
+            contaminated_registry.append(entry)
+        try:
+            contaminated_policy = replace(
+                POLICY, independent_semantic_registry=tuple(contaminated_registry))
+        except ValueError as exc:
+            self.assertIn("training/evaluation semantic-family overlap", str(exc))
+            return  # Prefer rejection before any signed attempt is consumed.
+
+        first = decision(evaluated_receipt(candidate_correct=False),
+                         policy=contaminated_policy)
+        self.assertEqual(first.disposition, "STAY")
+        second = evaluated_receipt(attempt=2, run_id="fresh-run-002")
+        second["training_semantic_family_ids"] = [
+            _semantic_sha(f"later-train:train-{i:03d}") for i in (1, 2)]
+        second["slices"]["heldout"][0]["semantic_family_id"] = _semantic_sha("train-1")
+        promoted = decision(second, first.state, policy=contaminated_policy)
+        self.assertNotEqual(
+            promoted.disposition, "GRADUATED",
+            "previously trained mechanics were laundered into a later holdout")
+
+    def test_repeated_training_drills_stay_legal_but_current_eval_overlap_blocks(self):
+        # Prior and subsequent training may intentionally revisit mechanics.
+        # This is already present in POLICY and must remain permitted.
+        self.assertEqual(len({
+            e.semantic_family_id for e in POLICY.independent_semantic_registry
+            if e.slice_name == "train"}), 2)
+        victim = next(e for e in _REGISTRY
+                      if e.attempt == 1 and e.slice_name == "transfer")
+        collision = tuple(
+            replace(e, semantic_family_id=_semantic_sha("train-2"))
+            if e == victim else e for e in _REGISTRY)
+        with self.assertRaisesRegex(
+                ValueError, "training/evaluation semantic-family overlap"):
+            replace(POLICY, independent_semantic_registry=collision)
+
     def test_domain_limited_advisory_scores_cannot_be_recast_as_private_qualification(self):
         # The bounded mod-97 guarded advisor can produce correct booleans, but
         # it is explicitly advisory-only and its public, narrow task domain is

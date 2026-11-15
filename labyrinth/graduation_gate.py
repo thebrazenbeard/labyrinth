@@ -147,6 +147,17 @@ class GraduationPolicy:
             runs_by_attempt.setdefault(entry.attempt, set()).add(entry.run_id)
         if any(len(run_ids) != 1 for run_ids in runs_by_attempt.values()):
             raise ValueError("each attempt must have one precommitted run, not selectable suites")
+        # A later final case must not reuse mechanics taught in an earlier
+        # attempt. GateState tracks prior EVALUATIONS, not training history;
+        # validate the entire frozen registry instead of silently forgetting
+        # those exposures between attempts. Repeated train-only drills remain
+        # allowed; no train family may be claimed held-out at any point.
+        training_families = {e.semantic_family_id for e in registry
+                             if e.slice_name == "train"}
+        evaluation_families = {e.semantic_family_id for e in registry
+                               if e.slice_name != "train"}
+        if training_families & evaluation_families:
+            raise ValueError("training/evaluation semantic-family overlap across attempts")
         for name in ("min_accuracy", "min_format_rate", "min_gain_over_controls"):
             value = getattr(self, name)
             if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
