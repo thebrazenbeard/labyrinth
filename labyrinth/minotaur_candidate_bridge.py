@@ -730,8 +730,14 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
         for index, turn in enumerate(receipt.turns):
             if index >= call_limit or _terminal(initial) or turn.prompt_json != _request(receipt.public_start_json, history, index):
                 return False
-            if turn.disposition in ("MODEL_CALL_ERROR", "MODEL_OUTPUT_INVALID", "EVALUATOR_ERROR"):
+            if turn.disposition == "EVALUATOR_ERROR":
+                # An exception claim is not verified by replaying nothing.
+                # Without a replayable evaluator outcome, fail closed.
+                return False
+            if turn.disposition in ("MODEL_CALL_ERROR", "MODEL_OUTPUT_INVALID"):
                 if index != len(receipt.turns) - 1 or turn.public_feedback_json is not None:
+                    return False
+                if turn.disposition == "MODEL_CALL_ERROR" and turn.response_text:
                     return False
                 if turn.disposition == "MODEL_OUTPUT_INVALID":
                     try:
