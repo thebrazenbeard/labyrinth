@@ -194,5 +194,30 @@ class ProcessCandidateBoundaryTests(unittest.TestCase):
                         "Windows inherited stdout extended the candidate deadline")
 
 
+    def test_windows_candidate_descendant_dies_after_parent_timeout(self):
+        """Real same-job descendant must not execute after examiner cleanup."""
+        if os.name != "nt":
+            self.skipTest("Windows process-tree cleanup")
+        with tempfile.TemporaryDirectory(prefix="minotaur_job_w64_") as root:
+            spawned = Path(root, "spawned.txt")
+            escaped = Path(root, "escaped.txt")
+            grandchild = ("import pathlib,sys,time;time.sleep(1.6);"
+                          "pathlib.Path(sys.argv[1]).write_text('escaped')")
+            parent = ("import pathlib,subprocess,sys,time;"
+                      "time.sleep(0.1);"
+                      "subprocess.Popen((sys.executable,'-c',sys.argv[3],sys.argv[2]),"
+                      "stdin=subprocess.DEVNULL);"
+                      "pathlib.Path(sys.argv[1]).write_text('spawned');"
+                      "print('not JSON',flush=True)")
+            with self.assertRaises(TimeoutError):
+                probe((sys.executable, "-c", parent, str(spawned), str(escaped),
+                       grandchild), seconds=1.0).generate('{"public":true}')
+            self.assertTrue(spawned.exists(),
+                            "candidate child was not spawned; test inconclusive")
+            time.sleep(1.3)
+            self.assertFalse(escaped.exists(),
+                             "surviving Windows candidate descendant executed after cleanup")
+
+
 if __name__ == "__main__":
     unittest.main()

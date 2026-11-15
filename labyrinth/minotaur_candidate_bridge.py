@@ -13,6 +13,7 @@ model identity, private-custody authority or actual neural execution.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import hashlib
 import json
@@ -297,6 +298,29 @@ def _read_stdout_windows(pipe: Any, *, cap: int, deadline: float) -> bytes:
     return b"".join(fragments)
 
 
+@contextmanager
+def _candidate_request_directory():
+    """Retry transient Windows sharing violations after job-wide termination.
+
+    Job termination may release child-inherited stdin handles asynchronously.
+    Never ignore a locked file or leave a public request on disk silently.
+    """
+    folder = tempfile.TemporaryDirectory(prefix="labyrinth_candidate_")
+    try:
+        yield folder.name
+    finally:
+        deadline = time.monotonic() + (0.75 if os.name == "nt" else 0)
+        while True:
+            try:
+                folder.cleanup()
+                break
+            except PermissionError as exc:
+                if (os.name != "nt" or getattr(exc, "winerror", None) != 32
+                        or time.monotonic() >= deadline):
+                    raise
+                time.sleep(0.02)
+
+
 class SubprocessCandidateAdapter:
     """Optional public-JSON child protocol, NOT an OS access-control boundary.
 
@@ -356,9 +380,10 @@ class SubprocessCandidateAdapter:
                                     "group": self.unix_group_id, "extra_groups": ()})
         # Feed stdin from an on-disk PUBLIC request so neither side can
         # deadlock writing an input pipe while the child fills stdout.
-        # POSIX and Windows use deadline-aware pipe polling. Neither path
-        # establishes a sandbox, OS process containment or model identity.
-        with tempfile.TemporaryDirectory(prefix="labyrinth_candidate_") as directory:
+        # Both platforms poll stdout. Windows also cleans up processes that
+        # were successfully attached to its per-candidate Job Object; the
+        # launch race, separate-principal custody and sandbox remain open.
+        with _candidate_request_directory() as directory:
             request_file = Path(directory) / "public_request.json"
             request_file.write_bytes(request)
             with request_file.open("rb") as source:
@@ -370,6 +395,20 @@ class SubprocessCandidateAdapter:
                     stderr=subprocess.DEVNULL,
                     cwd=(tempfile.gettempdir() if os.name == "nt" else directory),
                     env=environment, shell=False, **launch_identity)
+                candidate_job = None
+                if os.name == "nt":
+                    # Attach immediately. A process can run before assignment;
+                    # this closes the known descendant-cleanup gap, NOT that
+                    # launch race or the same-user private-file access gap.
+                    try:
+                        from ._windows_candidate_job import attach_kill_on_close
+                        candidate_job = attach_kill_on_close(child)
+                    except BaseException:
+                        if child.poll() is None:
+                            child.kill()
+                        child.wait()
+                        child.stdout.close()
+                        raise
                 cap = MAX_RESPONSE_CHARACTERS * 4
                 deadline = time.monotonic() + self.timeout_seconds
                 try:
@@ -384,16 +423,22 @@ class SubprocessCandidateAdapter:
                         raise RuntimeError("candidate process exited unsuccessfully")
                     return raw.decode("utf-8", errors="strict").strip()
                 finally:
-                    # Stop cooperative descendants retaining stdout after the
-                    # original candidate exits. Session isolation is not a
-                    # sandbox: a child may still deliberately detach.
+                    # POSIX terminates the initial process group; Windows
+                    # closes its candidate Job Object, killing descendants
+                    # actually attached after launch. Neither is a sandbox.
                     if os.name == "posix":
                         try:
                             os.killpg(child.pid, signal.SIGKILL)
                         except ProcessLookupError:
                             pass
-                    elif child.poll() is None:
-                        child.kill()
+                    else:
+                        try:
+                            if candidate_job is not None:
+                                from ._windows_candidate_job import close_kill_job
+                                close_kill_job(candidate_job)
+                        finally:
+                            if child.poll() is None:
+                                child.kill()
                     child.wait()
                     child.stdout.close()
 
