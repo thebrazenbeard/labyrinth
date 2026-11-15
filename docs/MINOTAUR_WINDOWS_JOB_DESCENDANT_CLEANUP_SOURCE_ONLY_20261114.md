@@ -78,3 +78,23 @@ https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignpro
 - Exact-commit hosted CI and full Windows suite need separately documented
   results before broader qualification. Do not merge/deploy or graduate a model
   based on this source-only change.
+
+## Immutable first-head full suite and CI-policy follow-up
+
+Initial head `f2bcae9b3a653b7c50cb898d4b31305e6a338a21`:
+- Native Lappy Windows Python3.14.5 full `unittest discover -s tests -q`:
+  **1,279 PASS, 6 skipped, zero failures**, 325.507s, exit0,
+  2026-11-14 19:06:48–19:12:24 EST; exact same start/end SHA.
+- Hosted Python3.10 and 3.12 workflow #43656512198: both passed
+  1,279 tests, **55 skipped** each; job logs verified.
+- Hosted neural-CPU workflow #43656512155: **FAILED exit1**
+  despite 141 unit assertions passing, because the new Windows-only
+  test called `skipTest` on Linux and the dedicated workflow rejects
+  *any* unexpected skip. See PR #246 comment #6886359693.
+
+Subsequent test-only correction replaces this Linux-side `skipTest`
+with the established suite convention `return` (Windows behavior and
+adversarial test unchanged). Native Windows focused subprocess tests:
+12 PASS, 0 skipped; WSL Ubuntu26.04 normal: 12 PASS, 0 skipped;
+WSL optimized `-O`: 12 PASS, 0 skipped; diffcheck clean.
+New immutable-commit hosted verdicts must be checked separately.
