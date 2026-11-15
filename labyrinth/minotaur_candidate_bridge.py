@@ -806,7 +806,12 @@ def save_receipt_new(path: str | Path, receipt: RunReceipt) -> None:
     target = Path(path)
     if target.is_symlink():
         raise FileExistsError("receipt destination is a symlink")
-    encoded = (_json(asdict(receipt)) + "\n").encode("utf-8")
+    fields = asdict(receipt)
+    claimed = fields.pop("receipt_sha256")
+    if claimed != _sha(_json(fields)):
+        raise ValueError("receipt digest does not match serialized fields")
+    fields["receipt_sha256"] = claimed
+    encoded = (_json(fields) + "\n").encode("utf-8")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(target, flags, 0o600)
     with os.fdopen(descriptor, "wb") as file:
