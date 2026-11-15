@@ -380,35 +380,26 @@ class SubprocessCandidateAdapter:
                                     "group": self.unix_group_id, "extra_groups": ()})
         # Feed stdin from an on-disk PUBLIC request so neither side can
         # deadlock writing an input pipe while the child fills stdout.
-        # Both platforms poll stdout. Windows also cleans up processes that
-        # were successfully attached to its per-candidate Job Object; the
-        # launch race, separate-principal custody and sandbox remain open.
+        # Both platforms poll stdout. Windows starts candidate code only
+        # after attaching an event-gated bootstrap to its Job Object. The
+        # same-user OS principal and independent examiner custody remain open.
         with _candidate_request_directory() as directory:
             request_file = Path(directory) / "public_request.json"
             request_file.write_bytes(request)
             with request_file.open("rb") as source:
-                child = subprocess.Popen(
-                    self.command, stdin=source, stdout=subprocess.PIPE,
-                    # Windows descendants can keep an inherited CWD open after
-                    # their parent exits. Never make the disposable request
-                    # directory the child's current working directory.
-                    stderr=subprocess.DEVNULL,
-                    cwd=(tempfile.gettempdir() if os.name == "nt" else directory),
-                    env=environment, shell=False, **launch_identity)
                 candidate_job = None
                 if os.name == "nt":
-                    # Attach immediately. A process can run before assignment;
-                    # this closes the known descendant-cleanup gap, NOT that
-                    # launch race or the same-user private-file access gap.
-                    try:
-                        from ._windows_candidate_job import attach_kill_on_close
-                        candidate_job = attach_kill_on_close(child)
-                    except BaseException:
-                        if child.poll() is None:
-                            child.kill()
-                        child.wait()
-                        child.stdout.close()
-                        raise
+                    # Trusted bootstrap waits on an inherited unsignaled event.
+                    # Only attach-to-job success releases candidate execution;
+                    # this remains SAME-USER execution, NOT a file sandbox.
+                    from ._windows_gated_launch import start_candidate_inside_job
+                    child, candidate_job = start_candidate_inside_job(
+                        self.command, source, environment, tempfile.gettempdir())
+                else:
+                    child = subprocess.Popen(
+                        self.command, stdin=source, stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL, cwd=directory,
+                        env=environment, shell=False, **launch_identity)
                 cap = MAX_RESPONSE_CHARACTERS * 4
                 deadline = time.monotonic() + self.timeout_seconds
                 try:
