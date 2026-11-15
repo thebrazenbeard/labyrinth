@@ -730,22 +730,19 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
         for index, turn in enumerate(receipt.turns):
             if index >= call_limit or _terminal(initial) or turn.prompt_json != _request(receipt.public_start_json, history, index):
                 return False
-            if turn.disposition == "EVALUATOR_ERROR":
-                # An exception claim is not verified by replaying nothing.
-                # Without a replayable evaluator outcome, fail closed.
+            if turn.disposition in ("EVALUATOR_ERROR", "MODEL_CALL_ERROR"):
+                # Exception claims cannot be verified by replaying nothing.
+                # Without a replayable evaluator or model outcome, fail closed.
                 return False
-            if turn.disposition in ("MODEL_CALL_ERROR", "MODEL_OUTPUT_INVALID"):
+            if turn.disposition == "MODEL_OUTPUT_INVALID":
                 if index != len(receipt.turns) - 1 or turn.public_feedback_json is not None:
                     return False
-                if turn.disposition == "MODEL_CALL_ERROR" and turn.response_text:
+                try:
+                    _parse(turn.response_text)
+                except (ValueError, TypeError, json.JSONDecodeError, RecursionError):
+                    pass
+                else:
                     return False
-                if turn.disposition == "MODEL_OUTPUT_INVALID":
-                    try:
-                        _parse(turn.response_text)
-                    except (ValueError, TypeError, json.JSONDecodeError, RecursionError):
-                        pass
-                    else:
-                        return False
                 return receipt.final_verdict == turn.disposition and not receipt.verified_escape
             decision, content = _parse(turn.response_text)
             if turn.disposition == "ACTION_BUDGET_EXCEEDED":
