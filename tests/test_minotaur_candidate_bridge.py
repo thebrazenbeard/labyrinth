@@ -151,6 +151,130 @@ class CandidateBridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "evaluator-only"):
             run_candidate(public, factory, spy, authorize_local_adapter=True)
 
+    def test_process_only_does_not_invoke_python_mapping_callbacks_in_public_input(self):
+        # A process boundary does not help when serializing a programmable
+        # Mapping executes attacker-supplied Python on the examiner side.
+        import sys
+        from labyrinth.minotaur_candidate_bridge import SubprocessCandidateAdapter
+
+        effects = []
+
+        class ProgrammablePublicDict(dict):
+            def items(self):
+                effects.append("python-callback-executed-in-examiner")
+                return super().items()
+
+        public, factory, _ = context()
+        adapter = SubprocessCandidateAdapter(
+            (sys.executable, "-c", 'import sys;sys.stdin.buffer.read();print(\'{"kind":"CLAIM","claim":{"kind":"ABSTAIN","assessment":"UNKNOWN"}}\')'),
+            model_id="synthetic:public-container-guard")
+        with self.assertRaisesRegex(ValueError, "plain JSON containers"):
+            run_candidate(ProgrammablePublicDict(public), factory, adapter,
+                          authorize_local_adapter=True,
+                          require_process_separation=True,
+                          max_model_calls=1)
+        self.assertEqual(effects, [])
+
+    def test_process_only_rejects_nested_list_subclass_without_iteration(self):
+        import sys
+        from labyrinth.minotaur_candidate_bridge import SubprocessCandidateAdapter
+
+        effects = []
+
+        class ExecutableList(list):
+            def __iter__(self):
+                effects.append("iter-called-in-examiner")
+                return super().__iter__()
+
+        public, factory, _ = context()
+        public["nested_extension"] = {"user_data": ExecutableList([1, 2])}
+        adapter = SubprocessCandidateAdapter(
+            (sys.executable, "-c", "print('{}')"),
+            model_id="synthetic:nested-inert-guard")
+        with self.assertRaisesRegex(ValueError, "plain JSON containers"):
+            run_candidate(public, factory, adapter,
+                          authorize_local_adapter=True,
+                          require_process_separation=True,
+                          max_model_calls=1)
+        self.assertEqual(effects, [])
+
+    def test_process_only_rejects_programmable_examiner_feedback(self):
+        import sys
+        from labyrinth.minotaur_candidate_bridge import SubprocessCandidateAdapter
+
+        effects = []
+
+        class ProgrammableFeedbackDict(dict):
+            def items(self):
+                effects.append("feedback-items-called-in-examiner")
+                return super().items()
+
+        public, factory, _ = context()
+
+        class Host:
+            def __init__(self):
+                self.inner = factory()
+
+            def view(self):
+                return self.inner.view()
+
+            def act(self, action):
+                return ProgrammableFeedbackDict(self.inner.act(action))
+
+            def submit(self, claim):
+                return self.inner.submit(claim)
+
+        response = '{"kind":"ACTION","action":"wait"}'
+        adapter = SubprocessCandidateAdapter(
+            (sys.executable, "-c",
+             "import sys;sys.stdin.buffer.read();print(" + repr(response) + ")"),
+            model_id="synthetic:feedback-inert-guard")
+        receipt = run_candidate(public, Host, adapter,
+                                authorize_local_adapter=True,
+                                require_process_separation=True,
+                                max_model_calls=1)
+        self.assertEqual(receipt.final_verdict, "EVALUATOR_ERROR")
+        self.assertEqual(effects, [])
+
+    def test_process_only_refuses_unauthorized_adapter_before_public_traversal(self):
+        effects = []
+
+        class ProgrammableDict(dict):
+            def items(self):
+                effects.append("items-called-before-auth")
+                return super().items()
+
+        public, factory, _ = context()
+        with self.assertRaisesRegex(PermissionError, "process-only"):
+            run_candidate(ProgrammableDict(public), factory, SpyLocalAdapter(),
+                          require_process_separation=True)
+        self.assertEqual(effects, [])
+
+    def test_process_receipt_audit_rejects_programmable_public_input(self):
+        import sys
+        from labyrinth.minotaur_candidate_bridge import SubprocessCandidateAdapter
+
+        public, factory, _ = context()
+        response = '{"kind":"CLAIM","claim":{"kind":"ABSTAIN","assessment":"UNKNOWN"}}'
+        adapter = SubprocessCandidateAdapter(
+            (sys.executable, "-c",
+             "import sys;sys.stdin.buffer.read();print(" + repr(response) + ")"),
+            model_id="synthetic:receipt-inert-guard")
+        receipt = run_candidate(public, factory, adapter,
+                                authorize_local_adapter=True,
+                                require_process_separation=True,
+                                max_model_calls=1)
+        self.assertTrue(audit_receipt(receipt, public, factory))
+        effects = []
+
+        class ProgrammableDict(dict):
+            def items(self):
+                effects.append("replay-callback-executed-in-examiner")
+                return super().items()
+
+        self.assertFalse(audit_receipt(receipt, ProgrammableDict(public), factory))
+        self.assertEqual(effects, [])
+
     def test_public_snapshot_cannot_serialize_different_mapping_than_it_inspected(self):
         """Public validation and JSON bytes must use the identical primitive snapshot."""
         class DeceptiveMapping(Mapping):
