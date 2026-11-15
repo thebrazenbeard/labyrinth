@@ -608,6 +608,45 @@ class CandidateBridgeTests(unittest.TestCase):
         forged = _seal(**receipt_fields)
         self.assertFalse(audit_receipt(forged, public, factory))
 
+    def test_model_call_error_cannot_be_audited_without_replaying_failure(self):
+        public, factory, _ = context()
+        valid = run_candidate(
+            public, factory, FixedActionAdapter(("wait",)), max_model_calls=1)
+        self.assertTrue(audit_receipt(valid, public, factory))
+        self.assertEqual(valid.turns[0].disposition, "ACTION")
+        fields_without_digest = {
+            field.name: getattr(valid, field.name)
+            for field in fields(RunReceipt)
+            if field.name != "receipt_sha256"
+        }
+        forged = _seal(**{
+            **fields_without_digest,
+            "turns": (replace(valid.turns[0], response_text="",
+                              public_feedback_json=None,
+                              disposition="MODEL_CALL_ERROR"),),
+            "final_verdict": "MODEL_CALL_ERROR",
+            "verified_escape": False,
+        })
+        # Model generated a valid ACTION, yet a digest-resealed exception
+        # assertion must not count as independently replayed failure.
+        self.assertFalse(audit_receipt(forged, public, factory))
+
+    def test_real_model_call_exception_is_recorded_but_not_replay_verified(self):
+        public, factory, _ = context()
+
+        class FailingAdapter:
+            model_id = "synthetic:raises-before-output"
+
+            def generate(self, prompt, *, seed=None):
+                raise RuntimeError("synthetic model-call exception")
+
+        receipt = run_candidate(public, factory, FailingAdapter(),
+                                authorize_local_adapter=True, max_model_calls=1)
+        self.assertEqual(receipt.final_verdict, "MODEL_CALL_ERROR")
+        self.assertEqual(receipt.turns[0].response_text, "")
+        self.assertIsNone(receipt.turns[0].public_feedback_json)
+        self.assertFalse(audit_receipt(receipt, public, factory))
+
     def test_rehashed_receipt_cannot_stop_early_with_unused_model_calls(self):
         public, factory, _ = context()
         legitimate = run_candidate(

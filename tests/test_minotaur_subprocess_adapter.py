@@ -100,7 +100,9 @@ class ProcessCandidateBoundaryTests(unittest.TestCase):
                                  authorize_local_adapter=True, require_process_separation=True,
                                  max_model_calls=1)
         self.assertEqual(sleeping.final_verdict, "MODEL_CALL_ERROR")
-        self.assertTrue(audit_receipt(sleeping, self.public, self.factory))
+        # A recorded timeout is diagnostic evidence, not independently replayed
+        # evidence that the subprocess model invocation actually failed.
+        self.assertFalse(audit_receipt(sleeping, self.public, self.factory))
 
     def test_oversize_output_is_cut_off_before_hanging_child_timeout(self):
         script = ("import sys,time;"
