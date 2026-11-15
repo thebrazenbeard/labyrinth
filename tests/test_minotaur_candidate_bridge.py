@@ -19,6 +19,7 @@ from labyrinth.minotaur_candidate_bridge import (
     run_matched_pair,
     save_receipt_new,
     _public,
+    _seal,
 )
 
 
@@ -237,6 +238,7 @@ class CandidateBridgeTests(unittest.TestCase):
                                 max_model_calls=1)
         self.assertEqual(receipt.final_verdict, "EVALUATOR_ERROR")
         self.assertEqual(effects, [])
+        self.assertFalse(audit_receipt(receipt, public, Host))
 
     def test_process_only_refuses_unauthorized_adapter_before_public_traversal(self):
         effects = []
@@ -576,6 +578,35 @@ class CandidateBridgeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "receipt digest"):
                 save_receipt_new(path, stale)
             self.assertFalse(path.exists())
+
+    def test_evaluator_error_cannot_be_audited_without_replaying_failure(self):
+        public, factory, _ = context()
+        valid = run_candidate(public, factory, FixedActionAdapter(("wait",)))
+        receipt_fields = {field.name: getattr(valid, field.name)
+                          for field in fields(RunReceipt)
+                          if field.name != "receipt_sha256"}
+        receipt_fields.update(
+            turns=(replace(valid.turns[0], disposition="EVALUATOR_ERROR",
+                           public_feedback_json=None),),
+            final_verdict="EVALUATOR_ERROR", verified_escape=False)
+        forged = _seal(**receipt_fields)
+        # The action succeeds in the real examiner. A self-hash cannot turn it
+        # into independently replayed evidence of an evaluator exception.
+        self.assertNotEqual(forged.receipt_sha256, valid.receipt_sha256)
+        self.assertFalse(audit_receipt(forged, public, factory))
+
+    def test_model_call_error_requires_empty_response_on_audit(self):
+        public, factory, _ = context()
+        valid = run_candidate(public, factory, FixedActionAdapter(("wait",)))
+        receipt_fields = {field.name: getattr(valid, field.name)
+                          for field in fields(RunReceipt)
+                          if field.name != "receipt_sha256"}
+        receipt_fields.update(
+            turns=(replace(valid.turns[0], disposition="MODEL_CALL_ERROR",
+                           public_feedback_json=None),),
+            final_verdict="MODEL_CALL_ERROR", verified_escape=False)
+        forged = _seal(**receipt_fields)
+        self.assertFalse(audit_receipt(forged, public, factory))
 
     def test_write_once_receipt_and_roundtrip_self_digest(self):
         public, factory, _ = context()
