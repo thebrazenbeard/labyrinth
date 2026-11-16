@@ -71,6 +71,7 @@ class OllamaChildBridgeTests(unittest.TestCase):
         self.assertIs(request["stream"], False)
         self.assertEqual(request["options"]["temperature"], 0)
         self.assertEqual(request["options"]["seed"], 17)
+        self.assertIs(request["think"], False)
         self.assertIn("public_start", request["prompt"])
         self.assertNotIn(case.case_id, request["prompt"])
 

@@ -44,7 +44,7 @@ def main(arguments: list[str]) -> int:
         adapter = OllamaAdapter(
             model=model_name, base_url=endpoint,
             timeout_seconds=20.0, max_output_tokens=128,
-            max_response_bytes=128_000)
+            max_response_bytes=128_000, think=False)
         response = adapter.generate(prompt, seed=candidate_request["seed"])
         if type(response) is not str:
             return 3
