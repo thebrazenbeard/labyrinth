@@ -573,16 +573,19 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
     # locality, inference weights, provider, or independence from cloud APIs.
     provenance = ("DETERMINISTIC_CONTROL" if fixed else
                   "MODEL_SUBPROCESS_UNATTESTED" if separated else "MODEL_ADAPTER_UNATTESTED")
-    public_json = _public(public_start, require_plain_containers=require_process_separation)
+    # A subprocess-labeled run always rejects programmable host containers,
+    # whether or not the optional process-only rejection flag was supplied.
+    strict_plain = separated
+    public_json = _public(public_start, require_plain_containers=strict_plain)
     public_snapshot = json.loads(public_json)
     budget = _validated_budget(public_snapshot, max_model_calls)
     call_limit = min(max_model_calls, budget + 1)
     session = session_factory()
     initial = json.loads(_public(_session_view(session, first=True),
-                                 require_plain_containers=require_process_separation))
+                                 require_plain_containers=strict_plain))
     last_feedback = initial
     binding = _bind_public_start(session, public_json, initial,
-                                 require_plain_containers=require_process_separation)
+                                 require_plain_containers=strict_plain)
     history: list[dict[str, Any]] = []
     turns: list[TurnReceipt] = []
     final = _verdict(initial)
@@ -628,7 +631,7 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
             else:
                 feedback = session.submit(_claim_for_host(content))
             feedback_json = _public(feedback,
-                                    require_plain_containers=require_process_separation)
+                                    require_plain_containers=strict_plain)
             feedback = json.loads(feedback_json)
         except Exception:
             turns.append(TurnReceipt(request, response, None, "EVALUATOR_ERROR"))

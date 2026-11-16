@@ -270,6 +270,30 @@ class CandidateBridgeTests(unittest.TestCase):
                           max_model_calls=1)
         self.assertEqual(effects, [])
 
+    def test_subprocess_default_rejects_programmable_public_before_host_callbacks(self):
+        # The exact subprocess adapter is process-labeled even without the
+        # optional strict flag: it must not execute public-container Python.
+        import sys
+        from labyrinth.minotaur_candidate_bridge import SubprocessCandidateAdapter
+
+        callbacks = []
+
+        class HostCallbackDict(dict):
+            def items(self):
+                callbacks.append("host-public-items")
+                return super().items()
+
+        public, factory, _ = context()
+        adapter = SubprocessCandidateAdapter(
+            (sys.executable, "-c",
+             "import json,sys;json.load(sys.stdin);"
+             "print(json.dumps({'kind':'ACTION','action':'wait'}))"),
+            model_id="synthetic:default-process-public-guard")
+        with self.assertRaisesRegex(ValueError, "plain JSON containers"):
+            run_candidate(HostCallbackDict(public), factory, adapter,
+                          authorize_local_adapter=True, max_model_calls=1)
+        self.assertEqual(callbacks, [])
+
     def test_process_only_rejects_nested_list_subclass_without_iteration(self):
         import sys
         from labyrinth.minotaur_candidate_bridge import SubprocessCandidateAdapter
@@ -292,6 +316,47 @@ class CandidateBridgeTests(unittest.TestCase):
                           require_process_separation=True,
                           max_model_calls=1)
         self.assertEqual(effects, [])
+
+    def test_subprocess_default_rejects_programmable_examiner_feedback(self):
+        # Default exact subprocess invocation must enforce the same inert
+        # examiner-feedback boundary as explicit process-only mode.
+        import sys
+        from labyrinth.minotaur_candidate_bridge import SubprocessCandidateAdapter
+
+        callbacks = []
+
+        class HostCallbackFeedback(dict):
+            def items(self):
+                callbacks.append("host-feedback-items")
+                return super().items()
+
+        public, factory, _ = context()
+
+        class Host:
+            def __init__(self):
+                self.inner = factory()
+
+            def view(self):
+                return self.inner.view()
+
+            def act(self, action):
+                return HostCallbackFeedback(self.inner.act(action))
+
+            def submit(self, claim):
+                return self.inner.submit(claim)
+
+        adapter = SubprocessCandidateAdapter(
+            (sys.executable, "-c",
+             "import json,sys;json.load(sys.stdin);"
+             "print(json.dumps({'kind':'ACTION','action':'wait'}))"),
+            model_id="synthetic:default-process-feedback-guard")
+        receipt = run_candidate(public, Host, adapter,
+                                authorize_local_adapter=True, max_model_calls=1)
+        self.assertEqual(receipt.adapter_provenance, "MODEL_SUBPROCESS_UNATTESTED")
+        self.assertEqual(receipt.final_verdict, "EVALUATOR_ERROR")
+        self.assertEqual(callbacks, [],
+                         "subprocess-labeled path ran host feedback callback")
+        self.assertFalse(audit_receipt(receipt, public, Host))
 
     def test_process_only_rejects_programmable_examiner_feedback(self):
         import sys
