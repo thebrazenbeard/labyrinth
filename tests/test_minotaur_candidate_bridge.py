@@ -694,6 +694,30 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertNotEqual(forged.receipt_sha256, legitimate.receipt_sha256)
         self.assertFalse(audit_receipt(forged, public, factory))
 
+    def test_rehashed_out_of_range_seed_fails_before_examiner_replay(self):
+        public, factory, _ = context()
+        legitimate = run_candidate(
+            public, factory, FixedActionAdapter(("wait",)), seed=12,
+            max_model_calls=1)
+        self.assertTrue(audit_receipt(legitimate, public, factory))
+        fields_without_digest = {
+            field.name: getattr(legitimate, field.name)
+            for field in fields(RunReceipt)
+            if field.name != "receipt_sha256"
+        }
+
+        for impossible_seed in (-1, 2**31):
+            with self.subTest(seed=impossible_seed):
+                forged = _seal(**{**fields_without_digest, "seed": impossible_seed})
+                calls = []
+
+                def counted_factory():
+                    calls.append(1)
+                    return factory()
+
+                self.assertFalse(audit_receipt(forged, public, counted_factory))
+                self.assertEqual(calls, [])
+
     def test_write_once_receipt_and_roundtrip_self_digest(self):
         public, factory, _ = context()
         receipt = run_candidate(public, factory, FixedActionAdapter(WINNING_SEED_ZERO))
