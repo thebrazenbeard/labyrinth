@@ -37,9 +37,12 @@ MAX_ACTIONS = 32
 _PRIVATE_FIELDS = frozenset({"case_id", "seed", "sealed", "gold_trace", "fingerprint",
                              "answer", "correct_answer", "exam_id", "kind", "private"})
 _INSTRUCTION = ("Return one JSON object only: either "
-                '{"kind":"ACTION","action":"one action or query from the public list"} or '
+                'an ACTION object with action exactly one of the public action/question '
+                'strings (not the generic word "query"), or '
                 '{"kind":"CLAIM","claim":{"kind":"ABSTAIN","assessment":"UNKNOWN"}}. '
-                "No prose, tools, code or extra fields. Invalid output ends this evaluation.")
+                "Read public_start.prompt and public action/question names for exact ACTION "
+                 "names and CLAIM field shapes. No prose, tools, code or extra fields. "
+                 "Invalid output ends this evaluation.")
 
 
 def _json(value: Any) -> str:
