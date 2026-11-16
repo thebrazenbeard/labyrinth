@@ -234,6 +234,52 @@ class CandidateBridgeTests(unittest.TestCase):
                                   authorize_local_adapter=True)
         self.assertEqual(permitted.adapter_provenance, "MODEL_ADAPTER_UNATTESTED")
 
+    def test_oracle_public_protocol_gives_model_exact_actions_and_claim_shapes(self):
+        from labyrinth.oracle_chamber_exam import (
+            CandidateSession as OracleSession,
+            candidate_view as oracle_view,
+            make_case as oracle_case,
+        )
+
+        case = oracle_case(7, sealed=True)
+        public = oracle_view(case)
+        self.assertEqual(set(public), {"prompt", "questions", "remaining_queries",
+                                       "submissions", "answers"})
+        protocol = public["prompt"]
+        self.assertIn("Malformed queries consume budget and return no binary answer.", public["prompt"])
+        self.assertIs(type(protocol), str)
+        self.assertNotIn("{...}", protocol)  # Never offer invalid JSON pseudo-examples.
+        for required in ('"action":"alpha"', '"kind":"COMMIT"',
+                         "POLICY", "UNSAT_CERTIFICATE",
+                         '"kind":"ABSTAIN"', '"kind":"NOVEL_RULE"',
+                         "INVALID"):
+            with self.subTest(required=required):
+                self.assertIn(required, protocol)
+
+        seen_requests = []
+
+        class ProtocolProbe:
+            model_id = "synthetic:oracle-public-format-probe"
+
+            def generate(self, prompt, *, seed=None):
+                seen_requests.append(json.loads(prompt))
+                return '{"kind":"ACTION","action":"alpha"}'
+
+        factory = lambda: OracleSession(case)
+        receipt = run_candidate(public, factory, ProtocolProbe(),
+                                authorize_local_adapter=True, max_model_calls=1)
+        self.assertEqual(receipt.turns[0].disposition, "ACTION")
+        self.assertEqual(len(seen_requests), 1)
+        self.assertEqual(seen_requests[0]["public_start"]["prompt"], protocol)
+        self.assertIn("public_start.prompt", seen_requests[0]["response_instructions"])
+        self.assertNotIn('"action":"one action or query from the public list"',
+                         seen_requests[0]["response_instructions"])
+        self.assertNotIn(case.case_id, json.dumps(seen_requests[0]))
+        feedback = json.loads(receipt.turns[0].public_feedback_json)
+        self.assertEqual(feedback["answers"][0]["question"], "alpha")
+        self.assertIn(feedback["answers"][0]["answer"], (0, 1))
+        self.assertTrue(audit_receipt(receipt, public, factory))
+
     def test_oracle_invalid_query_null_is_public_feedback_not_evaluator_failure(self):
         # Oracle Chamber explicitly charges malformed queries and publishes
         # an INVALID answer of null, rather than exposing a private answer.

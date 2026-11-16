@@ -75,12 +75,29 @@ def candidate_view(case: Case) -> dict[str, object]:
         "prompt": (f"{rng.choice(_OPENINGS)} {rng.choice(_DIRECTIVES)} "
                    "The hidden identifier is one of 0, 1, 2, 3. "
                    "alpha asks its low bit; beta asks its high bit; parity "
-                   "asks low XOR high. Every query produces a binary answer. "
+                   "asks low XOR high. Valid queries produce a binary answer. "
                    f"Across at most {MAX_QUERIES} queries, at most "
                    f"{case.lie_budget} {lie_word} may be inverted adversarially. "
-                   "A query may be repeated. Malformed queries consume budget. "
+                   "A query may be repeated. Malformed queries consume budget and return no binary answer. "
                    "Correctly guessing one instance is not proof of a policy "
-                   "that works against every permitted adversary."),
+                   "that works against every permitted adversary. "
+                   'Return one JSON decision only. ACTION.action must be an exact name '
+                   'from questions, e.g. {"kind":"ACTION","action":"alpha"}. '
+                   'The word "query" is INVALID and still consumes query budget. '
+                   'For a case-specific guess, use '
+                   '{"kind":"CLAIM","claim":{"kind":"COMMIT","secret":0}}, '
+                   'replacing 0 with your reasoned integer 0..3. '
+                   'To abstain, use '
+                   '{"kind":"CLAIM","claim":{"kind":"ABSTAIN","assessment":"UNKNOWN"}}. '
+                   'To propose a new rule for review, use '
+                   '{"kind":"CLAIM","claim":{"kind":"NOVEL_RULE",'
+                   '"rule_change":"nonempty proposed rule"}}. '
+                   'POLICY claims use claim.kind POLICY and claim.policy with five '
+                   'question names and a declarative decoder, or a query_tree plus decoder. '
+                   'UNSAT_CERTIFICATE claims use claim.kind UNSAT_CERTIFICATE and '
+                   'claim.declared_rules with keys secrets, binary_answers, max_queries, '
+                   'lie_budget; infer values from the public rules. '
+                   'Examples specify response syntax, not verified winning strategies.'),
         "questions": list(PREDICATES),
         "remaining_queries": MAX_QUERIES,
         "submissions": ["COMMIT", "POLICY", "ABSTAIN", "UNSAT_CERTIFICATE", "NOVEL_RULE"],
