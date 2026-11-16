@@ -43,7 +43,7 @@ def main(arguments: list[str]) -> int:
         # inheritance and non-text/incomplete responses. No remote override.
         adapter = OllamaAdapter(
             model=model_name, base_url=endpoint,
-            timeout_seconds=8.0, max_output_tokens=128,
+            timeout_seconds=20.0, max_output_tokens=128,
             max_response_bytes=128_000)
         response = adapter.generate(prompt, seed=candidate_request["seed"])
         if type(response) is not str:
