@@ -127,6 +127,7 @@ class GraduationPolicy:
         registered_cases: set[tuple[int, str, str]] = set()
         registered_prompts: set[tuple[int, str, str]] = set()
         runs_by_attempt: dict[int, set[str]] = {}
+        evaluation_family_owner: dict[str, tuple[int, str]] = {}
         for entry in registry:
             case_key = (entry.attempt, entry.run_id, entry.case_id)
             prompt_key = (entry.attempt, entry.run_id, entry.prompt_commitment)
@@ -142,6 +143,16 @@ class GraduationPolicy:
                     or case_key in registered_cases
                     or prompt_key in registered_prompts):
                 raise ValueError("malformed or repeated independent semantic registry entry")
+            if entry.slice_name != "train":
+                # Family labels represent normalized mechanisms. One frozen
+                # family may have many variants WITHIN a slice, but cannot
+                # independently establish another slice or retry attempt.
+                owner = (entry.attempt, entry.slice_name)
+                previous = evaluation_family_owner.setdefault(
+                    entry.semantic_family_id, owner)
+                if previous != owner:
+                    raise ValueError(
+                        "evaluation family reused across slices or attempts")
             registered_cases.add(case_key)
             registered_prompts.add(prompt_key)
             runs_by_attempt.setdefault(entry.attempt, set()).add(entry.run_id)

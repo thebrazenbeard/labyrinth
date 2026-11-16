@@ -139,6 +139,50 @@ class MinotaurGraduationTests(unittest.TestCase):
         self.assertTrue(result.state.graduated)
         self.assertFalse(hasattr(result, "metrics"))
 
+    def test_frozen_policy_rejects_cross_slice_family_overlap_up_front(self):
+        # Hostile synthetic evaluator can label distinct IDs/prompts as one
+        # mechanism. Signed receipts already BLOCK, but a frozen policy must
+        # refuse to precommit a campaign whose slices are not independent.
+        collided = tuple(
+            replace(entry, semantic_family_id=_semantic_sha(
+                f"{entry.run_id}:heldout:{int(entry.case_id.rsplit('-', 1)[1])}"))
+            if entry.slice_name == "transfer" else entry
+            for entry in _REGISTRY
+        )
+        with self.assertRaisesRegex(ValueError, "evaluation family reused across"):
+            replace(POLICY, independent_semantic_registry=collided)
+
+    def test_frozen_policy_rejects_family_reuse_across_retry_attempts(self):
+        # Re-running a failed held-out mechanism in attempt two cannot serve
+        # as new private evidence, even if IDs, run and prompts differ.
+        collided = tuple(
+            replace(entry, semantic_family_id=_semantic_sha(
+                "fresh-run-001:heldout:0"))
+            if entry.attempt == 2 and entry.slice_name == "heldout"
+            and entry.case_id.endswith("-000") else entry
+            for entry in _REGISTRY
+        )
+        with self.assertRaisesRegex(ValueError, "evaluation family reused across"):
+            replace(POLICY, independent_semantic_registry=collided)
+
+    def test_repeated_variants_within_one_slice_share_one_family_and_remain_allowed(self):
+        # Multiple case variants per one family are allowed. The evaluator
+        # counts their conservative all-correct family aggregate only once.
+        variants = tuple(
+            replace(entry, semantic_family_id=_semantic_sha(
+                "fresh-run-001:heldout:0"))
+            if entry.attempt == 1 and entry.slice_name == "heldout"
+            and entry.case_id.endswith("-001") else entry
+            for entry in _REGISTRY
+        )
+        precommitted = replace(POLICY, independent_semantic_registry=variants)
+        receipt = evaluated_receipt()
+        receipt["slices"]["heldout"][1]["semantic_family_id"] = (
+            _semantic_sha("fresh-run-001:heldout:0"))
+        result = decision(receipt, policy=precommitted)
+        self.assertEqual(result.disposition, "GRADUATED")
+        self.assertEqual(len(result.state.consumed_eval_semantic_family_ids), 31)
+
     def test_prior_training_mechanism_cannot_graduate_as_later_holdout(self):
         # An evaluator may honestly identify the same mechanics under distinct
         # case IDs and prompts. The signed roster must still remain train/eval
