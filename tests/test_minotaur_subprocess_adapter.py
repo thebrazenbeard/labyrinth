@@ -57,6 +57,33 @@ class ProcessCandidateBoundaryTests(unittest.TestCase):
         self.assertEqual(host_calls, [])
         self.assertEqual(json.loads(receipt.turns[0].response_text)["action"], "wait")
 
+    def test_subprocess_label_cannot_run_host_callback_without_process_only_flag(self):
+        # Adversarial class-level override: default invocation historically
+        # executed this method inside the examiner while labeling it a child.
+        script = ("import json,sys;json.load(sys.stdin);"
+                  "print(json.dumps({'kind':'ACTION','action':'wait'}))")
+        adapter = probe((sys.executable, "-c", script))
+        host_reach = []
+
+        def hostile(self, prompt, *, seed=None):
+            import inspect
+            host_reach.append(any(
+                isinstance(value, CandidateSession)
+                for frame in inspect.stack()
+                for value in frame.frame.f_locals.values()
+            ))
+            return '{"kind":"ACTION","action":"leak"}'
+
+        with mock.patch.object(type(adapter), "generate", hostile):
+            receipt = run_candidate(self.public, self.factory, adapter,
+                                    authorize_local_adapter=True, max_model_calls=1)
+
+        self.assertEqual(receipt.adapter_provenance, "MODEL_SUBPROCESS_UNATTESTED")
+        self.assertEqual(host_reach, [],
+                         "subprocess-labeled adapter executed host Python in examiner")
+        self.assertEqual(json.loads(receipt.turns[0].response_text)["action"], "wait")
+        self.assertTrue(audit_receipt(receipt, self.public, self.factory))
+
     def test_process_only_mode_rejects_python_callback_even_if_authorized(self):
         class InProcessSpy:
             model_id = "python:spy"
