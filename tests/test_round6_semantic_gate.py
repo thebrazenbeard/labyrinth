@@ -200,20 +200,35 @@ class SemanticFamilyGateTests(unittest.TestCase):
         receipt = evaluated_receipt()
         prior = receipt["slices"]["heldout"][0]["semantic_family_id"]
         case_id = receipt["slices"]["transfer"][0]["case_id"]
-        policy = _bound_relabel(receipt, {case_id: prior})
-        result = decision(receipt, policy=policy)
+        # Wave84 rejects a structurally impossible roster before trial
+        # execution, not only after inspecting a signed receipt.
+        with self.assertRaisesRegex(
+                ValueError, "evaluation family reused across slices or attempts"):
+            _bound_relabel(receipt, {case_id: prior})
+        # A separately signed row that contradicts an honest precommitment
+        # must still be BLOCKED at receipt adjudication.
+        receipt["slices"]["transfer"][0]["semantic_family_id"] = prior
+        result = decision(receipt, policy=POLICY)
         self.assertEqual(result.disposition, "BLOCKED")
+        self.assertFalse(result.state.graduated)
 
     def test_semantic_family_replay_fails_across_signed_attempts(self):
         first_receipt = evaluated_receipt(candidate_correct=False)
         second_receipt = evaluated_receipt(attempt=2, run_id="fresh-run-002")
         prior = first_receipt["slices"]["heldout"][0]["semantic_family_id"]
         case_id = second_receipt["slices"]["heldout"][0]["case_id"]
-        policy = _bound_relabel(second_receipt, {case_id: prior})
-        first = decision(first_receipt, policy=policy)
+        # The frozen registry cannot preauthorize the same evaluation
+        # mechanism on a second attempt under a new run/case ID.
+        with self.assertRaisesRegex(
+                ValueError, "evaluation family reused across slices or attempts"):
+            _bound_relabel(second_receipt, {case_id: prior})
+        first = decision(first_receipt, policy=POLICY)
         self.assertEqual(first.disposition, "STAY")
-        second = decision(second_receipt, first.state, policy=policy)
+        # Signed hostile receipt contradicts that legitimate policy.
+        second_receipt["slices"]["heldout"][0]["semantic_family_id"] = prior
+        second = decision(second_receipt, first.state, policy=POLICY)
         self.assertEqual(second.disposition, "BLOCKED")
+        self.assertFalse(second.state.graduated)
 
     def test_signer_cannot_cherry_pick_only_successful_precommitted_cases(self):
         receipt = evaluated_receipt()
