@@ -68,6 +68,51 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertTrue(audit_receipt(receipt, public, factory))
         self.assertEqual(receipt.adapter_provenance, "DETERMINISTIC_CONTROL")
 
+    def test_preexisting_terminal_escape_cannot_credit_zero_model_inference(self):
+        public, _, _ = context()
+
+        class PrewonSession:
+            def public_start(self):
+                return public
+
+            def view(self):
+                return {"status": "VERIFIED_WIN", "finished": True,
+                        "escape_verified": True}
+
+            def act(self, action):
+                self.fail_on_action = True
+                raise AssertionError("terminal examiner cannot be acted on")
+
+        class ProbeAdapter:
+            model_id = "local:zero-inference-probe"
+
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, prompt, *, seed=None):
+                self.calls += 1
+                return '{"kind":"ACTION","action":"wait"}'
+
+        probe = ProbeAdapter()
+        receipt = run_candidate(public, PrewonSession, probe,
+                                authorize_local_adapter=True, max_model_calls=1)
+        self.assertEqual(probe.calls, 0)
+        self.assertEqual(receipt.turns, ())
+        self.assertEqual(receipt.final_verdict, "VERIFIED_WIN")
+        self.assertFalse(receipt.verified_escape)
+        self.assertTrue(audit_receipt(receipt, public, PrewonSession))
+        forged_fields = {field.name: getattr(receipt, field.name)
+                         for field in fields(RunReceipt)
+                         if field.name != "receipt_sha256"}
+        forged = _seal(**{**forged_fields, "verified_escape": True})
+        self.assertFalse(audit_receipt(forged, public, PrewonSession))
+
+        pair = run_matched_pair(public, PrewonSession,
+                                candidate=FixedActionAdapter(("wait",)),
+                                control=FixedActionAdapter(("wait",)))
+        self.assertFalse(pair.candidate_win)
+        self.assertFalse(pair.control_win)
+
     def test_matched_pair_uses_fresh_sessions_and_records_no_learning(self):
         public, factory, _ = context()
         paired = run_matched_pair(
