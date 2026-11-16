@@ -718,6 +718,35 @@ class CandidateBridgeTests(unittest.TestCase):
                 self.assertFalse(audit_receipt(forged, public, counted_factory))
                 self.assertEqual(calls, [])
 
+    def test_rehashed_impossible_model_metadata_rejected_before_examiner_use(self):
+        public, factory, _ = context()
+        legitimate = run_candidate(
+            public, factory, FixedActionAdapter(("wait",)),
+            seed=12, max_model_calls=1)
+        self.assertTrue(audit_receipt(legitimate, public, factory))
+        original = {
+            field.name: getattr(legitimate, field.name)
+            for field in fields(RunReceipt)
+            if field.name != "receipt_sha256"
+        }
+        impossible_values = (
+            ("adapter_provenance", "INDEPENDENTLY_VERIFIED_NEURAL_MODEL"),
+            ("adapter_provenance", ""),
+            ("model_id_unattested", ""),
+            ("model_id_unattested", "x" * 257),
+        )
+        for key, value in impossible_values:
+            with self.subTest(field=key, value_length=len(value)):
+                forged = _seal(**{**original, key: value})
+                examiner_calls = []
+
+                def counted_factory():
+                    examiner_calls.append(1)
+                    return factory()
+
+                self.assertFalse(audit_receipt(forged, public, counted_factory))
+                self.assertEqual(examiner_calls, [])
+
     def test_write_once_receipt_and_roundtrip_self_digest(self):
         public, factory, _ = context()
         receipt = run_candidate(public, factory, FixedActionAdapter(WINNING_SEED_ZERO))

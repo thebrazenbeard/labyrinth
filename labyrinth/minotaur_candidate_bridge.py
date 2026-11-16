@@ -701,6 +701,13 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
     try:
         if not _inert_receipt_shape(receipt) or receipt.schema != SCHEMA:
             return False
+        if (receipt.adapter_provenance not in (
+                "DETERMINISTIC_CONTROL", "MODEL_SUBPROCESS_UNATTESTED",
+                "MODEL_ADAPTER_UNATTESTED")
+                or not 1 <= len(receipt.model_id_unattested) <= 256):
+            # The runner cannot issue invented provenance labels or model IDs.
+            # Allowed labels remain self-asserted, never authenticated.
+            return False
         fields = asdict(receipt)
         claimed = fields.pop("receipt_sha256")
         # Replay may only enforce the provenance claimed by a self-hashed
