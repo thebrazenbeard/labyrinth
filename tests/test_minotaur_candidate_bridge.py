@@ -234,6 +234,41 @@ class CandidateBridgeTests(unittest.TestCase):
                                   authorize_local_adapter=True)
         self.assertEqual(permitted.adapter_provenance, "MODEL_ADAPTER_UNATTESTED")
 
+    def test_oracle_invalid_query_null_is_public_feedback_not_evaluator_failure(self):
+        # Oracle Chamber explicitly charges malformed queries and publishes
+        # an INVALID answer of null, rather than exposing a private answer.
+        from labyrinth.oracle_chamber_exam import (
+            CandidateSession as OracleSession,
+            candidate_view as oracle_view,
+            make_case as oracle_case,
+        )
+
+        case = oracle_case(7, sealed=True)
+        public = oracle_view(case)
+        factory = lambda: OracleSession(case)
+        receipt = run_candidate(
+            public, factory, FixedActionAdapter(("query",)),
+            max_model_calls=1,
+        )
+        self.assertEqual(receipt.final_verdict, "UNKNOWN")
+        self.assertEqual(receipt.turns[0].disposition, "ACTION")
+        feedback = json.loads(receipt.turns[0].public_feedback_json)
+        self.assertEqual(feedback["answers"], [{"question": "INVALID", "answer": None}])
+        self.assertEqual(feedback["remaining_queries"], 4)
+        self.assertTrue(audit_receipt(receipt, public, factory))
+
+        # The exception must only admit a null under answers[index].answer.
+        for value in (
+            {"answer": None},
+            {"nested": {"answer": None}},
+            {"answers": [{"answer": 2}]},
+            {"answers": [{"answer": "0"}]},
+            {"answers": [{"answer": {"private": "hidden"}}]},
+        ):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                    ValueError, "evaluator-only"):
+                _public(value)
+
     def test_recursive_private_public_fields_fail_closed_before_model_call(self):
         public, factory, _ = context()
         public["nested"] = {"case_id": "private"}
