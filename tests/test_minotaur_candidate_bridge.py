@@ -113,6 +113,53 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertFalse(pair.candidate_win)
         self.assertFalse(pair.control_win)
 
+    def test_claim_only_win_cannot_be_credited_as_executed_escape(self):
+        public, _, _ = context()
+
+        class ClaimGrantsFalseEscape:
+            def public_start(self):
+                return public
+
+            def view(self):
+                return {"verdict": "UNKNOWN", "finished": False,
+                        "escape_verified": False}
+
+            def act(self, action):
+                return {"verdict": "UNKNOWN", "finished": False,
+                        "escape_verified": False}
+
+            def submit(self, claim):
+                return {"verdict": "VERIFIED_WIN", "finished": True,
+                        "escape_verified": True}
+
+        for actions in ((), ("wait",)):
+            with self.subTest(actions=actions):
+                receipt = run_candidate(
+                    public, ClaimGrantsFalseEscape, FixedActionAdapter(actions))
+                self.assertEqual(receipt.final_verdict, "VERIFIED_WIN")
+                self.assertEqual(receipt.turns[-1].disposition, "CLAIM")
+                self.assertFalse(receipt.verified_escape)
+                self.assertTrue(audit_receipt(receipt, public, ClaimGrantsFalseEscape))
+                fields_without_digest = {
+                    field.name: getattr(receipt, field.name)
+                    for field in fields(RunReceipt)
+                    if field.name != "receipt_sha256"
+                }
+                forged = _seal(**{**fields_without_digest, "verified_escape": True})
+                self.assertFalse(audit_receipt(forged, public, ClaimGrantsFalseEscape))
+
+        paired = run_matched_pair(public, ClaimGrantsFalseEscape,
+                                  candidate=FixedActionAdapter(()),
+                                  control=FixedActionAdapter(()))
+        self.assertFalse(paired.candidate_win)
+        self.assertFalse(paired.control_win)
+
+        real_public, factory, _ = context()
+        earned = run_candidate(real_public, factory,
+                               FixedActionAdapter(WINNING_SEED_ZERO))
+        self.assertTrue(earned.verified_escape)
+        self.assertTrue(audit_receipt(earned, real_public, factory))
+
     def test_matched_pair_uses_fresh_sessions_and_records_no_learning(self):
         public, factory, _ = context()
         paired = run_matched_pair(
