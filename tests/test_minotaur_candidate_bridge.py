@@ -577,6 +577,30 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertEqual(larger.turns[0].response_text, oversized_response[:4097])
         self.assertTrue(audit_receipt(larger, public, factory))
 
+    def test_rehashed_invalid_output_cannot_claim_unbounded_response_witness(self):
+        public, factory, _ = context()
+        real = run_candidate(
+            public, factory, ReplayAdapter({}, default="!" * 9000),
+            max_model_calls=1)
+        self.assertEqual(real.final_verdict, "MODEL_OUTPUT_INVALID")
+        self.assertEqual(len(real.turns[0].response_text), 4097)
+        self.assertTrue(audit_receipt(real, public, factory))
+
+        original = {
+            field.name: getattr(real, field.name)
+            for field in fields(RunReceipt)
+            if field.name != "receipt_sha256"
+        }
+        for impossible_length in (4098, 9000):
+            with self.subTest(length=impossible_length):
+                forged_turn = replace(
+                    real.turns[0], response_text="!" * impossible_length)
+                rehashed = _seal(**{**original, "turns": (forged_turn,)})
+                self.assertNotEqual(real.receipt_sha256, rehashed.receipt_sha256)
+                self.assertFalse(
+                    audit_receipt(rehashed, public, factory),
+                    "replay accepted impossible unbounded model-output witness")
+
     def test_nonstring_adapter_response_cannot_run_programmable_string_conversion(self):
         """Malformed adapter output must not invoke attacker-owned __str__."""
         public, factory, _ = context()

@@ -751,7 +751,11 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
                 # Without a replayable evaluator or model outcome, fail closed.
                 return False
             if turn.disposition == "MODEL_OUTPUT_INVALID":
-                if index != len(receipt.turns) - 1 or turn.public_feedback_json is not None:
+                # The runner records at most one overflow character (4097)
+                # even when the original malformed output is arbitrarily long.
+                if (index != len(receipt.turns) - 1
+                        or turn.public_feedback_json is not None
+                        or len(turn.response_text) > MAX_RESPONSE_CHARACTERS + 1):
                     return False
                 try:
                     _parse(turn.response_text)
