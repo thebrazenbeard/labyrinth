@@ -62,6 +62,75 @@ class LocalTrialTests(unittest.TestCase):
         self.assertFalse(case["candidate"]["verified_escape"])
         self.assertFalse(report["learning_qualified"])
 
+    def test_known_witness_executes_through_same_protocol_without_model_credit(self):
+        abstain = '{"kind":"CLAIM","claim":{"kind":"ABSTAIN","assessment":"UNKNOWN"}}'
+        with fake_local_ollama(response=abstain) as (url, calls):
+            report = run_local_trial(
+                "synthetic:local", endpoint=url, seeds=(7,),
+                sealed_modes=(False,), max_calls=10, timeout_seconds=6.0)
+        self.assertEqual(len(calls), 1)
+        case = report["cases"][0]
+        positive = case["protocol_positive_control"]
+        self.assertEqual(positive["status"], "EXECUTED_SOURCE_WITNESS")
+        self.assertEqual(positive["turn_count"], 10)
+        self.assertEqual(positive["dispositions"], ["ACTION"] * 10)
+        self.assertTrue(positive["verified_escape"])
+        self.assertTrue(positive["audit_replay"])
+        self.assertFalse(case["candidate"]["verified_escape"])
+        self.assertFalse(report["comparison_qualified"])
+        self.assertFalse(report["learning_qualified"])
+        for _path, request in calls:
+            self.assertNotIn("protocol_positive_control", request["prompt"])
+            self.assertNotIn("known_witness_actions", request["prompt"])
+            self.assertNotIn("source_development_oracle", request["prompt"])
+
+    def test_positive_control_is_skipped_for_underbudget_or_proven_unsat(self):
+        with fake_local_ollama() as (url, calls):
+            report = run_local_trial(
+                "synthetic:local", endpoint=url, seeds=(7,),
+                sealed_modes=(False, True), max_calls=2, timeout_seconds=6.0)
+        left, right = report["cases"]
+        self.assertEqual(left["protocol_positive_control"]["status"],
+                         "WITNESS_EXCEEDS_BUDGET")
+        self.assertEqual(left["protocol_positive_control"]["turn_count"], 0)
+        self.assertFalse(left["protocol_positive_control"]["verified_escape"])
+        self.assertEqual(right["protocol_positive_control"]["status"],
+                         "PROVEN_UNSAT_NO_WITNESS")
+        self.assertEqual(right["protocol_positive_control"]["turn_count"], 0)
+        self.assertFalse(right["protocol_positive_control"]["verified_escape"])
+        self.assertEqual(len(calls), 4)
+
+    def test_winning_witness_is_not_computed_until_model_process_exits(self):
+        from unittest.mock import patch
+        import labyrinth.minotaur_local_trial as trial
+        original = trial.search
+        with fake_local_ollama() as (url, calls):
+            def witness_only_after_model(case):
+                self.assertEqual(len(calls), 1, "oracle precomputed before candidate")
+                return original(case)
+            with patch.object(trial, "search", side_effect=witness_only_after_model):
+                report = run_local_trial(
+                    "synthetic:local", endpoint=url, seeds=(7,),
+                    sealed_modes=(False,), max_calls=1, timeout_seconds=6.0)
+        self.assertEqual(report["cases"][0]["candidate"]["turn_count"], 1)
+
+    def test_no_case_witness_exists_until_all_candidate_calls_finish(self):
+        from unittest.mock import patch
+        import labyrinth.minotaur_local_trial as trial
+        original = trial.search
+        with fake_local_ollama() as (url, calls):
+            def no_oracle_while_next_candidate_may_run(case):
+                self.assertEqual(len(calls), 4, "earlier witness overlaps later model process")
+                return original(case)
+            with patch.object(trial, "search",
+                              side_effect=no_oracle_while_next_candidate_may_run):
+                report = run_local_trial(
+                    "synthetic:local", endpoint=url, seeds=(7,),
+                    sealed_modes=(False, True), max_calls=2,
+                    timeout_seconds=6.0)
+        self.assertEqual(len(report["cases"]), 2)
+        self.assertEqual(len(calls), 4)
+
     def test_failed_model_call_cannot_be_reported_as_replay_or_win(self):
         with fake_local_ollama(done=False) as (url, calls):
             report = run_local_trial("synthetic:local", endpoint=url,

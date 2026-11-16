@@ -77,17 +77,13 @@ def run_local_trial(
     child = SubprocessCandidateAdapter(
         (sys.executable, str(_CHILD), model, endpoint),
         model_id=f"ollama:{model}:unattested", timeout_seconds=timeout_seconds)
-    results: list[dict[str, Any]] = []
+    pending: list[tuple[int, bool, Any, dict[str, Any], Any, float]] = []
     for seed in seeds:
         for sealed in sealed_modes:
             # Same host-side case is reconstructed independently for the two
             # runs. No private case object is placed in the child request.
             case = make_case(seed, sealed=sealed)
             public = candidate_view(case)
-            # Host-owned DEVELOPMENT oracle: report calibration only; never
-            # include this result in the public child request or model score.
-            oracle = search(case)
-            witness_actions = len(oracle.witness) if oracle.verdict == "VERIFIED_WIN" else None
             factory = lambda case=case: CandidateSession(case)
             begin = time.monotonic()
             model_run = run_candidate(
@@ -95,30 +91,68 @@ def run_local_trial(
                 max_model_calls=max_calls, authorize_local_adapter=True,
                 require_process_separation=True)
             model_elapsed = time.monotonic() - begin
-            # Controls are stateful scripts; never carry their cursor into
-            # another, even publicly identical, private case.
-            control = FixedActionAdapter(
-                tuple("forward" for _ in range(max_calls)),
-                model_id="fixed:forward:zero-update")
-            control_run = run_candidate(
-                public, factory, control, seed=seed,
+            pending.append((seed, sealed, case, public, model_run, model_elapsed))
+    # Do not construct source-oracle witnesses while ANY model child can run.
+    # This remains same-user/process-private custody: not an OS sandbox.
+    results: list[dict[str, Any]] = []
+    for seed, sealed, case, public, model_run, model_elapsed in pending:
+        factory = lambda case=case: CandidateSession(case)
+        # Delay constructing even the source witness until the model child
+        # exits. This reduces co-resident answer exposure but does NOT
+        # establish independent OS-principal examiner custody (#146).
+        oracle = search(case)
+        witness_actions = len(oracle.witness) if oracle.verdict == "VERIFIED_WIN" else None
+        if (witness_actions is not None and
+                1 <= witness_actions <= max_calls):
+            scripted = FixedActionAdapter(
+                tuple(oracle.witness),
+                model_id="fixed:source-witness:development-only")
+            positive_run = run_candidate(
+                public, factory, scripted, seed=seed,
                 max_model_calls=max_calls)
-            public_json = json.dumps(public, sort_keys=True,
-                                     ensure_ascii=False, separators=(",", ":"))
-            results.append({
-                "seed": seed,
-                "sealed_for_development_only": sealed,
-                "public_sha256": sha256(public_json.encode("utf-8")).hexdigest(),
-                "source_development_oracle": {
-                    "verdict": oracle.verdict,
-                    "known_witness_actions": witness_actions,
-                    "call_budget_can_fit_known_witness": (
-                        witness_actions is not None and witness_actions <= max_calls),
-                },
-                "candidate_elapsed_seconds": round(model_elapsed, 3),
-                "candidate": _case_result(model_run, public, factory),
-                "control": _case_result(control_run, public, factory),
-            })
+            positive: dict[str, Any] = {
+                "status": "EXECUTED_SOURCE_WITNESS",
+                **_case_result(positive_run, public, factory),
+            }
+        else:
+            positive = {
+                "status": (
+                    "WITNESS_EXCEEDS_BUDGET" if witness_actions is not None
+                    and witness_actions > max_calls else
+                    "PROVEN_UNSAT_NO_WITNESS" if
+                    oracle.verdict == "PROVEN_UNSAT_UNDER_DECLARED_RULES" else
+                    "SOURCE_WITNESS_UNAVAILABLE"
+                ),
+                "verified_escape": False,
+                "audit_replay": False,
+                "turn_count": 0,
+                "dispositions": [],
+            }
+        # Controls are stateful scripts; never carry their cursor into
+        # another, even publicly identical, private case.
+        control = FixedActionAdapter(
+            tuple("forward" for _ in range(max_calls)),
+            model_id="fixed:forward:zero-update")
+        control_run = run_candidate(
+            public, factory, control, seed=seed,
+            max_model_calls=max_calls)
+        public_json = json.dumps(public, sort_keys=True,
+                                 ensure_ascii=False, separators=(",", ":"))
+        results.append({
+            "seed": seed,
+            "sealed_for_development_only": sealed,
+            "public_sha256": sha256(public_json.encode("utf-8")).hexdigest(),
+            "source_development_oracle": {
+                "verdict": oracle.verdict,
+                "known_witness_actions": witness_actions,
+                "call_budget_can_fit_known_witness": (
+                    witness_actions is not None and witness_actions <= max_calls),
+            },
+            "candidate_elapsed_seconds": round(model_elapsed, 3),
+            "candidate": _case_result(model_run, public, factory),
+            "control": _case_result(control_run, public, factory),
+            "protocol_positive_control": positive,
+        })
     return {
         "schema": _SCHEMA,
         "case_family": RULESET,
