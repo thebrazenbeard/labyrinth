@@ -656,7 +656,7 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
                  source_commit_unattested=source["commit"],
                  source_tree_sha256=source["source_tree_sha256"],
                  turns=tuple(turns), final_verdict=final,
-                 verified_escape=_is_verified_escape(final, last_feedback))
+                 verified_escape=bool(turns) and _is_verified_escape(final, last_feedback))
 
 
 def _inert_receipt_shape(receipt: Any) -> bool:
@@ -787,7 +787,8 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
             # Runner would request another model response on this active case.
             return False
         return (receipt.final_verdict == last
-                and receipt.verified_escape == _is_verified_escape(last, last_feedback))
+                and receipt.verified_escape == (bool(receipt.turns)
+                                                and _is_verified_escape(last, last_feedback)))
     except (ValueError, TypeError, KeyError, AttributeError, OSError, RecursionError):
         return False
 
