@@ -593,7 +593,7 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
         request = _request(public_json, history, index)
         try:
             response = (_SUBPROCESS_GENERATE(adapter, request, seed=seed)
-                        if require_process_separation else adapter.generate(request, seed=seed))
+                        if separated else adapter.generate(request, seed=seed))
         except Exception:
             turns.append(TurnReceipt(request, "", None, "MODEL_CALL_ERROR"))
             final = "MODEL_CALL_ERROR"
