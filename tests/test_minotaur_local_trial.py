@@ -25,6 +25,12 @@ class LocalTrialTests(unittest.TestCase):
         self.assertEqual(left["public_sha256"], right["public_sha256"])
         self.assertFalse(left["sealed_for_development_only"])
         self.assertTrue(right["sealed_for_development_only"])
+        self.assertEqual(left["source_development_oracle"]["verdict"], "VERIFIED_WIN")
+        self.assertEqual(left["source_development_oracle"]["known_witness_actions"], 10)
+        self.assertFalse(left["source_development_oracle"]["call_budget_can_fit_known_witness"])
+        self.assertEqual(right["source_development_oracle"]["verdict"],
+                         "PROVEN_UNSAT_UNDER_DECLARED_RULES")
+        self.assertIsNone(right["source_development_oracle"]["known_witness_actions"])
         for case in report["cases"]:
             self.assertEqual(case["candidate"]["dispositions"], ["ACTION", "ACTION"])
             self.assertEqual(case["control"]["dispositions"], ["ACTION", "ACTION"])
@@ -41,6 +47,20 @@ class LocalTrialTests(unittest.TestCase):
             self.assertEqual(request["options"]["seed"], 7)
             self.assertIn("public_start", request["prompt"])
             self.assertNotIn("case_id", request["prompt"])
+
+    def test_source_oracle_budget_does_not_grant_model_win(self):
+        abstain = '{"kind":"CLAIM","claim":{"kind":"ABSTAIN","assessment":"UNKNOWN"}}'
+        with fake_local_ollama(response=abstain) as (url, calls):
+            report = run_local_trial("synthetic:local", endpoint=url,
+                                     seeds=(7,), sealed_modes=(False,),
+                                     max_calls=16, timeout_seconds=6.0)
+        self.assertEqual(len(calls), 1)
+        case = report["cases"][0]
+        self.assertTrue(case["source_development_oracle"]["call_budget_can_fit_known_witness"])
+        self.assertEqual(case["source_development_oracle"]["known_witness_actions"], 10)
+        self.assertEqual(case["candidate"]["dispositions"], ["CLAIM"])
+        self.assertFalse(case["candidate"]["verified_escape"])
+        self.assertFalse(report["learning_qualified"])
 
     def test_failed_model_call_cannot_be_reported_as_replay_or_win(self):
         with fake_local_ollama(done=False) as (url, calls):

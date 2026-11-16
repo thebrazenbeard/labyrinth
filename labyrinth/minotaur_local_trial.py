@@ -21,7 +21,7 @@ from .adapters import OllamaAdapter
 from .minotaur_candidate_bridge import (
     FixedActionAdapter, SubprocessCandidateAdapter, audit_receipt, run_candidate,
 )
-from .timegate_exam import CandidateSession, RULESET, candidate_view, make_case
+from .timegate_exam import CandidateSession, RULESET, candidate_view, make_case, search
 
 _SCHEMA = "MINOTAUR_LOCAL_DEV_TRIAL_V1"
 _CHILD = Path(__file__).resolve().parents[1] / "scripts" / "minotaur_ollama_child.py"
@@ -84,6 +84,10 @@ def run_local_trial(
             # runs. No private case object is placed in the child request.
             case = make_case(seed, sealed=sealed)
             public = candidate_view(case)
+            # Host-owned DEVELOPMENT oracle: report calibration only; never
+            # include this result in the public child request or model score.
+            oracle = search(case)
+            witness_actions = len(oracle.witness) if oracle.verdict == "VERIFIED_WIN" else None
             factory = lambda case=case: CandidateSession(case)
             begin = time.monotonic()
             model_run = run_candidate(
@@ -105,6 +109,12 @@ def run_local_trial(
                 "seed": seed,
                 "sealed_for_development_only": sealed,
                 "public_sha256": sha256(public_json.encode("utf-8")).hexdigest(),
+                "source_development_oracle": {
+                    "verdict": oracle.verdict,
+                    "known_witness_actions": witness_actions,
+                    "call_budget_can_fit_known_witness": (
+                        witness_actions is not None and witness_actions <= max_calls),
+                },
                 "candidate_elapsed_seconds": round(model_elapsed, 3),
                 "candidate": _case_result(model_run, public, factory),
                 "control": _case_result(control_run, public, factory),
