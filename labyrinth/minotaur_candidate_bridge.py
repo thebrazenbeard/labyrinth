@@ -712,7 +712,10 @@ def audit_receipt(receipt: RunReceipt, public_start: Mapping[str, Any],
             return False
         if receipt.source_tree_sha256 != _source_state()["source_tree_sha256"]:
             return False
-        if type(receipt.max_model_calls) is not int or not 1 <= receipt.max_model_calls <= MAX_ACTIONS:
+        if (type(receipt.seed) is not int or not 0 <= receipt.seed < 2**31
+                or type(receipt.max_model_calls) is not int
+                or not 1 <= receipt.max_model_calls <= MAX_ACTIONS):
+            # Replay must reject runner-impossible metadata before examiner use.
             return False
         session = session_factory()
         initial = json.loads(_public(_session_view(session, first=True),
