@@ -392,6 +392,34 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertEqual(len(receipt.turns), 1)
         self.assertTrue(audit_receipt(receipt, public, factory))
 
+    def test_oversized_output_preserves_one_character_of_overflow_for_audit(self):
+        public, factory, _ = context()
+        # The first 4096 chars parse as a valid action; the real response
+        # exceeds the cap and must still audit as malformed output.
+        valid_prefix = '{"kind":"ACTION","action":"wait"}'.ljust(4096)
+        oversized_response = valid_prefix + "!"
+
+        class OversizedAdapter:
+            model_id = "synthetic:overlong-adapter"
+
+            def generate(self, prompt, *, seed=None):
+                return oversized_response
+
+        receipt = run_candidate(public, factory, OversizedAdapter(),
+                                authorize_local_adapter=True, max_model_calls=1)
+        self.assertEqual(receipt.final_verdict, "MODEL_OUTPUT_INVALID")
+        self.assertEqual(receipt.turns[0].response_text, oversized_response)
+        self.assertEqual(len(receipt.turns[0].response_text), 4097)
+        self.assertTrue(audit_receipt(receipt, public, factory))
+
+        # An arbitrarily longer output remains bounded at the same prefix.
+        oversized_response = valid_prefix + "!" * 6000
+        larger = run_candidate(public, factory, OversizedAdapter(),
+                               authorize_local_adapter=True, max_model_calls=1)
+        self.assertEqual(larger.final_verdict, "MODEL_OUTPUT_INVALID")
+        self.assertEqual(larger.turns[0].response_text, oversized_response[:4097])
+        self.assertTrue(audit_receipt(larger, public, factory))
+
     def test_nonstring_adapter_response_cannot_run_programmable_string_conversion(self):
         """Malformed adapter output must not invoke attacker-owned __str__."""
         public, factory, _ = context()
