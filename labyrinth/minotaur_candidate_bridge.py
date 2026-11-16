@@ -604,7 +604,9 @@ def run_candidate(public_start: Mapping[str, Any], session_factory: Callable[[],
             # Never call __str__ on a malformed adapter object: its conversion
             # can execute arbitrary code, throw, or allocate unbounded text.
             # The adapter boundary admits only an exact string as evidence.
-            safe_response = response[:MAX_RESPONSE_CHARACTERS] if type(response) is str else ""
+            # Keep one overflow character: 4096 may be a parseable prefix,
+            # while 4097 alone proves the original response exceeded the cap.
+            safe_response = response[:MAX_RESPONSE_CHARACTERS + 1] if type(response) is str else ""
             try:
                 _require_unicode_scalars(safe_response)
             except ValueError:
