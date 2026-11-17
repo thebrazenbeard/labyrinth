@@ -37,9 +37,12 @@ MAX_ACTIONS = 32
 _PRIVATE_FIELDS = frozenset({"case_id", "seed", "sealed", "gold_trace", "fingerprint",
                              "answer", "correct_answer", "exam_id", "kind", "private"})
 _INSTRUCTION = ("Return one JSON object only: either "
-                '{"kind":"ACTION","action":"one action or query from the public list"} or '
+                'an ACTION object with action exactly one of the public action/question '
+                'strings (not the generic word "query"), or '
                 '{"kind":"CLAIM","claim":{"kind":"ABSTAIN","assessment":"UNKNOWN"}}. '
-                "No prose, tools, code or extra fields. Invalid output ends this evaluation.")
+                "Read public_start.prompt and public action/question names for exact ACTION "
+                 "names and CLAIM field shapes. No prose, tools, code or extra fields. "
+                 "Invalid output ends this evaluation.")
 
 
 def _json(value: Any) -> str:
@@ -120,13 +123,16 @@ def _public(value: Mapping[str, Any], *, require_plain_containers: bool = False)
                 for key, child in node.items():
                     if type(key) is not str:
                         raise ValueError("evaluator-only or malformed public field")
-                    # Oracle Chamber's public answer transcript has one
-                    # explicitly allowed bit at answers[index].answer.
-                    public_query_bit = (key == "answer" and len(path) == 2
-                                        and path[0] == "answers"
-                                        and type(path[1]) is int and type(child) is int
-                                        and child in (0, 1))
-                    if key in _PRIVATE_FIELDS and not public_query_bit:
+                    # Oracle Chamber's public answer transcript contains
+                    # binary bits for valid queries and null for malformed
+                    # queries that still consume budget. Only that exact
+                    # answers[index].answer location may expose either value.
+                    public_query_answer = (
+                        key == "answer" and len(path) == 2
+                        and path[0] == "answers" and type(path[1]) is int
+                        and ((type(child) is int and child in (0, 1)) or child is None)
+                    )
+                    if key in _PRIVATE_FIELDS and not public_query_answer:
                         raise ValueError("evaluator-only or malformed public field")
                     if key in result:
                         raise ValueError("duplicate public field")
