@@ -100,6 +100,22 @@ class OllamaAdapterTests(unittest.TestCase):
             "options": {"temperature": 0, "num_predict": 17, "seed": 123},
         })
 
+    def test_opt_in_thinking_control_is_explicit(self) -> None:
+        for flag in (False, True):
+            with self.subTest(think=flag):
+                adapter = OllamaAdapter("local-model", think=flag)
+                opener = Mock()
+                opener.open.return_value = _FakeResponse(
+                    json.dumps({"done": True, "response": "answer"}).encode())
+                object.__setattr__(adapter, "_opener", opener)
+                self.assertEqual(adapter.generate("Question?", seed=7), "answer")
+                payload = json.loads(opener.open.call_args.args[0].data)
+                self.assertIs(payload["think"], flag)
+                self.assertEqual(payload["options"]["seed"], 7)
+        for invalid in (0, 1, "false", []):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                OllamaAdapter("local-model", think=invalid)
+
     def test_rejects_oversize_bad_json_and_incomplete(self) -> None:
         adapter = OllamaAdapter("model", max_response_bytes=64)
         for payload in (b"a" * 65, b"not-json", b'{"response":"x","done":false}', b'{"done":true}', b"[]"):

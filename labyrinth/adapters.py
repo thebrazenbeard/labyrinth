@@ -88,6 +88,7 @@ class OllamaAdapter:
     allow_remote: bool = False
     max_response_bytes: int = 1_000_000
     max_output_tokens: int = 256
+    think: bool | None = None
     _url: str = field(init=False, repr=False)
     _opener: request.OpenerDirector = field(init=False, repr=False, compare=False)
 
@@ -118,6 +119,8 @@ class OllamaAdapter:
             raise ValueError("max_response_bytes outside safe range")
         if not isinstance(self.max_output_tokens, int) or isinstance(self.max_output_tokens, bool) or not 1 <= self.max_output_tokens <= 8192:
             raise ValueError("max_output_tokens outside safe range")
+        if self.think is not None and type(self.think) is not bool:
+            raise ValueError("think must be an exact bool or None")
         # No redirects. No HTTP_PROXY/HTTPS_PROXY inherited from the host.
         object.__setattr__(self, "_opener", request.build_opener(request.ProxyHandler({}), _NoRedirect()))
         object.__setattr__(self, "_url", self.base_url.rstrip("/") + "/api/generate")
@@ -131,12 +134,15 @@ class OllamaAdapter:
         options: dict[str, object] = {"temperature": 0, "num_predict": self.max_output_tokens}
         if seed is not None:
             options["seed"] = seed
-        body = json.dumps({
+        payload: dict[str, object] = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
             "options": options,
-        }, ensure_ascii=False).encode("utf-8")
+        }
+        if self.think is not None:
+            payload["think"] = self.think
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = request.Request(self._url, data=body, headers={"Content-Type": "application/json"}, method="POST")
         try:
             with self._opener.open(req, timeout=self.timeout_seconds) as response:
