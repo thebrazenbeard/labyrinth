@@ -21,9 +21,13 @@ class CurriculumSpec:
     distinct_challenges_required: int = 3
 
     def __post_init__(self) -> None:
-        if not self.levels or any(not isinstance(level, str) or not level for level in self.levels):
+        if type(self.levels) not in (tuple, list):
+            raise ValueError("levels must be a tuple or list of nonempty strings")
+        levels = tuple(self.levels)
+        if not levels or any(type(level) is not str or not level for level in levels):
             raise ValueError("levels must contain nonempty strings")
-        if len(set(self.levels)) != len(self.levels):
+        object.__setattr__(self, "levels", levels)
+        if len(set(levels)) != len(levels):
             raise ValueError("levels must be unique")
         if type(self.window_size) is not int or self.window_size < 1:
             raise ValueError("window_size must be positive")
@@ -31,7 +35,7 @@ class CurriculumSpec:
             1 <= self.distinct_challenges_required <= self.window_size
         ):
             raise ValueError("distinct_challenges_required must be within the window")
-        if isinstance(self.promotion_score, bool) or not isinstance(self.promotion_score, (int, float)) or not (
+        if type(self.promotion_score) not in (int, float) or not (
             math.isfinite(self.promotion_score) and 0 <= self.promotion_score <= 1
         ):
             raise ValueError("promotion_score must be finite and between 0 and 1")
@@ -46,13 +50,15 @@ class TrainingObservation:
     split: str = "train"
 
     def __post_init__(self) -> None:
-        if not isinstance(self.challenge_id, str) or not self.challenge_id:
+        if type(self.challenge_id) is not str or not self.challenge_id:
             raise ValueError("challenge_id must be nonempty")
         if type(self.seed) is not int or self.seed < 0:
             raise ValueError("seed must be a nonnegative integer")
-        if not isinstance(self.level, str) or not self.level:
+        if type(self.level) is not str or not self.level:
             raise ValueError("level must be nonempty")
-        if isinstance(self.score, bool) or not isinstance(self.score, (int, float)) or not (
+        if type(self.split) is not str:
+            raise ValueError("split must be a plain string")
+        if type(self.score) not in (int, float) or not (
             math.isfinite(self.score) and 0 <= self.score <= 1
         ):
             raise ValueError("score must be finite and between 0 and 1")
@@ -64,6 +70,16 @@ class CurriculumState:
 
     level_index: int = 0
     observations: tuple[TrainingObservation, ...] = ()
+
+    def __post_init__(self) -> None:
+        if type(self.level_index) is not int or self.level_index < 0:
+            raise ValueError("level_index must be a nonnegative integer")
+        if type(self.observations) not in (tuple, list):
+            raise ValueError("observations must be a tuple or list")
+        observations = tuple(self.observations)
+        if any(type(obs) is not TrainingObservation for obs in observations):
+            raise ValueError("observations must contain training observation records")
+        object.__setattr__(self, "observations", observations)
 
     def to_dict(self) -> dict:
         return {
@@ -83,7 +99,8 @@ class CurriculumState:
 
     @classmethod
     def from_dict(cls, data: dict) -> "CurriculumState":
-        if not isinstance(data, dict) or data.get("schema_version") != 1 or type(data.get("level_index")) is not int:
+        if (not isinstance(data, dict) or type(data.get("schema_version")) is not int
+                or data["schema_version"] != 1 or type(data.get("level_index")) is not int):
             raise ValueError("unsupported curriculum state")
         entries = data.get("observations")
         if not isinstance(entries, list):
@@ -112,12 +129,21 @@ def _digest_int(*parts: object) -> int:
 
 def _validate_state(spec: CurriculumSpec, state: CurriculumState) -> None:
     """Replay progression to reject contaminated or forged restored states."""
+    if type(spec) is not CurriculumSpec or type(spec.levels) is not tuple:
+        raise ValueError("invalid retained curriculum specification")
+    CurriculumSpec.__post_init__(spec)
+    if (type(state) is not CurriculumState or type(state.level_index) is not int
+            or type(state.observations) is not tuple):
+        raise ValueError("invalid retained curriculum state")
     if not 0 <= state.level_index < len(spec.levels):
         raise ValueError("invalid state level_index")
     cursor = 0
     seen: set[tuple[str, int]] = set()
     window: list[TrainingObservation] = []
     for obs in state.observations:
+        if type(obs) is not TrainingObservation:
+            raise ValueError("invalid stored training observation")
+        TrainingObservation.__post_init__(obs)
         if obs.split != "train" or obs.level != spec.levels[cursor]:
             raise ValueError("state contains non-training or out-of-level evidence")
         key = (obs.challenge_id, obs.seed)
@@ -159,7 +185,7 @@ def next_training_case(
     if (
         not ids
         or isinstance(ids, str)
-        or any(not isinstance(item, str) or not item for item in ids)
+        or any(type(item) is not str or not item for item in ids)
         or len(set(ids)) != len(ids)
         or len(ids) < spec.distinct_challenges_required
     ):
@@ -183,6 +209,9 @@ def record_training_result(
     Scores must be supplied by a trusted external grader.
     """
     _validate_state(spec, state)
+    if type(observation) is not TrainingObservation:
+        raise ValueError("invalid training observation")
+    TrainingObservation.__post_init__(observation)
     if observation.split != "train":
         raise ValueError("evaluation/control observations cannot advance curriculum")
     if observation.level != spec.levels[state.level_index]:
