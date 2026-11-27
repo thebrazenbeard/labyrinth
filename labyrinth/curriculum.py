@@ -21,9 +21,13 @@ class CurriculumSpec:
     distinct_challenges_required: int = 3
 
     def __post_init__(self) -> None:
-        if not self.levels or any(not isinstance(level, str) or not level for level in self.levels):
+        if not isinstance(self.levels, (tuple, list)):
+            raise ValueError("levels must be a tuple or list of nonempty strings")
+        levels = tuple(self.levels)
+        if not levels or any(not isinstance(level, str) or not level for level in levels):
             raise ValueError("levels must contain nonempty strings")
-        if len(set(self.levels)) != len(self.levels):
+        object.__setattr__(self, "levels", levels)
+        if len(set(levels)) != len(levels):
             raise ValueError("levels must be unique")
         if type(self.window_size) is not int or self.window_size < 1:
             raise ValueError("window_size must be positive")
@@ -65,6 +69,13 @@ class CurriculumState:
     level_index: int = 0
     observations: tuple[TrainingObservation, ...] = ()
 
+    def __post_init__(self) -> None:
+        if type(self.level_index) is not int or self.level_index < 0:
+            raise ValueError("level_index must be a nonnegative integer")
+        if not isinstance(self.observations, (tuple, list)):
+            raise ValueError("observations must be a tuple or list")
+        object.__setattr__(self, "observations", tuple(self.observations))
+
     def to_dict(self) -> dict:
         return {
             "schema_version": 1,
@@ -83,7 +94,8 @@ class CurriculumState:
 
     @classmethod
     def from_dict(cls, data: dict) -> "CurriculumState":
-        if not isinstance(data, dict) or data.get("schema_version") != 1 or type(data.get("level_index")) is not int:
+        if (not isinstance(data, dict) or type(data.get("schema_version")) is not int
+                or data["schema_version"] != 1 or type(data.get("level_index")) is not int):
             raise ValueError("unsupported curriculum state")
         entries = data.get("observations")
         if not isinstance(entries, list):
